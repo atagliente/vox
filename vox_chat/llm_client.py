@@ -1,0 +1,452 @@
+"""The single place where an OpenAI-compatible client is built and used.
+
+Streaming deltas are accumulated into exactly one assistant message; tool
+calls are merged by index, because providers send them fragment by fragment.
+"""
+
+from __future__ import annotations
+
+import json
+import threading
+import time
+from dataclasses import dataclass, field
+from typing import Any, Iterable, Iterator, Literal, Mapping, Sequence
+
+import openai
+from openai import OpenAI
+
+from .models import Message, ToolCall
+from .reasoning import ThinkSplitter
+from .usage import TokenUsage
+
+ErrorKind = Literal["connection", "timeout", "http", "cancelled", "protocol"]
+
+
+class LLMError(Exception):
+    """A provider failure already turned into something worth showing."""
+
+    def __init__(self, kind: ErrorKind, message: str, detail: str = "") -> None:
+        super().__init__(message)
+        self.kind: ErrorKind = kind
+        self.message = message
+        self.detail = detail
+
+    def __str__(self) -> str:
+        return self.message
+
+
+EventType = Literal[
+    "text", "reasoning", "tool_calls", "usage", "done", "cancelled"
+]
+
+
+@dataclass
+class StreamEvent:
+    """One step of a streaming response."""
+
+    type: EventType
+    text: str = ""
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    finish_reason: str | None = None
+    usage: TokenUsage | None = None
+
+
+def _delta_of(chunk: Any) -> Any:
+    choices = getattr(chunk, "choices", None)
+    if not choices:
+        return None
+    return getattr(choices[0], "delta", None)
+
+
+def _finish_reason_of(chunk: Any) -> str | None:
+    choices = getattr(chunk, "choices", None)
+    if not choices:
+        return None
+    return getattr(choices[0], "finish_reason", None)
+
+
+def _reasoning_of(delta: Any) -> str | None:
+    """Reasoning from the fields providers use for it, when present."""
+    for field_name in ("reasoning_content", "reasoning", "thinking"):
+        value = getattr(delta, field_name, None)
+        if value:
+            return str(value)
+    extra = getattr(delta, "model_extra", None)
+    if isinstance(extra, dict):
+        for field_name in ("reasoning_content", "reasoning", "thinking"):
+            value = extra.get(field_name)
+            if value:
+                return str(value)
+    return None
+
+
+def _usage_of(chunk: Any) -> TokenUsage | None:
+    """Read the usage block providers append to the final chunk, if any."""
+    counted = getattr(chunk, "usage", None)
+    if counted is None:
+        return None
+    prompt = getattr(counted, "prompt_tokens", None)
+    completion = getattr(counted, "completion_tokens", None)
+    if prompt is None and completion is None:
+        return None
+    return TokenUsage(int(prompt or 0), int(completion or 0))
+
+
+def consume_stream(
+    chunks: Iterable[Any], cancel: threading.Event | None = None
+) -> Iterator[StreamEvent]:
+    """Turn raw streaming chunks into ordered :class:`StreamEvent` values.
+
+    Kept free of any OpenAI import so it can be exercised with fake chunks.
+    Text deltas are emitted as they arrive; tool call fragments are buffered
+    by index and emitted once, at the end.
+    """
+    pending: dict[int, dict[str, str]] = {}
+    finish_reason: str | None = None
+    reported: TokenUsage | None = None
+    splitter = ThinkSplitter()
+
+    for chunk in chunks:
+        if cancel is not None and cancel.is_set():
+            yield StreamEvent("cancelled")
+            return
+        counted = _usage_of(chunk)
+        if counted is not None:
+            reported = counted
+        reason = _finish_reason_of(chunk)
+        if reason:
+            finish_reason = reason
+        delta = _delta_of(chunk)
+        if delta is None:
+            continue
+        thought = _reasoning_of(delta)
+        if thought:
+            yield StreamEvent("reasoning", text=thought)
+        text = getattr(delta, "content", None)
+        if text:
+            # Some models inline their thinking in the content instead.
+            for kind, piece in splitter.feed(text):
+                yield StreamEvent("reasoning" if kind == "reasoning" else "text",
+                                  text=piece)
+        for fragment in getattr(delta, "tool_calls", None) or []:
+            index = getattr(fragment, "index", 0) or 0
+            slot = pending.setdefault(index, {"id": "", "name": "", "arguments": ""})
+            identifier = getattr(fragment, "id", None)
+            if identifier:
+                slot["id"] = identifier
+            function = getattr(fragment, "function", None)
+            if function is not None:
+                name = getattr(function, "name", None)
+                if name:
+                    slot["name"] = name
+                arguments = getattr(function, "arguments", None)
+                if arguments:
+                    slot["arguments"] += arguments
+
+    for kind, piece in splitter.flush():
+        yield StreamEvent("reasoning" if kind == "reasoning" else "text", text=piece)
+
+    if pending:
+        calls = [
+            ToolCall(
+                id=slot["id"] or f"call_{index}",
+                name=slot["name"],
+                arguments=slot["arguments"],
+            )
+            for index, slot in sorted(pending.items())
+        ]
+        yield StreamEvent("tool_calls", tool_calls=calls)
+
+    if reported is not None:
+        yield StreamEvent("usage", usage=reported)
+
+    yield StreamEvent("done", finish_reason=finish_reason)
+
+
+def to_api_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
+    """Render conversation messages for the chat completions endpoint."""
+    payload: list[dict[str, Any]] = []
+    for message in messages:
+        rendered = message.to_api()
+        if rendered is not None:
+            payload.append(rendered)
+    return payload
+
+
+class LLMClient:
+    """Thin wrapper over :class:`openai.OpenAI` with readable failures."""
+
+    def __init__(self, base_url: str, api_key: str, timeout: float = 600.0,
+                 extra_body: Mapping[str, Any] | None = None) -> None:
+        self.base_url = base_url
+        self.timeout = float(timeout)
+        self.extra_body: dict[str, Any] = dict(extra_body or {})
+        self._api_key = api_key or "not-needed"
+        self._client = OpenAI(
+            base_url=base_url, api_key=self._api_key, timeout=self.timeout
+        )
+        self._stream_lock = threading.Lock()
+        self._active_request_client: OpenAI | None = None
+        self._active_stream: Any | None = None
+
+    def _new_request_client(self) -> OpenAI:
+        """Return a disposable client so an in-flight request can be aborted."""
+        return OpenAI(
+            base_url=self.base_url,
+            api_key=self._api_key,
+            timeout=self.timeout,
+        )
+
+    def cancel_active_stream(self) -> bool:
+        """Close the active response and its transport from another thread.
+
+        Merely setting a cancellation event is not enough while the HTTP
+        client is waiting for response headers or the next stream chunk.
+        Closing both objects wakes that blocking read so the worker can stop.
+        """
+        with self._stream_lock:
+            stream = self._active_stream
+            request_client = self._active_request_client
+
+        closed = False
+        for target in (stream, request_client):
+            closer = getattr(target, "close", None)
+            if callable(closer):
+                try:
+                    closer()
+                except Exception:
+                    # Cancellation is best-effort; the worker converts the
+                    # resulting transport error into a cancelled event.
+                    pass
+                closed = True
+        return closed
+
+    @classmethod
+    def from_provider(cls, provider: Mapping[str, Any]) -> "LLMClient":
+        return cls(
+            base_url=str(provider.get("base_url", "")),
+            api_key=str(provider.get("api_key", "")),
+            timeout=float(provider.get("timeout_seconds", 600)),
+            extra_body=provider.get("extra_body") or {},
+        )
+
+    def warm(self, model: str) -> float:
+        """Ask for a single token so the server loads the model now.
+
+        Returns how long it took. Cold local models can take minutes; doing
+        this in the background means the operator waits while typing rather
+        than after pressing enter.
+        """
+        started = time.monotonic()
+        try:
+            self._client.with_options(max_retries=0).chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": "ok"}],
+                max_tokens=1,
+                temperature=0.0,
+                extra_body=self.extra_body or None,
+            )
+        except openai.APITimeoutError as exc:
+            raise LLMError("timeout", "preload timed out", str(exc)) from exc
+        except openai.APIConnectionError as exc:
+            raise LLMError(
+                "connection", f"cannot reach provider: {self.base_url}", str(exc)
+            ) from exc
+        except openai.APIStatusError as exc:
+            raise LLMError(
+                "http", f"provider returned HTTP {exc.status_code}", _status_detail(exc)
+            ) from exc
+        except openai.OpenAIError as exc:
+            raise LLMError("protocol", f"preload failed: {exc}", str(exc)) from exc
+        return time.monotonic() - started
+
+    def list_models(self, timeout: float | None = None) -> list[str]:
+        """Non-destructive reachability check against ``/v1/models``."""
+        try:
+            # No retries: a reachability probe must fail fast and stay honest.
+            client = self._client.with_options(max_retries=0)
+            if timeout is not None:
+                client = client.with_options(timeout=timeout)
+            response = client.models.list()
+        except openai.APITimeoutError as exc:
+            raise LLMError("timeout", f"provider timed out: {self.base_url}", str(exc)) from exc
+        except openai.APIConnectionError as exc:
+            raise LLMError(
+                "connection", f"cannot reach provider: {self.base_url}", str(exc)
+            ) from exc
+        except openai.APIStatusError as exc:
+            raise LLMError(
+                "http", f"provider returned HTTP {exc.status_code}", str(exc)
+            ) from exc
+        except openai.OpenAIError as exc:
+            raise LLMError("protocol", f"provider error: {exc}", str(exc)) from exc
+        return sorted(model.id for model in response.data)
+
+    def ping(self, timeout: float = 5.0) -> tuple[bool, str]:
+        """Return ``(reachable, detail)`` without raising."""
+        try:
+            models = self.list_models(timeout=timeout)
+        except LLMError as exc:
+            return False, exc.message
+        return True, f"{len(models)} models"
+
+    def stream_chat(
+        self,
+        messages: Sequence[Message],
+        model: str,
+        temperature: float = 0.2,
+        max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        cancel: threading.Event | None = None,
+        include_usage: bool = True,
+    ) -> Iterator[StreamEvent]:
+        """Stream a completion, yielding text deltas then any tool calls.
+
+        With ``include_usage`` the provider is asked to append exact token
+        counts to the final chunk; providers that reject the option are
+        retried once without it.
+        """
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": to_api_messages(messages),
+            "temperature": temperature,
+            "stream": True,
+        }
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+        if include_usage:
+            payload["stream_options"] = {"include_usage": True}
+        if self.extra_body:
+            # Provider-specific extras, e.g. Ollama keep_alive.
+            payload["extra_body"] = dict(self.extra_body)
+
+        stream: Any | None = None
+        request_client = self._new_request_client()
+        with self._stream_lock:
+            self._active_request_client = request_client
+            self._active_stream = None
+
+        try:
+            try:
+                try:
+                    stream = request_client.chat.completions.create(**payload)
+                except openai.APIStatusError as exc:
+                    if not include_usage or not _rejects_stream_options(exc):
+                        raise
+                    payload.pop("stream_options", None)
+                    stream = request_client.chat.completions.create(**payload)
+            except openai.APITimeoutError as exc:
+                if cancel is not None and cancel.is_set():
+                    yield StreamEvent("cancelled")
+                    return
+                raise LLMError("timeout", "request timed out", str(exc)) from exc
+            except openai.APIConnectionError as exc:
+                if cancel is not None and cancel.is_set():
+                    yield StreamEvent("cancelled")
+                    return
+                raise LLMError(
+                    "connection", f"cannot reach provider: {self.base_url}", str(exc)
+                ) from exc
+            except openai.APIStatusError as exc:
+                if cancel is not None and cancel.is_set():
+                    yield StreamEvent("cancelled")
+                    return
+                raise LLMError(
+                    "http",
+                    f"provider returned HTTP {exc.status_code}",
+                    _status_detail(exc),
+                ) from exc
+            except openai.OpenAIError as exc:
+                if cancel is not None and cancel.is_set():
+                    yield StreamEvent("cancelled")
+                    return
+                raise LLMError("protocol", f"provider error: {exc}", str(exc)) from exc
+            except Exception:
+                if cancel is not None and cancel.is_set():
+                    yield StreamEvent("cancelled")
+                    return
+                raise
+
+            with self._stream_lock:
+                if self._active_request_client is request_client:
+                    self._active_stream = stream
+
+            if cancel is not None and cancel.is_set():
+                yield StreamEvent("cancelled")
+                return
+
+            try:
+                yield from consume_stream(stream, cancel)
+            except openai.APITimeoutError as exc:
+                if cancel is not None and cancel.is_set():
+                    yield StreamEvent("cancelled")
+                    return
+                raise LLMError("timeout", "stream timed out", str(exc)) from exc
+            except openai.APIConnectionError as exc:
+                if cancel is not None and cancel.is_set():
+                    yield StreamEvent("cancelled")
+                    return
+                raise LLMError("connection", "stream interrupted", str(exc)) from exc
+            except openai.APIStatusError as exc:
+                if cancel is not None and cancel.is_set():
+                    yield StreamEvent("cancelled")
+                    return
+                raise LLMError(
+                    "http",
+                    f"provider returned HTTP {exc.status_code}",
+                    _status_detail(exc),
+                ) from exc
+            except openai.OpenAIError as exc:
+                if cancel is not None and cancel.is_set():
+                    yield StreamEvent("cancelled")
+                    return
+                raise LLMError("protocol", f"stream error: {exc}", str(exc)) from exc
+            except Exception:
+                if cancel is not None and cancel.is_set():
+                    yield StreamEvent("cancelled")
+                    return
+                raise
+        finally:
+            with self._stream_lock:
+                if self._active_request_client is request_client:
+                    self._active_request_client = None
+                    self._active_stream = None
+            for target in (stream, request_client):
+                closer = getattr(target, "close", None)
+                if callable(closer):
+                    try:
+                        closer()
+                    except Exception:
+                        pass
+
+
+def _status_detail(exc: openai.APIStatusError) -> str:
+    """Best-effort human text out of an HTTP error body."""
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict) and error.get("message"):
+            return str(error["message"])
+        return json.dumps(body)[:500]
+    return str(exc)
+
+
+def _rejects_stream_options(exc: openai.APIStatusError) -> bool:
+    """True when the provider refused the usage option rather than the call."""
+    if exc.status_code not in (400, 404, 422):
+        return False
+    return "stream_options" in f"{exc} {_status_detail(exc)}".lower()
+
+
+def supports_tools_error(exc: LLMError) -> bool:
+    """True when the failure looks like the model refusing tool calling."""
+    if exc.kind not in ("http", "protocol"):
+        return False
+    haystack = f"{exc.message} {exc.detail}".lower()
+    return any(
+        marker in haystack
+        for marker in ("does not support tools", "tools", "tool_choice", "function")
+    )

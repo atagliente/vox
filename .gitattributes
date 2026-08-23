@@ -1,0 +1,5 @@
+# Shell scripts and Python must keep LF, or they break on Linux and macOS.
+* text=auto eol=lf
+
+# PowerShell is happier with CRLF on Windows.
+*.ps1 text eol=crlf

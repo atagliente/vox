@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vox"
+version = "0.1.0"
+description = "VOX - retro terminal chat client for OpenAI-compatible providers"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "PolyForm Noncommercial 1.0.0" }
+authors = [{ name = "atagliente" }]
+keywords = ["tui", "llm", "ollama", "chat", "coding-agent"]
+classifiers = [
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development",
+]
+dependencies = [
+  "openai>=1.30",
+  "textual>=0.60",
+  "rich>=13.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+vox = "vox_chat.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/atagliente/vox"
+
+[tool.setuptools.packages.find]
+include = ["vox_chat*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
