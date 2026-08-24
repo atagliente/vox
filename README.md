@@ -112,7 +112,7 @@ The bottom row shows this legend at all times.
 ## Code on the right
 
 When an answer contains fenced code, the right-hand panel opens with the blocks
-laid out flush left, without the fences — drag over them with `Shift` held and
+laid out flush left, without the fences, updating as the answer streams — drag over them with `Shift` held and
 your terminal copies exactly the code. `Ctrl+Y` copies the last block to the
 system clipboard, `/code` lists them, `/code 2` copies the second, `/panel
 index` switches the panel back to sessions, prompts and roles.

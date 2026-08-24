@@ -709,3 +709,89 @@ async def test_ctrl_w_saves_the_session(offline_app: VoxApp) -> None:
         assert isinstance(offline_app.screen, TextPromptModal), "it asks for a name"
         await pilot.press("escape")
         await pilot.pause()
+
+
+async def test_the_code_panel_follows_the_answer_while_it_streams(
+    offline_app: VoxApp,
+) -> None:
+    """A slow answer must not leave the previous one's code on screen."""
+    from vox_chat.agent import AgentEvent
+
+    async with offline_app.run_test(size=(130, 30)) as pilot:
+        await pilot.pause()
+
+        def panel() -> str:
+            return str(offline_app.query_one("#side-content").render())
+
+        for chunk in ("Here:\n\n", "```python\n", "x = 1\n"):
+            offline_app.handle_agent_event(AgentEvent("text", text=chunk))
+            await pilot.pause()
+
+        assert offline_app.code_blocks, "the half-written block is already shown"
+        assert offline_app.code_blocks[0].closed is False
+        assert "x = 1" in panel()
+
+        offline_app.handle_agent_event(AgentEvent("text", text="print(x)\n```\n"))
+        await pilot.pause()
+        assert offline_app.code_blocks[0].closed is True
+        assert "print(x)" in panel()
+
+
+async def test_a_second_answer_replaces_the_code_in_the_panel(
+    offline_app: VoxApp,
+) -> None:
+    from vox_chat.agent import AgentEvent
+    from vox_chat.models import Message as ChatMessage
+
+    async with offline_app.run_test(size=(130, 30)) as pilot:
+        await pilot.pause()
+        offline_app.handle_agent_event(
+            AgentEvent(
+                "assistant_done",
+                messages=[ChatMessage(role="assistant", content="```python\nx = 1\n```")],
+            )
+        )
+        await pilot.pause()
+        assert [block.code for block in offline_app.code_blocks] == ["x = 1"]
+
+        offline_app._assistant_box = None
+        for chunk in ("```python\n", "x = 2\n", "```\n"):
+            offline_app.handle_agent_event(AgentEvent("text", text=chunk))
+            await pilot.pause()
+        assert [block.code for block in offline_app.code_blocks] == ["x = 2"]
+
+        offline_app.handle_agent_event(
+            AgentEvent(
+                "assistant_done",
+                messages=[ChatMessage(role="assistant", content="```python\nx = 2\n```")],
+            )
+        )
+        await pilot.pause()
+        assert "x = 2" in str(offline_app.query_one("#side-content").render())
+        assert "x = 1" not in str(offline_app.query_one("#side-content").render())
+
+
+async def test_an_answer_with_no_code_empties_the_panel(offline_app: VoxApp) -> None:
+    from vox_chat.agent import AgentEvent
+    from vox_chat.models import Message as ChatMessage
+
+    async with offline_app.run_test(size=(130, 30)) as pilot:
+        await pilot.pause()
+        offline_app.handle_agent_event(
+            AgentEvent(
+                "assistant_done",
+                messages=[ChatMessage(role="assistant", content="```python\nx = 1\n```")],
+            )
+        )
+        await pilot.pause()
+        assert offline_app.code_blocks
+
+        offline_app.handle_agent_event(
+            AgentEvent(
+                "assistant_done",
+                messages=[ChatMessage(role="assistant", content="no code this time")],
+            )
+        )
+        await pilot.pause()
+        assert offline_app.code_blocks == []
+        assert "No code" in str(offline_app.query_one("#side-content").render())

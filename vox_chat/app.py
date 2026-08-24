@@ -497,6 +497,10 @@ class VoxApp(App[None]):
                 )
             self._assistant_box.append_text(event.text)
             self.transcript.scroll_end(animate=False)
+            # Re-parsing on every token would be wasteful; a fence or a line
+            # break is the only thing that can change the blocks.
+            if any(marker in event.text for marker in ("`", "~", "\n")):
+                self.refresh_code_blocks(self._assistant_box.message.content)
         elif event.type == "reasoning":
             self.show_reasoning(event.text)
         elif event.type == "tool_start" and event.tool_call is not None:
@@ -543,16 +547,21 @@ class VoxApp(App[None]):
         self._reasoning_box.append_text(chunk)
         self.transcript.scroll_end(animate=False)
 
-    def refresh_code_blocks(self) -> None:
-        """Re-read the latest answer and update the code panel."""
-        answer = next(
-            (
-                message.content
-                for message in reversed(self.session.messages)
-                if message.role == "assistant" and message.content
-            ),
-            "",
-        )
+    def refresh_code_blocks(self, answer: str | None = None) -> None:
+        """Update the code panel from ``answer``, or from the latest one.
+
+        Called while the answer is still streaming as well as when it lands,
+        so a long reply does not leave the previous answer's code on screen.
+        """
+        if answer is None:
+            answer = next(
+                (
+                    message.content
+                    for message in reversed(self.session.messages)
+                    if message.role == "assistant" and message.content
+                ),
+                "",
+            )
         blocks = code_blocks.extract(answer)
         if blocks == self.code_blocks:
             return

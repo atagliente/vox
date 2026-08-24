@@ -277,7 +277,11 @@ Every fenced block in the latest answer is extracted — ` ``` ` and `~~~`
 fences, with or without a language tag, indented or not, and the one still
 being streamed is shown too, marked incomplete. The panel opens by itself the
 first time an answer contains code (`"ui": {"code_panel": false}` stops that)
-and widens to make room.
+and widens to make room. It follows the answer as it streams, so on a slow
+model you watch the new code arrive instead of staring at the previous
+answer's; a block whose closing fence has not arrived yet is shown and marked
+incomplete. An answer with no code empties the panel rather than leaving stale
+code behind.
 
 The code is rendered flush left with no prefix and no fences, so a terminal
 selection over it yields the code and nothing else. `Ctrl+Y` copies the last
