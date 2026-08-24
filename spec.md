@@ -82,7 +82,8 @@ The main screen contains:
 3. a multiline input field at the bottom;
 4. a status bar with connection state, generation state and usage figures,
    above a permanent key legend;
-5. a side panel listing sessions, saved prompts and roles;
+5. a side panel with two modes: the code blocks of the latest answer, laid out
+   for copying, and an index of sessions, saved prompts and roles;
 6. a modal window for settings;
 7. a modal confirmation window for writes and command execution, focused on
    the cancel button, navigable with the arrows and carrying a legend of the
@@ -101,6 +102,9 @@ Minimum shortcuts:
 - `Ctrl+,` — settings
 - `Ctrl+G` — stop the current generation
 - `Ctrl+B` — toggle the side panel
+- `Ctrl+Y` — copy the last code block of the answer
+- `Ctrl+Shift+C` — copy the selection, or the last answer
+- `Ctrl+Shift+V`, `Ctrl+V` — paste the system clipboard into the input
 - `Ctrl+C` — inside a dialog: confirms a quit, cancels anything else; outside:
   copy the selection, else stop the generation, else quit
 - `Ctrl+Q` — quit, asking for confirmation when there are unsaved changes
@@ -261,6 +265,14 @@ that rejects the option is retried once without it, and the figures fall back
 to a character-based estimate that is flagged as approximate. The window the
 percentage is measured against is `generation.context_window`, because the API
 does not report it. `ui.show_usage` hides the readout.
+
+## Clipboard
+
+Copy and paste reach the real system clipboard through the platform's own
+helper (PowerShell, `pbcopy`/`pbpaste`, `wl-copy`, `xclip`, `xsel`,
+`termux-clipboard-*`), run without a shell and under a timeout, in a worker so
+the UI never blocks. When no helper exists the key reports the failure instead
+of doing nothing, and `vox doctor` lists what is available.
 
 ## Roles
 

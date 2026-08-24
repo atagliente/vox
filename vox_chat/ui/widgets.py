@@ -103,6 +103,11 @@ class PromptArea(TextArea):
             super().__init__()
             self.direction = direction
 
+    class ClipboardPaste(TextualMessage):
+        """Posted when the operator asks for the system clipboard."""
+
+    PASTE_KEYS = ("ctrl+v", "ctrl+shift+v")
+
     def _at_first_line(self) -> bool:
         return self.cursor_location[0] == 0
 
@@ -124,6 +129,11 @@ class PromptArea(TextArea):
             event.prevent_default()
             event.stop()
             self.post_message(self.Recall(1))
+            return
+        if event.key in self.PASTE_KEYS:
+            event.prevent_default()
+            event.stop()
+            self.post_message(self.ClipboardPaste())
             return
         if event.key in self.NEWLINE_KEYS:
             event.prevent_default()
@@ -240,7 +250,9 @@ class KeyBar(Static):
         ("^R", "roles"),
         ("^,", "settings"),
         ("^B", "panel"),
+        ("^Y", "copy code"),
         ("↑↓", "history"),
+        ("^⇧C/V", "copy/paste"),
     )
 
     def __init__(self) -> None:

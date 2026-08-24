@@ -248,6 +248,40 @@ ways:
   that the server may still be loading the model. `/stats` separates the wait
   from the actual generation time.
 
+### Copy and paste
+
+`Ctrl+Shift+V` and `Ctrl+V` paste the **system** clipboard into the input;
+`Ctrl+Shift+C` copies the input selection, or, with nothing selected, the last
+answer. `Ctrl+C` still copies a selection as before.
+
+VOX talks to the real clipboard through whatever helper the platform provides
+— PowerShell `Set-Clipboard` / `Get-Clipboard` on Windows, `pbcopy` / `pbpaste`
+on macOS, `wl-copy`, `xclip` or `xsel` on Linux, `termux-clipboard-*` on
+Termux. It never goes through a shell, gives up after five seconds, and says
+which helper it used. `vox doctor` reports what is available, so on a bare
+Linux box a missing `xclip` shows up as a warning rather than as a key that
+silently does nothing.
+
+Your terminal's own shortcuts keep working too: if it handles `Ctrl+Shift+V`
+itself it will paste before VOX ever sees the key, which is fine — the text
+arrives as a paste event either way. To select text with the mouse for the
+terminal's own copy, hold `Shift` while dragging, since the app itself is
+listening for mouse events.
+
+### The code panel
+
+Every fenced block in the latest answer is extracted — ` ``` ` and `~~~`
+fences, with or without a language tag, indented or not, and the one still
+being streamed is shown too, marked incomplete. The panel opens by itself the
+first time an answer contains code (`"ui": {"code_panel": false}` stops that)
+and widens to make room.
+
+The code is rendered flush left with no prefix and no fences, so a terminal
+selection over it yields the code and nothing else. `Ctrl+Y` copies the last
+block, `/code` lists what is available, `/code <n>` copies that one, and
+`/panel index` / `/panel code` switch the panel between the code and the
+sessions-prompts-roles index.
+
 ### Confirmation dialogs
 
 Writes, patches, commands and deletions open a two-button dialog. The cancel

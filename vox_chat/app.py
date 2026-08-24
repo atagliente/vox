@@ -15,9 +15,10 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.widgets import Static
 
-from . import __version__, commands
+from . import __version__, clipboard, code_blocks, commands
 from .agent import AgentEvent, run_turn
 from .config import (
     ConfigError,
@@ -72,8 +73,11 @@ class VoxApp(App[None]):
         Binding("ctrl+comma", "open_settings", "Settings", priority=True),
         Binding("ctrl+g", "stop", "Stop", priority=True),
         Binding("ctrl+b", "toggle_panel", "Panel", priority=True),
+        Binding("ctrl+y", "copy_code", "Copy code", priority=True),
         Binding("ctrl+q", "request_quit", "Quit", priority=True),
         Binding("ctrl+c", "interrupt", "Copy / stop / quit", priority=True),
+        Binding("ctrl+shift+c", "copy_selection", "Copy", priority=True),
+        Binding("ctrl+shift+v", "paste_clipboard", "Paste", priority=True),
     ]
 
     def __init__(
@@ -110,7 +114,8 @@ class VoxApp(App[None]):
         self._spinner_tick = 0
         self.session = self._new_session()
         self._assistant_box: MessageBox | None = None
-        self._panel_mode = "sessions"
+        self.code_blocks: list[code_blocks.CodeBlock] = []
+        self._panel_mode = "code"
 
     # ---------------------------------------------------------------- layout
 
@@ -199,7 +204,10 @@ class VoxApp(App[None]):
             self.write_error(f"cannot create client: {exc}")
 
     def refresh_header(self) -> None:
-        header = self.query_one(HeaderBar)
+        try:
+            header = self.query_one(HeaderBar)
+        except NoMatches:  # the screen is already being torn down
+            return
         header.update_state(
             link=self.link_label(),
             logon=self.masked_key(),
@@ -228,7 +236,11 @@ class VoxApp(App[None]):
         usage = self.usage_summary()
         if usage:
             extra = f"{extra}  ·  {usage}" if extra else usage
-        self.query_one(StatusBar).update_state(
+        try:
+            status = self.query_one(StatusBar)
+        except NoMatches:  # a timer can outlive the widgets for one tick
+            return
+        status.update_state(
             connected=self.connected,
             generating=self.generating,
             agent=agent,
@@ -287,6 +299,57 @@ class VoxApp(App[None]):
         """Enter in the input box sends the message."""
         event.stop()
         self.action_send()
+
+    def on_prompt_area_clipboard_paste(self, event: PromptArea.ClipboardPaste) -> None:
+        """Ctrl+V and Ctrl+Shift+V in the input box."""
+        event.stop()
+        self.action_paste_clipboard()
+
+    def action_copy_selection(self) -> None:
+        """Copy the input selection, or the latest answer when there is none."""
+        area = self.input_area
+        text = area.selected_text
+        source = "selection"
+        if not text:
+            answer = next(
+                (
+                    message.content
+                    for message in reversed(self.session.messages)
+                    if message.role == "assistant" and message.content
+                ),
+                "",
+            )
+            text, source = answer, "last answer"
+        if not text:
+            self.write_error("NOTHING TO COPY")
+            return
+        self.copy_to_system(text, source)
+
+    def action_paste_clipboard(self) -> None:
+        self.paste_from_system()
+
+    @work(thread=True, group="clipboard")
+    def copy_to_system(self, text: str, source: str) -> None:
+        """Reaching the real clipboard means shelling out; do it off the UI."""
+        ok, detail = clipboard.copy(text)
+        if ok:
+            self.call_from_thread(
+                self.write_system,
+                f"COPIED {source.upper()} - {len(text)} characters ({detail})",
+            )
+        else:
+            self.call_from_thread(self.write_error, f"COPY FAILED - {detail}")
+
+    @work(thread=True, group="clipboard")
+    def paste_from_system(self) -> None:
+        text, detail = clipboard.paste()
+        if text is None:
+            self.call_from_thread(self.write_error, f"PASTE FAILED - {detail}")
+            return
+        if not text:
+            self.call_from_thread(self.write_system, "CLIPBOARD IS EMPTY")
+            return
+        self.call_from_thread(self.input_area.insert, text)
 
     def on_prompt_area_recall(self, event: PromptArea.Recall) -> None:
         """Up and down at the edges of the input walk the history."""
@@ -454,6 +517,42 @@ class VoxApp(App[None]):
         self._reasoning_box.append_text(chunk)
         self.transcript.scroll_end(animate=False)
 
+    def refresh_code_blocks(self) -> None:
+        """Re-read the latest answer and update the code panel."""
+        answer = next(
+            (
+                message.content
+                for message in reversed(self.session.messages)
+                if message.role == "assistant" and message.content
+            ),
+            "",
+        )
+        blocks = code_blocks.extract(answer)
+        if blocks == self.code_blocks:
+            return
+        self.code_blocks = blocks
+        if blocks and self.config.get("ui", {}).get("code_panel", True):
+            self._panel_mode = "code"
+            self.query_one("#side-panel").set_class(True, "visible")
+        if self.query_one("#side-panel").has_class("visible"):
+            self.refresh_panel()
+
+    def action_copy_code(self) -> None:
+        """Ctrl+Y: copy the most recent code block."""
+        self.copy_code_block(len(self.code_blocks))
+
+    def copy_code_block(self, number: int) -> None:
+        if not self.code_blocks:
+            self.write_error("NO CODE BLOCK IN THE LAST ANSWER")
+            return
+        if not 1 <= number <= len(self.code_blocks):
+            self.write_error(
+                f"NO SUCH BLOCK: {number} (1-{len(self.code_blocks)} available)"
+            )
+            return
+        block = self.code_blocks[number - 1]
+        self.copy_to_system(block.code, f"code block {number}")
+
     def _commit(self, messages: list[Message]) -> None:
         """Append the messages produced by a turn to the session."""
         for message in messages:
@@ -462,6 +561,7 @@ class VoxApp(App[None]):
             self.dirty = True
         self._assistant_box = None
         self._reasoning_box = None
+        self.refresh_code_blocks()
 
     def finish_generation(self, error: str | None) -> None:
         self.generating = False
@@ -469,9 +569,7 @@ class VoxApp(App[None]):
         self.live_meter = None
         self._reasoning_box = None
         self.clear_thinking()
-        if self._usage_timer is not None:
-            self._usage_timer.stop()
-            self._usage_timer = None
+        self._stop_status_timer()
         if error:
             self.write_error(error)
             self.connected = False
@@ -493,8 +591,19 @@ class VoxApp(App[None]):
             self._thinking = None
 
     def _tick_status(self) -> None:
+        if not self.is_running:
+            self._stop_status_timer()
+            return
         self._spinner_tick += 1
         self.refresh_status()
+
+    def _stop_status_timer(self) -> None:
+        if self._usage_timer is not None:
+            self._usage_timer.stop()
+            self._usage_timer = None
+
+    def on_unmount(self) -> None:
+        self._stop_status_timer()
 
     def action_stop(self) -> None:
         if not self.generating or self.cancel_event.is_set():
@@ -732,6 +841,14 @@ class VoxApp(App[None]):
             self.refresh_panel()
 
     def refresh_panel(self) -> None:
+        panel = self.query_one("#side-panel")
+        panel.set_class(self._panel_mode == "code", "code")
+        if self._panel_mode == "code":
+            self.query_one("#side-title", Static).update("VOX · CODE")
+            self.query_one("#side-content", Static).update(
+                code_blocks.render_panel(self.code_blocks)
+            )
+            return
         sessions = self.session_store.list()
         lines = ["SESSIONS"]
         lines.extend(f"  {entry.name}  ({entry.message_count})" for entry in sessions[:10])
@@ -971,6 +1088,37 @@ class VoxApp(App[None]):
     def cmd_stats(self, argument: str) -> None:
         self.write_system(self.usage.report(self.context_window()))
 
+    def cmd_code(self, argument: str) -> None:
+        """Show the code panel, or copy one block by number."""
+        self._panel_mode = "code"
+        self.query_one("#side-panel").set_class(True, "visible")
+        self.refresh_panel()
+        if not argument:
+            if self.code_blocks:
+                summary = ", ".join(
+                    block.label(index)
+                    for index, block in enumerate(self.code_blocks, start=1)
+                )
+                self.write_system(f"CODE BLOCKS: {summary}  ·  /code <n> to copy")
+            else:
+                self.write_system("NO CODE BLOCK IN THE LAST ANSWER")
+            return
+        try:
+            number = int(argument.split()[0])
+        except ValueError:
+            self.write_error("USAGE: /code [number]")
+            return
+        self.copy_code_block(number)
+
+    def cmd_panel(self, argument: str) -> None:
+        mode = argument.strip().lower() or ("index" if self._panel_mode == "code" else "code")
+        if mode not in ("code", "index"):
+            self.write_error("USAGE: /panel code|index")
+            return
+        self._panel_mode = mode
+        self.query_one("#side-panel").set_class(True, "visible")
+        self.refresh_panel()
+
     def cmd_connect(self, argument: str) -> None:
         self.write_system("PROBING /v1/models…")
         self.check_connection()
@@ -1015,6 +1163,7 @@ class VoxApp(App[None]):
         area = self.input_area
         if self.focused is area and area.selected_text:
             area.action_copy()
+            self.copy_to_system(area.selected_text, "selection")
             return
         if self.generating:
             self.action_stop()

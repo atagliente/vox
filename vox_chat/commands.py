@@ -40,6 +40,8 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("agent", "/agent on|off", "Toggle coding-agent mode"),
     CommandSpec("workspace", "/workspace <path>", "Set the agent workspace"),
     CommandSpec("stats", "/stats", "Token usage, context and speed", ("usage",)),
+    CommandSpec("code", "/code [n]", "Show code blocks, copy one by number"),
+    CommandSpec("panel", "/panel code|index", "Switch the side panel"),
     CommandSpec("connect", "/connect", "Re-check the provider connection"),
     CommandSpec("warm", "/warm", "Preload the active model on the server"),
     CommandSpec("stop", "/stop", "Stop the current generation"),
@@ -134,6 +136,8 @@ def help_text() -> str:
             "  ctrl+g      stop generation  ctrl+r  roles",
             "  ctrl+b      side panel       ctrl+,  settings",
             "  ctrl+q      quit             ctrl+c  copy / stop / quit",
+            "  ctrl+shift+c copy            ctrl+shift+v  paste",
+            "  ctrl+y      copy last code block",
             "",
             "Start a message with // to send text that begins with a slash.",
         ]

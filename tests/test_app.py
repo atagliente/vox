@@ -501,3 +501,213 @@ async def test_the_spinner_warns_when_the_first_token_is_slow(
         box._started -= ThinkingBox.SLOW_AFTER + 1
         box._advance()
         assert "loading the model" in str(box.render())
+
+
+async def test_ctrl_shift_v_pastes_the_system_clipboard(
+    offline_app: VoxApp, monkeypatch
+) -> None:
+    from vox_chat import clipboard
+
+    monkeypatch.setattr(clipboard, "paste", lambda: ("pasted text", "fake"))
+    async with offline_app.run_test() as pilot:
+        await pilot.pause()
+        offline_app.input_area.focus()
+        await pilot.press("ctrl+shift+v")
+        for _ in range(20):
+            await pilot.pause()
+            if offline_app.input_area.text:
+                break
+        assert offline_app.input_area.text == "pasted text"
+
+
+async def test_ctrl_v_in_the_input_pastes_too(offline_app: VoxApp, monkeypatch) -> None:
+    from vox_chat import clipboard
+
+    monkeypatch.setattr(clipboard, "paste", lambda: ("from ctrl+v", "fake"))
+    async with offline_app.run_test() as pilot:
+        await pilot.pause()
+        offline_app.input_area.focus()
+        await pilot.press("ctrl+v")
+        for _ in range(20):
+            await pilot.pause()
+            if offline_app.input_area.text:
+                break
+        assert offline_app.input_area.text == "from ctrl+v"
+
+
+async def test_ctrl_shift_c_copies_the_selection(offline_app: VoxApp, monkeypatch) -> None:
+    from vox_chat import clipboard
+
+    copied: list[str] = []
+    monkeypatch.setattr(clipboard, "copy", lambda text: (copied.append(text), (True, "fake"))[1])
+    async with offline_app.run_test() as pilot:
+        await pilot.pause()
+        area = offline_app.input_area
+        area.focus()
+        area.insert("copy this")
+        area.select_all()
+        await pilot.press("ctrl+shift+c")
+        for _ in range(20):
+            await pilot.pause()
+            if copied:
+                break
+        assert copied == ["copy this"]
+
+
+async def test_ctrl_shift_c_falls_back_to_the_last_answer(
+    offline_app: VoxApp, monkeypatch
+) -> None:
+    from vox_chat import clipboard
+    from vox_chat.models import Message as ChatMessage
+
+    copied: list[str] = []
+    monkeypatch.setattr(clipboard, "copy", lambda text: (copied.append(text), (True, "fake"))[1])
+    async with offline_app.run_test() as pilot:
+        await pilot.pause()
+        offline_app.session.messages.append(
+            ChatMessage(role="assistant", content="the answer to copy")
+        )
+        await pilot.press("ctrl+shift+c")
+        for _ in range(20):
+            await pilot.pause()
+            if copied:
+                break
+        assert copied == ["the answer to copy"]
+
+
+async def test_a_failing_clipboard_is_reported(offline_app: VoxApp, monkeypatch) -> None:
+    from vox_chat import clipboard
+
+    monkeypatch.setattr(clipboard, "paste", lambda: (None, "no clipboard helper found"))
+    async with offline_app.run_test() as pilot:
+        await pilot.pause()
+        offline_app.input_area.focus()
+        await pilot.press("ctrl+shift+v")
+        for _ in range(20):
+            await pilot.pause()
+            if messages(offline_app) and messages(offline_app)[-1].message.role == "error":
+                break
+        last = messages(offline_app)[-1].message
+        assert last.role == "error"
+        assert "PASTE FAILED" in last.content
+
+
+async def test_copying_with_nothing_available_says_so(offline_app: VoxApp) -> None:
+    async with offline_app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("ctrl+shift+c")
+        await pilot.pause()
+        assert messages(offline_app)[-1].message.content == "NOTHING TO COPY"
+
+
+CODE_ANSWER = """Try this:
+
+```python
+x = 1
+print(x)
+```
+"""
+
+
+async def test_the_code_panel_opens_with_the_answer(offline_app: VoxApp) -> None:
+    from vox_chat.models import Message as ChatMessage
+
+    async with offline_app.run_test(size=(130, 30)) as pilot:
+        await pilot.pause()
+        assert not offline_app.query_one("#side-panel").has_class("visible")
+
+        offline_app.session.messages.append(
+            ChatMessage(role="assistant", content=CODE_ANSWER)
+        )
+        offline_app.refresh_code_blocks()
+        await pilot.pause()
+
+        panel = offline_app.query_one("#side-panel")
+        assert panel.has_class("visible"), "code opens the panel"
+        assert panel.has_class("code"), "and widens it"
+        content = str(offline_app.query_one("#side-content").render())
+        assert "print(x)" in content
+        assert "```" not in content
+
+
+async def test_an_answer_without_code_leaves_the_panel_alone(
+    offline_app: VoxApp,
+) -> None:
+    from vox_chat.models import Message as ChatMessage
+
+    async with offline_app.run_test() as pilot:
+        await pilot.pause()
+        offline_app.session.messages.append(
+            ChatMessage(role="assistant", content="no code here")
+        )
+        offline_app.refresh_code_blocks()
+        await pilot.pause()
+        assert offline_app.code_blocks == []
+        assert not offline_app.query_one("#side-panel").has_class("visible")
+
+
+async def test_ctrl_y_copies_the_last_code_block(offline_app: VoxApp, monkeypatch) -> None:
+    from vox_chat import clipboard
+    from vox_chat.models import Message as ChatMessage
+
+    copied: list[str] = []
+    monkeypatch.setattr(clipboard, "copy", lambda text: (copied.append(text), (True, "fake"))[1])
+    async with offline_app.run_test() as pilot:
+        await pilot.pause()
+        offline_app.session.messages.append(
+            ChatMessage(role="assistant", content=CODE_ANSWER)
+        )
+        offline_app.refresh_code_blocks()
+        await pilot.press("ctrl+y")
+        for _ in range(20):
+            await pilot.pause()
+            if copied:
+                break
+        assert copied == ["x = 1\nprint(x)"]
+
+
+async def test_code_command_copies_a_numbered_block(offline_app: VoxApp, monkeypatch) -> None:
+    from vox_chat import clipboard
+    from vox_chat.models import Message as ChatMessage
+
+    copied: list[str] = []
+    monkeypatch.setattr(clipboard, "copy", lambda text: (copied.append(text), (True, "fake"))[1])
+    answer = CODE_ANSWER + "\nand:\n\n```bash\nls -la\n```\n"
+    async with offline_app.run_test() as pilot:
+        await pilot.pause()
+        offline_app.session.messages.append(
+            ChatMessage(role="assistant", content=answer)
+        )
+        offline_app.refresh_code_blocks()
+        offline_app.run_command("/code 2")
+        for _ in range(20):
+            await pilot.pause()
+            if copied:
+                break
+        assert copied == ["ls -la"]
+
+        offline_app.run_command("/code 9")
+        await pilot.pause()
+        assert "NO SUCH BLOCK" in messages(offline_app)[-1].message.content
+
+
+async def test_ctrl_y_without_code_says_so(offline_app: VoxApp) -> None:
+    async with offline_app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("ctrl+y")
+        await pilot.pause()
+        assert "NO CODE BLOCK" in messages(offline_app)[-1].message.content
+
+
+async def test_panel_command_switches_modes(offline_app: VoxApp) -> None:
+    async with offline_app.run_test(size=(130, 30)) as pilot:
+        await pilot.pause()
+        offline_app.run_command("/panel index")
+        await pilot.pause()
+        title = str(offline_app.query_one("#side-title").render())
+        assert "INDEX" in title
+        assert not offline_app.query_one("#side-panel").has_class("code")
+
+        offline_app.run_command("/panel code")
+        await pilot.pause()
+        assert "CODE" in str(offline_app.query_one("#side-title").render())

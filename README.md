@@ -91,7 +91,9 @@ server has **no authentication** — only do this on a network you trust.
 | `Alt+Enter` / `Ctrl+J` | new line | `Ctrl+R` | roles |
 | `↑` / `↓` | input history | `Ctrl+,` | settings |
 | `Ctrl+N` / `Ctrl+S` | new / save session | `Ctrl+G` | stop generating |
-| `Ctrl+C` | copy, else stop, else quit | `Ctrl+Q` | quit |
+| `Ctrl+Shift+C` / `Ctrl+Shift+V` | copy / paste | `Ctrl+C` | copy, else stop, else quit |
+| `Ctrl+V` | paste | `Ctrl+Y` | copy last code block |
+| `Ctrl+B` | side panel | `Ctrl+Q` | quit |
 
 The bottom row shows this legend at all times.
 
@@ -102,10 +104,19 @@ The bottom row shows this legend at all times.
 | `/model [name]`, `/provider [name]` | switch, without restarting |
 | `/role [name]`, `/prompts`, `/sessions` | pick a persona, a saved prompt, a session |
 | `/session-save [name]`, `/session-load <name>` | sessions live in `~/.vox/sessions/` |
+| `/code [n]` | show the answer's code blocks, copy one by number |
 | `/stats` | tokens, context fill, speed |
 | `/warm` | preload the model on the server |
 | `/agent on\|off`, `/workspace <path>` | coding-agent mode |
 | `/config`, `/settings`, `/connect`, `/stop` | configuration and connection |
+
+## Code on the right
+
+When an answer contains fenced code, the right-hand panel opens with the blocks
+laid out flush left, without the fences — drag over them with `Shift` held and
+your terminal copies exactly the code. `Ctrl+Y` copies the last block to the
+system clipboard, `/code` lists them, `/code 2` copies the second, `/panel
+index` switches the panel back to sessions, prompts and roles.
 
 ## If the first token takes forever
 

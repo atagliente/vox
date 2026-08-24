@@ -127,6 +127,7 @@ Screen {
     background: #1c1a14;
 }
 #side-panel.visible { display: block; }
+#side-panel.code { width: 58; max-width: 60%; }
 #side-title { text-style: bold; color: #c9a15a; }
 #input-area {
     height: auto;
@@ -198,6 +199,7 @@ Screen { background: #101014; color: #d6d6d6; }
     width: 34; display: none; padding: 0 1; border-left: solid #35353d;
 }
 #side-panel.visible { display: block; }
+#side-panel.code { width: 58; max-width: 60%; }
 #side-title { text-style: bold; }
 #input-area { height: auto; max-height: 12; border-top: solid #35353d; }
 #input { height: auto; min-height: 3; max-height: 10; }
@@ -230,6 +232,7 @@ Screen { background: #f4f2ec; color: #26241e; }
     width: 34; display: none; padding: 0 1; border-left: solid #cbc5b4;
 }
 #side-panel.visible { display: block; }
+#side-panel.code { width: 58; max-width: 60%; }
 #side-title { text-style: bold; }
 #input-area { height: auto; max-height: 12; border-top: solid #cbc5b4; }
 #input { height: auto; min-height: 3; max-height: 10; }

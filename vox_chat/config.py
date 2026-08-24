@@ -57,6 +57,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "show_timestamps": True,
         "show_usage": True,
         "show_reasoning": True,
+        "code_panel": True,
         "logo": "frame",
         "splash": True,
     },
@@ -190,7 +191,10 @@ def validate_config(data: Any) -> list[str]:
             errors.append(f"ui.theme must be one of {sorted(_THEMES)}")
         if ui.get("logo", "frame") not in _LOGOS:
             errors.append(f"ui.logo must be one of {sorted(_LOGOS)}")
-        for key in ("show_timestamps", "splash", "show_usage", "show_reasoning"):
+        for key in (
+            "show_timestamps", "splash", "show_usage", "show_reasoning",
+            "code_panel",
+        ):
             if not isinstance(ui.get(key, True), bool):
                 errors.append(f"ui.{key} must be a boolean")
     return errors

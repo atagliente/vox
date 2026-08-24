@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Literal
 
 from . import __version__
+from .clipboard import describe as describe_clipboard
 from .config import (
     ConfigError,
     LoadedConfig,
@@ -94,6 +95,13 @@ def check_editor() -> Check:
     return Check("OK", "EDITOR", f"{' '.join(command)} ({source})")
 
 
+def check_clipboard() -> Check:
+    detail = describe_clipboard()
+    if detail == "none found":
+        return Check("WARN", "CLIPBOARD", "no helper found - copy and paste will fail")
+    return Check("OK", "CLIPBOARD", detail)
+
+
 def check_link(loaded: LoadedConfig, timeout: float = 5.0) -> tuple[Check, list[str]]:
     """Probe ``/v1/models`` on the active provider without changing anything."""
     try:
@@ -130,7 +138,13 @@ def check_model(loaded: LoadedConfig, models: list[str]) -> Check:
 
 def run_checks(workspace: Path | None = None, timeout: float = 5.0) -> list[Check]:
     """Run every check in order and return the report lines."""
-    checks = [check_python(), check_dependencies(), check_home(), check_editor()]
+    checks = [
+        check_python(),
+        check_dependencies(),
+        check_home(),
+        check_editor(),
+        check_clipboard(),
+    ]
     loaded = load_config(workspace)
     for warning in loaded.warnings:
         checks.append(Check("WARN", "CONFIG", warning))
