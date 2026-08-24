@@ -149,25 +149,33 @@ if (-not $usedPipx) {
 
 # --------------------------------------------------------------------- PATH
 
-if (-not $usedPipx) {
-    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $entries = @()
-    if ($userPath) { $entries = $userPath.Split(';') | Where-Object { $_ } }
-    if ($entries -contains $BinDir) {
-        Write-Ok "PATH already contains $BinDir"
-    } elseif ($NoPath) {
-        Write-Warn "$BinDir is not in PATH (-NoPath given, add it yourself)"
+# pipx installs its own launcher elsewhere, so ask it where rather than
+# assuming; either way `vox` has to be reachable from any directory.
+if ($usedPipx) {
+    $pipxBin = (pipx environment --value PIPX_BIN_DIR 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $pipxBin) {
+        $pipxBin = Join-Path $env:USERPROFILE '.local\bin'
+    }
+    $BinDir = $pipxBin.Trim()
+}
+
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+$entries = @()
+if ($userPath) { $entries = $userPath.Split(';') | Where-Object { $_ } }
+if ($entries -contains $BinDir) {
+    Write-Ok "PATH already contains $BinDir"
+} elseif ($NoPath) {
+    Write-Warn "$BinDir is not in PATH (-NoPath given, add it yourself)"
+} else {
+    Write-Host ''
+    Write-Host "$BinDir is not in your user PATH."
+    if (Confirm-Step 'Add it now, so vox works from any directory?') {
+        $newPath = if ($userPath) { "$userPath;$BinDir" } else { $BinDir }
+        [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
+        $env:Path = "$env:Path;$BinDir"
+        Write-Ok 'user PATH updated - open a new terminal and just type: vox'
     } else {
-        Write-Host ''
-        Write-Host "$BinDir is not in your user PATH."
-        if (Confirm-Step 'Add it now?') {
-            $newPath = if ($userPath) { "$userPath;$BinDir" } else { $BinDir }
-            [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
-            $env:Path = "$env:Path;$BinDir"
-            Write-Ok 'user PATH updated (open a new terminal to pick it up)'
-        } else {
-            Write-Warn "add it manually: $BinDir"
-        }
+        Write-Warn "add it manually: $BinDir"
     }
 }
 

@@ -266,6 +266,13 @@ to a character-based estimate that is flagged as approximate. The window the
 percentage is measured against is `generation.context_window`, because the API
 does not report it. `ui.show_usage` hides the readout.
 
+## Shutdown
+
+Quitting cancels the running generation, closes the client and stops every
+timer. A worker thread blocked on a provider that never answers must not keep
+the process alive: after a short grace period the process leaves regardless,
+which is safe because all state is persisted as it changes.
+
 ## Clipboard
 
 Copy and paste reach the real system clipboard through the platform's own

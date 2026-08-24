@@ -117,11 +117,18 @@ your terminal copies exactly the code. `Ctrl+Y` copies the last block to the
 system clipboard, `/code` lists them, `/code 2` copies the second, `/panel
 index` switches the panel back to sessions, prompts and roles.
 
+## Leaving
+
+`Ctrl+Q` quits, asking first if the session has unsaved messages. If a request
+to a slow provider is still in flight, VOX gives it a moment and then leaves
+anyway rather than holding your shell hostage until the server answers.
+
 ## If the first token takes forever
 
 A local model that is not in memory has to be loaded first, and on modest
 hardware that can take minutes. VOX preloads it in the background right after
-connecting, so the wait happens while you type; `keep_alive` in `extra_body`
+connecting — with a spinner naming the model and the endpoint, a time limit,
+and `Ctrl+G` to stop waiting — so the wait happens while you type; `keep_alive` in `extra_body`
 stops the server unloading it between messages; the spinner shows the elapsed
 seconds, and `/stats` separates waiting from generating.
 
@@ -130,7 +137,12 @@ seconds, and `/stats` separates waiting from generating.
 Off by default. `/agent on` lets the model list, read and search files and —
 only after you approve each operation — write files, apply patches and run
 commands. Before a write or a patch you see the unified diff of exactly what
-would change. Everything is confined to the workspace (`/workspace <path>`): `..`,
+would change.
+
+Name the file and say it should be written — *"create hello.py with a main()
+that prints hello, world; write it to disk"* — and pick a model that supports
+tool calling; the smallest ones tend to answer with code instead of using the
+tools. [More in the guide](docs/USAGE.md). Everything is confined to the workspace (`/workspace <path>`): `..`,
 symlinks pointing outside and shell operators are refused, and commands run
 under a timeout.
 

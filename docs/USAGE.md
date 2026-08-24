@@ -235,7 +235,11 @@ ways:
 - **Preloading.** After connecting, and after a model change, it asks the
   server for a single token in the background, so the load happens while you
   are still typing. `/warm` does it on demand; `"generation": {"preload":
-  false}` turns it off.
+  false}` turns it off. While it waits, a spinner names the model *and the
+  endpoint* and counts the seconds, the status bar reads PRELOADING rather
+  than IDLE, and `Ctrl+G` stops waiting. It gives up after
+  `generation.preload_timeout_seconds` (180 by default) and says so, instead
+  of sitting on the ten-minute provider timeout with nothing on screen.
 - **Keeping the model resident.** Anything in a provider's `extra_body` is
   sent with every request, so for Ollama you can stop it unloading between
   messages:
@@ -247,6 +251,20 @@ ways:
 - **Saying so.** The spinner shows the elapsed seconds and, past ten, adds
   that the server may still be loading the model. `/stats` separates the wait
   from the actual generation time.
+
+### Leaving
+
+`Ctrl+Q` asks for confirmation if the session has unsaved messages, then
+cancels whatever is running, closes the connection pool, stops the timers and
+exits.
+
+One case needs more than that. Textual runs its thread workers on a pool whose
+threads are joined when the interpreter exits, so a request the provider never
+answers — a cold model that takes minutes to load, say — would keep the process
+alive long after the screen is gone: the terminal comes back but the shell does
+not. VOX waits a second and a half for such a worker to finish and then leaves
+anyway. Nothing is lost, because configuration, sessions, prompts, roles and
+history are written as they change, not at exit.
 
 ### Copy and paste
 
@@ -288,6 +306,35 @@ selection over it yields the code and nothing else. `Ctrl+Y` copies the last
 block, `/code` lists what is available, `/code <n>` copies that one, and
 `/panel index` / `/panel code` switch the panel between the code and the
 sessions-prompts-roles index.
+
+### Getting the model to create files
+
+Three things have to be true before a model can touch your disk:
+
+1. agent mode is on — `/agent on`;
+2. the workspace is the directory you mean — `/workspace ~/code/project`,
+   shown in the status bar;
+3. the model supports tool calling. Small models often ignore the tools and
+   just print code; VOX says so and disables agent mode for that turn.
+
+Then ask in plain language, but **name the file and say it should be written**.
+Measured against a local Ollama, "fammi un hello world" left the smallest model
+chatting about it, while this phrasing made every model call `write_file`:
+
+> Crea il file hello.py con una funzione main() che stampa 'hello, world'.
+> Scrivilo su disco.
+
+Useful patterns:
+
+- create: *"Create src/config.py with a load_config function that reads
+  config.json. Write it to disk."*
+- modify: *"Read src/main.py, then apply a patch that adds a --verbose flag."*
+  Reading first matters: a patch built on a guess will not apply.
+- several files: ask for them one at a time; you approve each write
+  separately anyway.
+
+Each write, patch or command opens the confirmation dialog with the diff, so
+you decide what actually happens.
 
 ### Reviewing a change before it happens
 

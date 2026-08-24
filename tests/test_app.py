@@ -795,3 +795,72 @@ async def test_an_answer_with_no_code_empties_the_panel(offline_app: VoxApp) -> 
         await pilot.pause()
         assert offline_app.code_blocks == []
         assert "No code" in str(offline_app.query_one("#side-content").render())
+
+
+async def test_the_preload_shows_a_live_spinner_and_names_the_endpoint(
+    offline_app: VoxApp,
+) -> None:
+    from vox_chat.ui.widgets import SPINNER_FRAMES, ThinkingBox
+
+    async with offline_app.run_test(size=(130, 30)) as pilot:
+        await pilot.pause()
+        offline_app.begin_preload("qwen2.5-coder:3b", "http://192.168.1.40:11434/v1")
+        await pilot.pause()
+
+        spinner = str(offline_app.query_one(ThinkingBox).render())
+        assert any(frame in spinner for frame in SPINNER_FRAMES)
+        assert "PRELOADING qwen2.5-coder:3b" in spinner
+        assert "192.168.1.40" in spinner, "the endpoint is named, not just the model"
+
+        status = str(offline_app.query_one("#status").render())
+        assert "PRELOADING" in status
+        assert "IDLE" not in status, "waiting on the server is not idle"
+
+
+async def test_a_finished_preload_reports_how_long_it_took(offline_app: VoxApp) -> None:
+    from vox_chat.ui.widgets import ThinkingBox
+
+    async with offline_app.run_test() as pilot:
+        await pilot.pause()
+        offline_app.begin_preload("m", "http://host/v1")
+        await pilot.pause()
+        offline_app.end_preload("m", 42.5, None)
+        await pilot.pause()
+        assert not offline_app.query(ThinkingBox)
+        assert "MODEL RESIDENT - m ready in 42.5s" in messages(offline_app)[-1].message.content
+        assert "IDLE" in str(offline_app.query_one("#status").render())
+
+
+async def test_a_preload_that_times_out_explains_itself(offline_app: VoxApp) -> None:
+    async with offline_app.run_test() as pilot:
+        await pilot.pause()
+        offline_app.begin_preload("m", "http://host/v1")
+        await pilot.pause()
+        offline_app.end_preload("m", None, "the model did not load within 180s")
+        await pilot.pause()
+        last = messages(offline_app)[-1].message
+        assert last.role == "error"
+        assert "did not load within 180s" in last.content
+        assert "first message" in last.content, "it says what happens next"
+        assert "/settings" in last.content
+
+
+async def test_ctrl_g_stops_waiting_for_a_preload(offline_app: VoxApp) -> None:
+    from vox_chat.ui.widgets import ThinkingBox
+
+    async with offline_app.run_test() as pilot:
+        await pilot.pause()
+        offline_app.begin_preload("m", "http://host/v1")
+        await pilot.pause()
+        await pilot.press("ctrl+g")
+        await pilot.pause()
+
+        assert offline_app._preloading is None
+        assert not offline_app.query(ThinkingBox)
+        assert "STOPPED WAITING FOR m" in messages(offline_app)[-1].message.content
+
+        offline_app.end_preload("m", 9.9, None)
+        await pilot.pause()
+        assert "STOPPED WAITING FOR m" in messages(offline_app)[-1].message.content, (
+            "a late answer does not re-announce a preload nobody is waiting for"
+        )

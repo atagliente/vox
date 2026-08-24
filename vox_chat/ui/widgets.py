@@ -286,8 +286,11 @@ class StatusBar(Static):
         super().__init__(id="status")
 
     def update_state(self, connected: bool, generating: bool, agent: bool,
-                     workspace: str, extra: str = "", spinner: str = "") -> None:
-        text = branding.status_line(connected, generating, agent, workspace, spinner)
+                     workspace: str, extra: str = "", spinner: str = "",
+                     busy: str = "") -> None:
+        text = branding.status_line(
+            connected, generating, agent, workspace, spinner, busy
+        )
         if extra:
             text = f"{text}  ·  {extra}"
         self.update(text)

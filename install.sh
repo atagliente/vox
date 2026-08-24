@@ -154,7 +154,8 @@ install_with_pipx() {
     say "${DIM}installing with pipx...${RESET}"
     pipx install --force "$TARGET" >/dev/null 2>&1 || return 1
     ok "installed with pipx"
-    BIN_DIR="$HOME/.local/bin"
+    pipx_bin=$(pipx environment --value PIPX_BIN_DIR 2>/dev/null)
+    BIN_DIR="${pipx_bin:-$HOME/.local/bin}"
     return 0
 }
 
@@ -203,9 +204,9 @@ else
     PROFILE=$(profile_file)
     say ""
     say "$BIN_DIR is not in your PATH."
-    if ask "Append it to $PROFILE?"; then
+    if ask "Append it to $PROFILE, so vox works from any directory?"; then
         printf '\n# added by VOX install.sh\nexport PATH="%s:$PATH"\n' "$BIN_DIR" >> "$PROFILE"
-        ok "PATH updated in $PROFILE"
+        ok "PATH updated in $PROFILE - open a new shell and just type: vox"
         say "${DIM}open a new shell, or run: export PATH=\"$BIN_DIR:\$PATH\"${RESET}"
     else
         warn "add it manually: export PATH=\"$BIN_DIR:\$PATH\""

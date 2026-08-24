@@ -43,6 +43,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "context_window": 8192,
         "include_usage": True,
         "preload": True,
+        "preload_timeout_seconds": 180,
     },
     "agent": {
         "enabled": False,
@@ -166,6 +167,10 @@ def validate_config(data: Any) -> list[str]:
         for key in ("include_usage", "preload"):
             if not isinstance(generation.get(key, True), bool):
                 errors.append(f"generation.{key} must be a boolean")
+        preload_timeout = generation.get("preload_timeout_seconds", 180)
+        if (not isinstance(preload_timeout, int) or isinstance(preload_timeout, bool)
+                or preload_timeout <= 0):
+            errors.append("generation.preload_timeout_seconds must be a positive integer")
         max_tokens = generation.get("max_tokens", 1800)
         if max_tokens is not None:
             if not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens <= 0:

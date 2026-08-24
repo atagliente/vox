@@ -111,6 +111,8 @@ class VoxApp(App[None]):
         self.usage = UsageTracker()
         self.live_meter: LiveMeter | None = None
         self._usage_timer = None
+        self._shutting_down = False
+        self._preloading: str | None = None
         self._thinking: ThinkingBox | None = None
         self._reasoning_box: MessageBox | None = None
         self._spinner_tick = 0
@@ -248,7 +250,12 @@ class VoxApp(App[None]):
             agent=agent,
             workspace=str(self.workspace_path),
             extra=f"{detail}  {extra}".strip(),
-            spinner=spinner_frame(self._spinner_tick) if self.generating else "",
+            spinner=(
+                spinner_frame(self._spinner_tick)
+                if self.generating or self._preloading
+                else ""
+            ),
+            busy="" if self._preloading is None else f"PRELOADING {self._preloading}",
         )
 
     @work(thread=True, group="connection")
@@ -272,21 +279,71 @@ class VoxApp(App[None]):
 
     @work(thread=True, group="warm")
     def preload_model(self) -> None:
-        """Load the model on the server before the first message needs it."""
+        """Load the model on the server before the first message needs it.
+
+        A cold model can take minutes, so this shows a live spinner and gives
+        up after ``generation.preload_timeout_seconds`` rather than sitting on
+        the provider timeout with nothing on screen.
+        """
         if self.client is None:
             return
         model = str(self.config.get("active_model", ""))
         if not model:
             return
-        self.call_from_thread(self.write_system, f"PRELOADING {model}…")
+        generation = self.config.get("generation", {})
+        timeout = float(generation.get("preload_timeout_seconds", 180))
+        self.call_from_thread(self.begin_preload, model, self.client.base_url)
         try:
-            elapsed = self.client.warm(model)
+            elapsed = self.client.warm(model, timeout=timeout)
         except LLMError as exc:
-            self.call_from_thread(self.write_error, f"PRELOAD FAILED - {exc.message}")
+            self.call_from_thread(self.end_preload, model, None, exc.message)
             return
-        self.call_from_thread(
-            self.write_system, f"MODEL RESIDENT - {model} ready in {elapsed:.1f}s"
+        self.call_from_thread(self.end_preload, model, elapsed, None)
+
+    def begin_preload(self, model: str, endpoint: str = "") -> None:
+        self._preloading = model
+        # Naming the endpoint makes a config pointing at the wrong server
+        # obvious, instead of looking like the model is slow.
+        self.show_thinking(f"PRELOADING {model} ON {endpoint}" if endpoint
+                           else f"PRELOADING {model}")
+        if self._usage_timer is None:
+            self._usage_timer = self.set_interval(0.1, self._tick_status)
+        self.refresh_status()
+
+    def end_preload(self, model: str, elapsed: float | None,
+                    error: str | None) -> None:
+        if self._preloading is None:
+            return  # the operator stopped waiting for it
+        self._preloading = None
+        self.clear_thinking()
+        if not self.generating:
+            self._stop_status_timer()
+        if error is not None:
+            endpoint = self.client.base_url if self.client is not None else "?"
+            self.write_error(
+                f"PRELOAD FAILED - {error} ({model} on {endpoint}). "
+                "The model will load on your first message instead; check "
+                "/settings if that endpoint is not the one you meant."
+            )
+        else:
+            self.write_system(
+                f"MODEL RESIDENT - {model} ready in {elapsed:.1f}s"
+            )
+        self.refresh_status()
+
+    def cancel_preload(self) -> bool:
+        """Stop waiting on a preload. The request itself cannot be recalled."""
+        if self._preloading is None:
+            return False
+        model, self._preloading = self._preloading, None
+        self.clear_thinking()
+        if not self.generating:
+            self._stop_status_timer()
+        self.write_system(
+            f"STOPPED WAITING FOR {model} - it may still be loading on the server"
         )
+        self.refresh_status()
+        return True
 
     def cmd_warm(self, argument: str) -> None:
         self.preload_model()
@@ -473,6 +530,8 @@ class VoxApp(App[None]):
             ):
                 self.call_from_thread(self.handle_agent_event, event)
         except LLMError as exc:
+            if self._shutting_down:
+                return
             log.warning("generation failed: %s", exc.kind)
             self.call_from_thread(self.finish_generation, f"{exc.message}")
         else:
@@ -638,9 +697,11 @@ class VoxApp(App[None]):
             self._usage_timer = None
 
     def on_unmount(self) -> None:
-        self._stop_status_timer()
+        self.shutdown()
 
     def action_stop(self) -> None:
+        if self.cancel_preload():
+            return
         if not self.generating or self.cancel_event.is_set():
             return
         self.cancel_event.set()
@@ -1183,7 +1244,17 @@ class VoxApp(App[None]):
             self.cancel_event.set()
         if self.dirty and not await self._confirm_discard("QUIT ANYWAY?"):
             return
+        self.shutdown()
         self.exit()
+
+    def shutdown(self) -> None:
+        """Stop everything we own before the screen goes away."""
+        self._shutting_down = True
+        self._preloading = None
+        self.cancel_event.set()
+        self._stop_status_timer()
+        if self.client is not None:
+            self.client.close()
 
 
     # Modal flows must run inside a worker: push_screen_wait suspends until the
@@ -1218,7 +1289,10 @@ class VoxApp(App[None]):
         await self._flow_quit()
 
 
-def run(workspace: Path | None = None, show_splash: bool = True) -> None:
-    """Entry point used by ``__main__``."""
+def run(workspace: Path | None = None, show_splash: bool = True) -> int:
+    """Convenience entry point; ``__main__`` drives the real one."""
+    from .__main__ import leave
+
     target = Path(workspace or Path.cwd())
     VoxApp(loaded=load_config(target), workspace=target, show_splash=show_splash).run()
+    return leave(0)

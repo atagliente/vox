@@ -3,11 +3,47 @@
 from __future__ import annotations
 
 import argparse
+import logging
+import os
 import sys
+import threading
+import time
 from pathlib import Path
 
 from . import __version__
 from .config import ConfigError, load_config, save_global_config
+
+SHUTDOWN_GRACE_SECONDS = 1.5
+
+
+def _stuck_threads() -> list[threading.Thread]:
+    """Non-daemon threads that would hold the interpreter open."""
+    return [
+        thread
+        for thread in threading.enumerate()
+        if thread is not threading.main_thread() and not thread.daemon and thread.is_alive()
+    ]
+
+
+def leave(code: int = 0, grace_seconds: float = SHUTDOWN_GRACE_SECONDS) -> int:
+    """Return once the screen is gone, forcing the point if a worker is stuck.
+
+    Textual runs thread workers on a pool whose threads are joined when the
+    interpreter exits, so one blocked on a provider that never answers keeps
+    the process alive long after the TUI has torn down — the terminal comes
+    back but the shell does not. Everything of ours is already on disk by
+    then (configuration, sessions and history are written as they change), so
+    after a short grace period it is better to leave than to hang.
+    """
+    deadline = time.monotonic() + grace_seconds
+    while _stuck_threads() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    if not _stuck_threads():
+        return code
+    logging.shutdown()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -94,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         loaded=loaded, workspace=workspace, show_splash=not args.no_splash
     )
     app.run()
-    return 0
+    return leave(0)
 
 
 if __name__ == "__main__":

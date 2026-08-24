@@ -89,10 +89,19 @@ def splash(model: str, role: str, workspace: str = "") -> str:
 
 
 def status_line(connected: bool, generating: bool, agent: bool,
-                workspace: str, spinner: str = "") -> str:
-    """The bottom status bar text, in terminal-report style."""
+                workspace: str, spinner: str = "", busy: str = "") -> str:
+    """The bottom status bar text, in terminal-report style.
+
+    ``busy`` names work that is not a generation, such as a preload, so the
+    bar never reads IDLE while the app is waiting on the server.
+    """
     link = "ONLINE" if connected else "OFFLINE"
-    state = f"{spinner} GENERATING".strip() if generating else "IDLE"
+    if generating:
+        state = f"{spinner} GENERATING".strip()
+    elif busy:
+        state = f"{spinner} {busy}".strip()
+    else:
+        state = "IDLE"
     mode = "AGENT" if agent else "CHAT"
     return _SEPARATOR.join([f"LINK {link}", state, f"MODE {mode}", f"WS {workspace}"])
 

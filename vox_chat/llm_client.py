@@ -230,7 +230,7 @@ class LLMClient:
             extra_body=provider.get("extra_body") or {},
         )
 
-    def warm(self, model: str) -> float:
+    def warm(self, model: str, timeout: float | None = None) -> float:
         """Ask for a single token so the server loads the model now.
 
         Returns how long it took. Cold local models can take minutes; doing
@@ -238,8 +238,11 @@ class LLMClient:
         than after pressing enter.
         """
         started = time.monotonic()
+        client = self._client.with_options(max_retries=0)
+        if timeout is not None:
+            client = client.with_options(timeout=timeout)
         try:
-            self._client.with_options(max_retries=0).chat.completions.create(
+            client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": "ok"}],
                 max_tokens=1,
@@ -247,7 +250,12 @@ class LLMClient:
                 extra_body=self.extra_body or None,
             )
         except openai.APITimeoutError as exc:
-            raise LLMError("timeout", "preload timed out", str(exc)) from exc
+            waited = time.monotonic() - started
+            raise LLMError(
+                "timeout",
+                f"the model did not load within {waited:.0f}s",
+                str(exc),
+            ) from exc
         except openai.APIConnectionError as exc:
             raise LLMError(
                 "connection", f"cannot reach provider: {self.base_url}", str(exc)
@@ -259,6 +267,15 @@ class LLMClient:
         except openai.OpenAIError as exc:
             raise LLMError("protocol", f"preload failed: {exc}", str(exc)) from exc
         return time.monotonic() - started
+
+    def close(self) -> None:
+        """Release the connection pool. Safe to call more than once."""
+        try:
+            self._client.close()
+        except (OSError, RuntimeError):
+            # Shutting down is best effort: a pool that is already gone, or a
+            # socket the peer closed first, is not a problem worth reporting.
+            pass
 
     def list_models(self, timeout: float | None = None) -> list[str]:
         """Non-destructive reachability check against ``/v1/models``."""
