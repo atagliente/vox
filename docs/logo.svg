@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 240" width="640" height="240"
+     role="img" aria-label="VOX — terminal for local models">
+  <title>VOX</title>
+
+  <!-- Mission-control palette, the same one the terminal theme uses. -->
+  <rect x="1" y="1" width="638" height="238" rx="10"
+        fill="#16150f" stroke="#45402f" stroke-width="2"/>
+
+  <!-- The thin frame the app draws around its header. -->
+  <rect x="28" y="28" width="584" height="184" rx="4"
+        fill="none" stroke="#2b2820" stroke-width="2"/>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace"
+     text-anchor="middle">
+    <!-- Wordmark, with the cursor as the only amber element -->
+    <text x="296" y="134" font-size="96" font-weight="700"
+          letter-spacing="18" fill="#cfc7b0">VOX</text>
+    <rect x="404" y="62" width="26" height="80" fill="#c9a15a"/>
+
+    <!-- Subtitle -->
+    <text x="320" y="182" font-size="19" letter-spacing="5.5" fill="#8b8266">
+      TERMINAL FOR LOCAL MODELS
+    </text>
+  </g>
+</svg>

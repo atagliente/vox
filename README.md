@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.png" alt="VOX" width="380">
+</p>
+
 # VOX
 
 A terminal chat client for coding, for any OpenAI-compatible endpoint: Ollama,
