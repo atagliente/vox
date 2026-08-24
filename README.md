@@ -4,12 +4,7 @@ A terminal chat client for coding, for any OpenAI-compatible endpoint: Ollama,
 llama.cpp server, vLLM, LM Studio, a remote gateway. Linux, macOS, Windows,
 Termux.
 
-```text
-┌────────────────────────────────────────────────────────────────────────────┐
-│ VOX 0.1.0  ·  LINK ONLINE  http://localhost:11434/v1                       │
-│ PROVIDER local-ollama  ·  MODEL qwen2.5-coder:3b  ·  ROLE python-developer │
-└────────────────────────────────────────────────────────────────────────────┘
-```
+![VOX: the conversation on the left, the answer's code blocks on the right ready to copy, token usage and the key legend along the bottom](docs/screenshot.png)
 
 ## Requirements
 
