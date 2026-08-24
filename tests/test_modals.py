@@ -81,50 +81,47 @@ async def test_the_legend_names_every_key(app: VoxApp) -> None:
         assert "ctrl+c" not in hint, "ctrl+c must not authorise a deletion"
 
 
-async def test_the_quit_legend_mentions_ctrl_c(app: VoxApp) -> None:
+async def test_the_quit_legend_names_its_own_keys(app: VoxApp) -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
-        app.push_screen(
-            ConfirmModal("UNSAVED CHANGES", "quit?", "DISCARD", "CANCEL",
-                         ctrl_c_confirms=True)
-        )
+        app.push_screen(ConfirmModal("UNSAVED CHANGES", "quit?", "DISCARD", "CANCEL"))
         await pilot.pause()
         hint = str(app.screen.query_one("#modal-hint").render())
-        assert "ctrl+c discard" in hint
+        assert "y discard" in hint
         assert "esc cancel" in hint
+        assert "ctrl+c" not in hint, "ctrl+c is copy now, not confirm"
 
 
-async def test_ctrl_c_confirms_a_quit_dialog(app: VoxApp) -> None:
+async def test_ctrl_q_opens_the_quit_dialog_and_y_confirms(app: VoxApp) -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
         app.dirty = True
-        await pilot.press("ctrl+c")
+        await pilot.press("ctrl+q")
         await pilot.pause()
         await pilot.pause()
-        assert isinstance(app.screen, ConfirmModal), "the quit dialog is up"
+        assert isinstance(app.screen, ConfirmModal)
         assert app._exit is False
 
-        await pilot.press("ctrl+c")
+        await pilot.press("y")
         await pilot.pause()
         await pilot.pause()
-        assert app._exit is True, "pressing it again confirms the quit"
+        assert app._exit is True
 
 
-async def test_ctrl_c_never_authorises_a_write(app: VoxApp) -> None:
+async def test_ctrl_c_inside_a_dialog_decides_nothing(app: VoxApp) -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
         result: list[bool] = []
-        app.push_screen(
-            ConfirmModal("AUTHORIZE WRITE_FILE?", "a.txt"), result.append
-        )
+        app.push_screen(ConfirmModal("AUTHORIZE WRITE?", "a.txt"), result.append)
         await pilot.pause()
         await pilot.press("ctrl+c")
         await pilot.pause()
-        assert result == [False]
+        assert result == [], "the dialog still waits for a real answer"
+        assert isinstance(app.screen, ConfirmModal)
         assert app._exit is False
 
 
-async def test_ctrl_c_closes_a_picker_without_quitting(app: VoxApp) -> None:
+async def test_escape_closes_a_picker(app: VoxApp) -> None:
     from vox_chat.ui.modals import PickerModal
 
     async with app.run_test() as pilot:
@@ -133,7 +130,7 @@ async def test_ctrl_c_closes_a_picker_without_quitting(app: VoxApp) -> None:
         await pilot.pause()
         await pilot.pause()
         assert isinstance(app.screen, PickerModal)
-        await pilot.press("ctrl+c")
+        await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, PickerModal)
         assert app._exit is False

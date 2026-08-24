@@ -89,11 +89,10 @@ server has **no authentication** — only do this on a network you trust.
 | --- | --- | --- | --- |
 | `Enter` | send | `Ctrl+P` | prompts |
 | `Alt+Enter` / `Ctrl+J` | new line | `Ctrl+R` | roles |
-| `↑` / `↓` | input history | `Ctrl+,` | settings |
-| `Ctrl+N` / `Ctrl+S` | new / save session | `Ctrl+G` | stop generating |
-| `Ctrl+Shift+C` / `Ctrl+Shift+V` | copy / paste | `Ctrl+C` | copy, else stop, else quit |
-| `Ctrl+V` | paste | `Ctrl+Y` | copy last code block |
-| `Ctrl+B` | side panel | `Ctrl+Q` | quit |
+| `Ctrl+C` / `Ctrl+V` | copy / paste | `Ctrl+S` | settings |
+| `Ctrl+Y` | copy last code block | `Ctrl+G` | stop generating |
+| `↑` / `↓` | input history | `Ctrl+B` | side panel |
+| `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+Q` | quit |
 
 The bottom row shows this legend at all times.
 

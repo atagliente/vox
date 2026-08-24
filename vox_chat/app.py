@@ -67,17 +67,19 @@ class VoxApp(App[None]):
     BINDINGS = [
         Binding("ctrl+enter", "send", "Send", priority=True),
         Binding("ctrl+n", "new_session", "New", priority=True),
-        Binding("ctrl+s", "save_session", "Save", priority=True),
+        Binding("ctrl+s", "open_settings", "Settings", priority=True),
+        Binding("ctrl+w", "save_session", "Save session", priority=True),
         Binding("ctrl+p", "open_prompts", "Prompts", priority=True),
         Binding("ctrl+r", "open_roles", "Roles", priority=True),
-        Binding("ctrl+comma", "open_settings", "Settings", priority=True),
+        Binding("ctrl+comma", "open_settings", "Settings", show=False, priority=True),
         Binding("ctrl+g", "stop", "Stop", priority=True),
         Binding("ctrl+b", "toggle_panel", "Panel", priority=True),
         Binding("ctrl+y", "copy_code", "Copy code", priority=True),
         Binding("ctrl+q", "request_quit", "Quit", priority=True),
-        Binding("ctrl+c", "interrupt", "Copy / stop / quit", priority=True),
-        Binding("ctrl+shift+c", "copy_selection", "Copy", priority=True),
-        Binding("ctrl+shift+v", "paste_clipboard", "Paste", priority=True),
+        Binding("ctrl+c", "copy_selection", "Copy", priority=True),
+        Binding("ctrl+v", "paste_clipboard", "Paste", priority=True),
+        Binding("ctrl+shift+c", "copy_selection", "Copy", show=False, priority=True),
+        Binding("ctrl+shift+v", "paste_clipboard", "Paste", show=False, priority=True),
     ]
 
     def __init__(
@@ -305,11 +307,26 @@ class VoxApp(App[None]):
         event.stop()
         self.action_paste_clipboard()
 
+    def focused_text_widget(self) -> Any:
+        """The widget a copy or paste should act on, modal screens included."""
+        focused = self.focused
+        if hasattr(focused, "selected_text") or hasattr(focused, "insert"):
+            return focused
+        try:
+            return self.input_area
+        except NoMatches:
+            return None
+
     def action_copy_selection(self) -> None:
-        """Copy the input selection, or the latest answer when there is none."""
-        area = self.input_area
-        text = area.selected_text
+        """Copy the selection, or the latest answer when there is none."""
+        widget = self.focused_text_widget()
+        text = getattr(widget, "selected_text", "") or ""
         source = "selection"
+        on_main_screen = self.screen is self.screen_stack[0]
+        if not text and not on_main_screen:
+            # Inside a modal there is no transcript to fall back on; stay quiet
+            # rather than writing an error behind the dialog.
+            return
         if not text:
             answer = next(
                 (
@@ -327,6 +344,15 @@ class VoxApp(App[None]):
 
     def action_paste_clipboard(self) -> None:
         self.paste_from_system()
+
+    def insert_into_focused(self, text: str) -> None:
+        """Insert pasted text where the cursor actually is."""
+        widget = self.focused_text_widget()
+        inserter = getattr(widget, "insert", None)
+        if callable(inserter):
+            inserter(text)
+            return
+        self.write_error("NOWHERE TO PASTE")
 
     @work(thread=True, group="clipboard")
     def copy_to_system(self, text: str, source: str) -> None:
@@ -349,7 +375,7 @@ class VoxApp(App[None]):
         if not text:
             self.call_from_thread(self.write_system, "CLIPBOARD IS EMPTY")
             return
-        self.call_from_thread(self.input_area.insert, text)
+        self.call_from_thread(self.insert_into_focused, text)
 
     def on_prompt_area_recall(self, event: PromptArea.Recall) -> None:
         """Up and down at the edges of the input walk the history."""
@@ -1139,36 +1165,9 @@ class VoxApp(App[None]):
                     f"{question}\nThe current session has unsaved messages.",
                     authorize_label="DISCARD",
                     deny_label="CANCEL",
-                    ctrl_c_confirms=True,
                 )
             )
         )
-
-    async def _flow_interrupt(self) -> None:
-        """Ctrl+C: copy a selection, else stop generating, else quit.
-
-        Textual leaves ctrl+c to the focused widget, where the input box
-        claims it for copy; this priority binding gives the key its usual
-        terminal meaning back without losing copy.
-        """
-        screen = self.screen
-        if isinstance(screen, ConfirmModal):
-            # On the quit dialog a second ctrl+c means "yes"; on an authorise
-            # dialog it means "no" — it must never approve a write.
-            screen.dismiss(screen.ctrl_c_confirms)
-            return
-        if screen is not self.screen_stack[0]:
-            screen.dismiss(None)
-            return
-        area = self.input_area
-        if self.focused is area and area.selected_text:
-            area.action_copy()
-            self.copy_to_system(area.selected_text, "selection")
-            return
-        if self.generating:
-            self.action_stop()
-            return
-        await self._flow_quit()
 
     async def _flow_quit(self) -> None:
         if self.generating:
@@ -1209,9 +1208,6 @@ class VoxApp(App[None]):
     async def action_request_quit(self) -> None:
         await self._flow_quit()
 
-    @work
-    async def action_interrupt(self) -> None:
-        await self._flow_interrupt()
 
 def run(workspace: Path | None = None, show_splash: bool = True) -> None:
     """Entry point used by ``__main__``."""

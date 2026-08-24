@@ -120,12 +120,12 @@ python -m vox_chat         # same app, from a checkout
 
 | Key | Action | Key | Action |
 | --- | --- | --- | --- |
-| `Enter` | send | `Ctrl+R` | roles |
-| `Alt+Enter` / `Ctrl+J` | new line | `Ctrl+,` | settings |
-| `↑` / `↓` | walk the input history | `Ctrl+G` | stop generation |
-| `Ctrl+N` | new session | `Ctrl+B` | side panel |
-| `Ctrl+S` | save session | `Ctrl+C` | copy selection, else stop, else quit |
-| `Ctrl+P` | prompts | `Ctrl+Q` | quit |
+| `Enter` | send | `Ctrl+P` | prompts |
+| `Alt+Enter` / `Ctrl+J` | new line | `Ctrl+R` | roles |
+| `Ctrl+C` / `Ctrl+V` | copy / paste | `Ctrl+S` | settings |
+| `Ctrl+Y` | copy last code block | `Ctrl+G` | stop generating |
+| `↑` / `↓` | input history | `Ctrl+B` | side panel |
+| `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+Q` | quit |
 
 `Enter` sends because `Ctrl+Enter` is not delivered by most terminals; it stays
 bound for the ones that do. The arrows only reach the history at the first and
@@ -250,9 +250,12 @@ ways:
 
 ### Copy and paste
 
-`Ctrl+Shift+V` and `Ctrl+V` paste the **system** clipboard into the input;
-`Ctrl+Shift+C` copies the input selection, or, with nothing selected, the last
-answer. `Ctrl+C` still copies a selection as before.
+`Ctrl+C` copies and `Ctrl+V` pastes, against the **system** clipboard, exactly
+as everywhere else. With nothing selected, `Ctrl+C` copies the last answer.
+`Ctrl+Shift+C` and `Ctrl+Shift+V` do the same, for terminals that reserve the
+plain combinations. Both follow the focus, so they work inside the settings
+modal too. Quitting is `Ctrl+Q`, stopping a generation is `Ctrl+G`, settings are `Ctrl+S`
+(`Ctrl+,` still works) and a session is saved with `Ctrl+W`.
 
 VOX talks to the real clipboard through whatever helper the platform provides
 — PowerShell `Set-Clipboard` / `Get-Clipboard` on Windows, `pbcopy` / `pbpaste`
@@ -290,9 +293,8 @@ side is focused first, so a stray `Enter` can never approve anything. `←`/`→
 approves, `Esc` cancels, and a legend under the buttons spells all of that out
 for the dialog you are actually looking at.
 
-`Ctrl+C` is forwarded to whatever is open: on the unsaved-changes dialog a
-second `Ctrl+C` confirms the quit, on an authorise dialog it cancels — it never
-approves a write — and on a picker it just closes it.
+`Esc` cancels any dialog or picker. `Ctrl+C` decides nothing there: it is the
+copy key, so a dialog keeps waiting for a real answer.
 
 ### Coding-agent mode
 

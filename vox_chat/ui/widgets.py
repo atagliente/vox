@@ -240,19 +240,20 @@ class KeyBar(Static):
     """
 
     KEYS: tuple[tuple[str, str], ...] = (
+        # Most useful first: the tail is what a narrow terminal loses.
         ("enter", "send"),
-        ("alt+enter", "new line"),
-        ("^C", "quit"),
+        ("^C/^V", "copy/paste"),
+        ("^Q", "quit"),
         ("^G", "stop"),
+        ("^Y", "copy code"),
+        ("alt+enter", "new line"),
         ("^N", "new"),
-        ("^S", "save"),
+        ("^S", "settings"),
+        ("^W", "save"),
         ("^P", "prompts"),
         ("^R", "roles"),
-        ("^,", "settings"),
         ("^B", "panel"),
-        ("^Y", "copy code"),
         ("↑↓", "history"),
-        ("^⇧C/V", "copy/paste"),
     )
 
     def __init__(self) -> None:

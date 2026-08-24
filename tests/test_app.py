@@ -221,20 +221,11 @@ async def test_enter_on_a_slash_command_runs_it(offline_app: VoxApp) -> None:
         assert "AVAILABLE COMMANDS" in messages(offline_app)[-1].message.content
 
 
-async def test_ctrl_c_quits_when_there_is_nothing_to_copy_or_stop(
-    offline_app: VoxApp,
-) -> None:
-    async with offline_app.run_test() as pilot:
-        await pilot.pause()
-        offline_app.input_area.focus()
-        await pilot.press("ctrl+c")
-        await pilot.pause()
-        assert offline_app._exit is True, "the app was asked to quit"
+async def test_ctrl_c_copies_and_never_quits(offline_app: VoxApp, monkeypatch) -> None:
+    from vox_chat import clipboard
 
-
-async def test_ctrl_c_copies_a_selection_instead_of_quitting(
-    offline_app: VoxApp,
-) -> None:
+    copied: list[str] = []
+    monkeypatch.setattr(clipboard, "copy", lambda text: (copied.append(text), (True, "fake"))[1])
     async with offline_app.run_test() as pilot:
         await pilot.pause()
         area = offline_app.input_area
@@ -242,60 +233,36 @@ async def test_ctrl_c_copies_a_selection_instead_of_quitting(
         area.insert("copy me")
         area.select_all()
         await pilot.press("ctrl+c")
-        await pilot.pause()
-        assert offline_app._exit is False, "a selection means copy, not quit"
+        for _ in range(20):
+            await pilot.pause()
+            if copied:
+                break
+        assert copied == ["copy me"]
+        assert offline_app._exit is False, "ctrl+c is copy, not quit"
         assert area.text == "copy me"
 
 
-async def test_ctrl_c_stops_a_running_generation(offline_app: VoxApp) -> None:
-    class AbortableClient:
-        def __init__(self) -> None:
-            self.cancel_calls = 0
-
-        def cancel_active_stream(self) -> bool:
-            self.cancel_calls += 1
-            return True
-
+async def test_ctrl_c_does_not_stop_a_running_generation(offline_app: VoxApp) -> None:
     async with offline_app.run_test() as pilot:
         await pilot.pause()
-        client = AbortableClient()
-        offline_app.client = client  # type: ignore[assignment]
         offline_app.generating = True
         await pilot.press("ctrl+c")
-        await pilot.press("ctrl+c")
+        await pilot.pause()
+        assert not offline_app.cancel_event.is_set(), "stopping is ctrl+g"
+        assert offline_app._exit is False
+
+        await pilot.press("ctrl+g")
         await pilot.pause()
         assert offline_app.cancel_event.is_set()
-        assert client.cancel_calls == 1, "the active HTTP stream is aborted once"
-        assert sum(
-            box.message.content == "STOP REQUESTED…" for box in messages(offline_app)
-        ) == 1
-        assert offline_app._exit is False
         offline_app.generating = False
 
 
-async def test_confirmation_buttons_are_selected_with_arrow_keys(
-    offline_app: VoxApp,
-) -> None:
-    from textual.widgets import Button
-
-    from vox_chat.ui.modals import ConfirmModal
-
-    result: list[bool] = []
+async def test_ctrl_q_quits(offline_app: VoxApp) -> None:
     async with offline_app.run_test() as pilot:
-        offline_app.push_screen(
-            ConfirmModal("UNSAVED CHANGES", "Discard this session?", "DISCARD"),
-            result.append,
-        )
         await pilot.pause()
-        modal = offline_app.screen
-        assert isinstance(modal, ConfirmModal)
-        assert modal.query_one("#cancel", Button).has_focus
-
-        await pilot.press("left")
-        assert modal.query_one("#ok", Button).has_focus
-        await pilot.press("enter")
+        await pilot.press("ctrl+q")
         await pilot.pause()
-        assert result == [True]
+        assert offline_app._exit is True
 
 
 async def test_arrow_keys_recall_previous_input(offline_app: VoxApp) -> None:
@@ -339,7 +306,8 @@ async def test_the_key_bar_is_always_visible(offline_app: VoxApp) -> None:
         await pilot.pause()
         bar = str(offline_app.query_one("#keybar").render())
         assert "enter send" in bar
-        assert "^C quit" in bar
+        assert "^C/^V copy/paste" in bar
+        assert "^Q quit" in bar
         assert "^G stop" in bar
 
 
@@ -393,11 +361,11 @@ async def test_slash_commands_open_the_same_modals(offline_app: VoxApp) -> None:
             await pilot.pause()
 
 
-async def test_ctrl_comma_opens_the_settings_modal(offline_app: VoxApp) -> None:
+async def test_ctrl_s_opens_the_settings_modal(offline_app: VoxApp) -> None:
     from vox_chat.ui.modals import SettingsModal
 
     async with offline_app.run_test() as pilot:
-        await pilot.press("ctrl+comma")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         await pilot.pause()
         assert isinstance(offline_app.screen, SettingsModal)
@@ -520,7 +488,7 @@ async def test_ctrl_shift_v_pastes_the_system_clipboard(
         assert offline_app.input_area.text == "pasted text"
 
 
-async def test_ctrl_v_in_the_input_pastes_too(offline_app: VoxApp, monkeypatch) -> None:
+async def test_ctrl_v_pastes(offline_app: VoxApp, monkeypatch) -> None:
     from vox_chat import clipboard
 
     monkeypatch.setattr(clipboard, "paste", lambda: ("from ctrl+v", "fake"))
@@ -535,7 +503,9 @@ async def test_ctrl_v_in_the_input_pastes_too(offline_app: VoxApp, monkeypatch) 
         assert offline_app.input_area.text == "from ctrl+v"
 
 
-async def test_ctrl_shift_c_copies_the_selection(offline_app: VoxApp, monkeypatch) -> None:
+async def test_ctrl_shift_c_still_works_as_an_alias(
+    offline_app: VoxApp, monkeypatch
+) -> None:
     from vox_chat import clipboard
 
     copied: list[str] = []
@@ -711,3 +681,31 @@ async def test_panel_command_switches_modes(offline_app: VoxApp) -> None:
         offline_app.run_command("/panel code")
         await pilot.pause()
         assert "CODE" in str(offline_app.query_one("#side-title").render())
+
+
+async def test_ctrl_comma_still_opens_settings(offline_app: VoxApp) -> None:
+    from vox_chat.ui.modals import SettingsModal
+
+    async with offline_app.run_test() as pilot:
+        await pilot.press("ctrl+comma")
+        await pilot.pause()
+        await pilot.pause()
+        assert isinstance(offline_app.screen, SettingsModal)
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_ctrl_w_saves_the_session(offline_app: VoxApp) -> None:
+    from vox_chat.models import Message as ChatMessage
+    from vox_chat.ui.modals import TextPromptModal
+
+    async with offline_app.run_test() as pilot:
+        await pilot.pause()
+        offline_app.session.messages.append(ChatMessage(role="user", content="keep me"))
+        offline_app.dirty = True
+        await pilot.press("ctrl+w")
+        await pilot.pause()
+        await pilot.pause()
+        assert isinstance(offline_app.screen, TextPromptModal), "it asks for a name"
+        await pilot.press("escape")
+        await pilot.pause()

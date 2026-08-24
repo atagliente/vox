@@ -96,18 +96,18 @@ Minimum shortcuts:
 - `Alt+Enter`, `Ctrl+J`, `Shift+Enter` — insert a new line
 - `↑` / `↓` — walk the input history, at the first and last line of the input
 - `Ctrl+N` — new session
-- `Ctrl+S` — save the session
+- `Ctrl+W` — save the session
 - `Ctrl+P` — saved prompts
 - `Ctrl+R` — role picker
-- `Ctrl+,` — settings
+- `Ctrl+S` — settings (`Ctrl+,` is kept as an alias)
 - `Ctrl+G` — stop the current generation
 - `Ctrl+B` — toggle the side panel
 - `Ctrl+Y` — copy the last code block of the answer
-- `Ctrl+Shift+C` — copy the selection, or the last answer
-- `Ctrl+Shift+V`, `Ctrl+V` — paste the system clipboard into the input
-- `Ctrl+C` — inside a dialog: confirms a quit, cancels anything else; outside:
-  copy the selection, else stop the generation, else quit
-- `Ctrl+Q` — quit, asking for confirmation when there are unsaved changes
+- `Ctrl+C`, `Ctrl+Shift+C` — copy the selection, or the last answer
+- `Ctrl+V`, `Ctrl+Shift+V` — paste the system clipboard
+- `Ctrl+Y` — copy the last code block of the answer
+- `Ctrl+Q` — quit, asking for confirmation when there are unsaved changes; it
+  is the only key that quits
 
 A key legend occupies the bottom row at all times, dropping entries from the
 right when the terminal is too narrow. Submitted lines, messages and slash

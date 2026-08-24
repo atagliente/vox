@@ -38,15 +38,12 @@ class ConfirmModal(ModalScreen[bool]):
     ]
 
     def __init__(self, title: str, body: str, authorize_label: str = "AUTHORIZE",
-                 deny_label: str = "DENY", ctrl_c_confirms: bool = False) -> None:
+                 deny_label: str = "DENY") -> None:
         super().__init__()
         self.title_text = title
         self.body_text = body
         self.authorize_label = authorize_label
         self.deny_label = deny_label
-        # Ctrl+C is claimed by the app, which forwards it here; on a quit
-        # dialog pressing it again means "yes, quit", never "yes, write".
-        self.ctrl_c_confirms = ctrl_c_confirms
 
     def hint(self) -> str:
         """The legend under the buttons, built from the real bindings."""
@@ -56,8 +53,6 @@ class ConfirmModal(ModalScreen[bool]):
             f"y {self.authorize_label.lower()}",
             f"esc {self.deny_label.lower()}",
         ]
-        if self.ctrl_c_confirms:
-            parts.insert(3, f"ctrl+c {self.authorize_label.lower()}")
         return "   ·   ".join(parts)
 
     def compose(self) -> ComposeResult:
