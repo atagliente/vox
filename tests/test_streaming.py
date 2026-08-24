@@ -333,3 +333,30 @@ def test_parse_arguments_and_confirmation_rules() -> None:
     assert needs_confirmation("run_command", AGENT_CONFIG)
     assert not needs_confirmation("read_file", AGENT_CONFIG)
     assert not needs_confirmation("write_file", dict(AGENT_CONFIG, confirm_writes=False))
+
+
+def test_a_preview_that_refuses_the_path_denies_the_call(workspace: Path) -> None:
+    """describe_call reads the workspace, so it can refuse before the tool does."""
+    client = FakeClient(
+        [
+            [
+                FakeChunk(
+                    tool_calls=[
+                        FakeToolCall(
+                            0, "c1",
+                            FakeFunction(
+                                "write_file",
+                                '{"path": "../escape.txt", "content": "x"}',
+                            ),
+                        )
+                    ]
+                ),
+                FakeChunk(finish_reason="tool_calls"),
+            ],
+            text_chunks("understood"),
+        ]
+    )
+    events = turn(client, Workspace(workspace), lambda name, body: True)
+    denied = [e for e in events if e.type in ("tool_result", "tool_denied")]
+    assert "escapes the workspace" in denied[0].text
+    assert not (workspace.parent / "escape.txt").exists()

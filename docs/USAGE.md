@@ -289,6 +289,20 @@ block, `/code` lists what is available, `/code <n>` copies that one, and
 `/panel index` / `/panel code` switch the panel between the code and the
 sessions-prompts-roles index.
 
+### Reviewing a change before it happens
+
+A write or a patch is never authorised blind: the dialog shows the unified
+diff of what would change, context lines included, removals in terracotta and
+additions in sage. A new file is announced as such and shown in full; a
+rewrite that would change nothing says so; a file that is not UTF-8 text is
+reported rather than diffed; a very long diff is clipped with a count of what
+was left out.
+
+The patch preview is produced by applying the diff in memory, so a patch that
+does not fit the current file is reported before you are asked to approve it,
+and nothing is written until you do. Building the preview reads the workspace,
+so it refuses a path that escapes it exactly as the tool would.
+
 ### Confirmation dialogs
 
 Writes, patches, commands and deletions open a two-button dialog. The cancel

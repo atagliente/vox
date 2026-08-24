@@ -5,11 +5,35 @@ from __future__ import annotations
 import json
 from typing import Any, Iterable, NamedTuple
 
+from rich.text import Text
+
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, ListItem, ListView, Static, TextArea
+
+
+_DIFF_STYLES = (
+    ("+++ ", "bold"),
+    ("--- ", "bold"),
+    ("@@", "#c9a15a"),
+    ("+", "#8da287"),
+    ("-", "#c47a5d"),
+)
+
+
+def diff_text(body: str) -> Text:
+    """Colour a confirmation body, tinting diff lines by their prefix."""
+    rendered = Text()
+    for index, line in enumerate(body.splitlines()):
+        if index:
+            rendered.append("\n")
+        style = next(
+            (style for prefix, style in _DIFF_STYLES if line.startswith(prefix)), ""
+        )
+        rendered.append(line, style=style)
+    return rendered
 
 
 class PickerItem(NamedTuple):
@@ -59,7 +83,7 @@ class ConfirmModal(ModalScreen[bool]):
         with Vertical(id="modal-box"):
             yield Label(self.title_text, id="modal-title")
             with VerticalScroll():
-                yield Static(self.body_text)
+                yield Static(diff_text(self.body_text))
             with Horizontal(id="modal-buttons"):
                 yield Button(self.authorize_label, id="ok", variant="success")
                 yield Button(self.deny_label, id="cancel", variant="error")

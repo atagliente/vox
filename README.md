@@ -129,7 +129,8 @@ seconds, and `/stats` separates waiting from generating.
 
 Off by default. `/agent on` lets the model list, read and search files and —
 only after you approve each operation — write files, apply patches and run
-commands. Everything is confined to the workspace (`/workspace <path>`): `..`,
+commands. Before a write or a patch you see the unified diff of exactly what
+would change. Everything is confined to the workspace (`/workspace <path>`): `..`,
 symlinks pointing outside and shell operators are refused, and commands run
 under a timeout.
 

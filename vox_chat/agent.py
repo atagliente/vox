@@ -256,7 +256,14 @@ def _run_tool(
         return _tool_message(call)
 
     if needs_confirmation(call.name, agent_config):
-        description = describe_call(call.name, arguments, workspace)
+        try:
+            description = describe_call(call.name, arguments, workspace)
+        except ToolError as exc:
+            # Building the preview reads the workspace, so it can refuse a
+            # path just as the tool itself would.
+            call.approved = False
+            call.result = f"error: {exc}"
+            return _tool_message(call)
         if not confirm(call.name, description):
             call.approved = False
             call.result = "user denied this operation"

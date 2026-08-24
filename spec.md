@@ -316,7 +316,9 @@ Mandatory safety rules:
 - every path is resolved and confined to the configured workspace;
 - `..` traversal and symlinks leaving the workspace are blocked;
 - reads are allowed only inside the workspace;
-- writes and patches require explicit user confirmation;
+- writes and patches require explicit user confirmation, shown as the unified
+  diff of the change, with the patch applied in memory first so one that does
+  not fit is reported before it is offered for approval;
 - every command requires confirmation and shows the command and its directory;
 - commands run without a shell and under a timeout;
 - stdout, stderr and the exit code are captured;

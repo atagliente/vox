@@ -7,6 +7,7 @@ explicit confirmation: there is no bypass parameter anywhere in this module.
 
 from __future__ import annotations
 
+import difflib
 import fnmatch
 import os
 import re
@@ -455,18 +456,92 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 ]
 
 
-def describe_call(name: str, arguments: dict[str, Any], workspace: Workspace) -> str:
-    """A short, human-readable description shown in the confirmation modal."""
-    if name == "write_file":
-        content = str(arguments.get("content", ""))
-        return (
-            f"WRITE {arguments.get('path', '?')}\n"
-            f"workspace: {workspace.root}\n"
-            f"{len(content.splitlines())} lines, {len(content)} characters"
+DEFAULT_DIFF_LINES = 240
+
+
+def _read_for_diff(path: Path) -> tuple[list[str], str | None]:
+    """Current content of ``path`` as lines, or a reason it cannot be read."""
+    if not path.exists():
+        return [], None
+    if not path.is_file():
+        return [], "target exists and is not a file"
+    try:
+        return path.read_text(encoding="utf-8").splitlines(), None
+    except UnicodeDecodeError:
+        return [], "the existing file is not UTF-8 text"
+    except OSError as exc:
+        return [], f"cannot read the existing file: {exc}"
+
+
+def render_diff(before: list[str], after: list[str], name: str,
+                max_lines: int = DEFAULT_DIFF_LINES) -> str:
+    """A unified diff between two versions of one file, clipped to fit."""
+    lines = list(
+        difflib.unified_diff(
+            before, after, fromfile=f"a/{name}", tofile=f"b/{name}", lineterm="", n=3
         )
+    )
+    if not lines:
+        return "no changes: the file already has this content"
+    if len(lines) > max_lines:
+        remaining = len(lines) - max_lines
+        lines = lines[:max_lines] + [f"... {remaining} more diff lines"]
+    return "\n".join(lines)
+
+
+def preview_write(workspace: Workspace, path: str, content: str,
+                  max_lines: int = DEFAULT_DIFF_LINES) -> str:
+    """What ``write_file`` would change, as a diff the operator can read."""
+    target = workspace.resolve(path)
+    name = workspace.relative(target)
+    before, problem = _read_for_diff(target)
+    after = content.splitlines()
+    if problem is not None:
+        return f"{problem}\n{len(after)} lines would be written"
+    if not target.exists():
+        return f"new file: {name} ({len(after)} lines)\n" + render_diff(
+            [], after, name, max_lines
+        )
+    return render_diff(before, after, name, max_lines)
+
+
+def preview_patch(workspace: Workspace, patch: str,
+                  max_lines: int = DEFAULT_DIFF_LINES) -> str:
+    """What ``apply_patch`` would change, computed by applying it in memory.
+
+    Building the preview also validates the patch, so one that does not apply
+    is reported before the operator is asked to authorise it.
+    """
+    try:
+        files = parse_patch(workspace, patch)
+    except ToolError as exc:
+        return f"this patch does not apply: {exc}"
+    sections: list[str] = []
+    budget = max_lines
+    for item in files:
+        name = workspace.relative(item.path)
+        before, problem = _read_for_diff(item.path)
+        if problem is not None:
+            sections.append(f"{name}: {problem}")
+            continue
+        section = render_diff(before, item.new_content.splitlines(), name, budget)
+        budget -= len(section.splitlines())
+        sections.append(section)
+        if budget <= 0:
+            sections.append("... remaining files not shown")
+            break
+    return "\n\n".join(sections)
+
+
+def describe_call(name: str, arguments: dict[str, Any], workspace: Workspace) -> str:
+    """What the confirmation modal shows: for writes, the actual diff."""
+    if name == "write_file":
+        path = str(arguments.get("path", "?"))
+        preview = preview_write(workspace, path, str(arguments.get("content", "")))
+        return f"WRITE {path}\nworkspace: {workspace.root}\n\n{preview}"
     if name == "apply_patch":
-        patch = str(arguments.get("patch", ""))
-        return f"PATCH\nworkspace: {workspace.root}\n{len(patch.splitlines())} diff lines"
+        preview = preview_patch(workspace, str(arguments.get("patch", "")))
+        return f"PATCH\nworkspace: {workspace.root}\n\n{preview}"
     if name == "run_command":
         return (
             f"RUN {arguments.get('command', '?')}\n"
