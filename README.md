@@ -121,10 +121,10 @@ index` switches the panel back to sessions, prompts and roles.
 
 ## Looking at the numbers
 
-`/inspect on` asks the provider for the distribution behind each token, and
-`Ctrl+T` opens a full-screen table that fills while the answer streams: the
-probability the model gave each token, how spread the returned top-k was, the
-gap to the runner-up, and the alternatives it passed over. Positions that were
+`Ctrl+T` turns the measurement on and opens a full-screen table that fills
+while the answer streams: the probability the model gave each token, how spread
+the returned top-k was, the gap to the runner-up, and the alternatives it
+passed over. Press `Esc`, ask a question, and press `Ctrl+T` again to watch. Positions that were
 flat and close are marked as decision points.
 
 ```text
@@ -145,8 +145,8 @@ parameters actually sent at the top, then the exchange, then the statistics and
 the decision points. HTML, JSON and Markdown, all three by default. The HTML is
 one self-contained file with no JavaScript at all.
 
-Off by default, because logprobs make each response several times heavier and
-not every provider supports them. One that refuses is retried without them and
+Off until you ask for it, because logprobs make each response several times
+heavier and not every provider supports them; `/inspect off` stops it again. One that refuses is retried without them and
 says so once; the chat is unaffected.
 
 ## Leaving
@@ -192,6 +192,8 @@ No test needs a running inference server.
 - [docs/USAGE.md](docs/USAGE.md) — full guide: every option, roles and prompts,
   usage figures, themes, reasoning, agent details
 - [spec.md](spec.md) — the specification the implementation follows
+- [CHANGELOG.md](CHANGELOG.md) — what changed, when, and what was measured to
+  justify it
 
 ## License
 

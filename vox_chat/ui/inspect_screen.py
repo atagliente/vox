@@ -33,18 +33,24 @@ class InspectScreen(Screen[None]):
         Binding("t", "filter('thinking')", "Thinking"),
         Binding("a", "filter('answer')", "Answer"),
         Binding("f", "filter('all')", "All"),
+        Binding("ctrl+l", "toggle_legend", "Legend"),
+        Binding("question_mark", "toggle_legend", "Legend", show=False),
     ]
 
-    def __init__(self, run: InspectionRun, enabled: bool = True) -> None:
+    def __init__(self, run: InspectionRun, enabled: bool = True,
+                 just_enabled: bool = False) -> None:
         super().__init__()
         self.run = run
         self.enabled = enabled
+        self.just_enabled = just_enabled
         self.filter = "all"
+        self.legend_open = False
         self._follow = True
 
     def compose(self) -> ComposeResult:
         yield Static("", id="inspect-title")
         yield Static("", id="inspect-summary")
+        yield Static("", id="inspect-legend")
         yield Static(Text(_HEADER, style="bold"), id="inspect-header")
         with VerticalScroll(id="inspect-body"):
             yield Static("", id="inspect-rows")
@@ -68,8 +74,13 @@ class InspectScreen(Screen[None]):
         self.query_one("#inspect-summary", Static).update(self._summary())
         self.query_one("#inspect-rows", Static).update(self._rows())
         self.query_one("#inspect-keys", Static).update(
-            "esc back   ·   f all   ·   d decisions   ·   t thinking   ·   a answer"
+            "esc back   ·   ctrl+l legend   ·   f all   ·   d decisions   ·   "
+            "t thinking   ·   a answer"
         )
+        legend = self.query_one("#inspect-legend", Static)
+        legend.set_class(self.legend_open, "visible")
+        if self.legend_open:
+            legend.update(self._legend())
         if self._follow:
             self.query_one("#inspect-body", VerticalScroll).scroll_end(animate=False)
 
@@ -84,16 +95,23 @@ class InspectScreen(Screen[None]):
 
     def _summary(self) -> Text:
         if not len(self.run):
+            if self.run.note:
+                return Text(self.run.note)
             if not self.enabled:
                 return Text(
                     "Inspection is off. Turn it on with /inspect on, then ask "
-                    "something: the table fills while the answer streams.",
+                    "something: the table fills while the answer streams."
                 )
-            note = self.run.note or (
-                "No token data arrived yet. If the provider does not report "
-                "logprobs, none will."
+            opening = (
+                "Inspection is now on. " if self.just_enabled
+                else "Nothing measured yet. "
             )
-            return Text(note)
+            # The view has no input of its own, so say where the question goes.
+            return Text(
+                opening
+                + "Press esc, ask a question, and this table fills while the "
+                "answer streams. Ctrl+T brings it back."
+            )
         stats = self.run.stats()
         thinking = self.run.phase_stats("thinking")
         answer = self.run.phase_stats("answer")
@@ -138,6 +156,56 @@ class InspectScreen(Screen[None]):
         return rendered
 
     # -------------------------------------------------------------- actions
+
+    def _legend(self) -> Text:
+        """What each column is, in the units it is actually in."""
+        criteria = self.run.criteria
+        rendered = Text()
+
+        def row(name: str, meaning: str) -> None:
+            rendered.append(f"  {name:<14}", style="bold")
+            rendered.append(meaning + "\n")
+
+        rendered.append("COLUMNS\n", style="bold")
+        row("#", "position in this turn, counting from zero")
+        row("TOKEN", "what the model emitted, quoted so spaces show")
+        row("P", "probability it gave that token: exp(logprob), 0 to 1")
+        row("H", "entropy of the returned top-k, in bits. 0 means one candidate")
+        row("", "held all the mass; higher means it was shared. Not the entropy")
+        row("", "of the vocabulary — the API does not return the tail.")
+        row("MARGIN", "P of the winner minus P of the runner-up: how clear the")
+        row("", "choice was. 1.00 means nothing else came close.")
+        row("ALTERNATIVES", "the other candidates returned, most likely first")
+
+        rendered.append("\nMARKERS\n", style="bold")
+        rendered.append("  ◄ DECISION   ", style="#c9a15a")
+        bits = "bit" if criteria.entropy_threshold == 1 else "bits"
+        rendered.append(
+            f"H at or above {criteria.entropy_threshold:g} {bits} and margin at\n"
+        )
+        rendered.append(" " * 15)
+        rendered.append(
+            f"or below {criteria.margin_threshold:g}, not punctuation, at least "
+            f"{criteria.min_distance} tokens\n"
+        )
+        rendered.append(" " * 15)
+        rendered.append("after the previous one. All four come from the config.\n")
+        rendered.append("  H in amber    ", style="#c9a15a")
+        rendered.append("at or above the threshold; ")
+        rendered.append("sage", style="#8da287")
+        rendered.append(" below it.\n")
+
+        rendered.append(
+            "\nThese are measurements of the output distribution. A spread"
+            "\ndistribution is a spread distribution: it is not evidence that"
+            "\nthe model hesitated.\n",
+            style="dim",
+        )
+        return rendered
+
+    def action_toggle_legend(self) -> None:
+        self.legend_open = not self.legend_open
+        self.refresh_view()
 
     def action_filter(self, name: str) -> None:
         if name in FILTERS:

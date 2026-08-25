@@ -339,8 +339,8 @@ you decide what actually happens.
 
 ### Inspecting the tokens
 
-`/inspect on` asks the provider for the distribution behind every token it
-emits; `Ctrl+T` — or `F2`, or `/inspect` with no argument — opens a full-screen table
+`Ctrl+T` — or `F2`, or `/inspect` with no argument — turns the measurement on
+if it was off and opens a full-screen table
 that fills while the answer streams and stays open afterwards. Pressing the
 same key again closes it.
 
@@ -364,6 +364,11 @@ entropy is over the returned top-k, not the full vocabulary
   29  ' simplified'       0.46   1.72    0.23   ' well' 0.22  ' fundamental' 0.12  ◄ DECISION
   30  ' explanation'      0.86   0.76    0.80   ' scientific' 0.06  ' physical' 0.03
 ```
+
+`Ctrl+L` opens a legend over the table explaining every column in the units it
+is actually in — what `P` is computed from, what `H` is measured over, what
+`MARGIN` compares — and quoting the decision-point criteria currently in force,
+not the defaults. The same key closes it.
 
 **What this is not.** These are measurements of the output distribution and
 nothing else: no attention, no activations, no model internals. A flat

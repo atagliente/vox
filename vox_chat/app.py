@@ -674,11 +674,32 @@ class VoxApp(App[None]):
             self._inspect_screen.refresh_view()
 
     def action_open_inspect(self) -> None:
-        """Toggle the view: the app binding wins over the screen's own keys."""
+        """Toggle the view, turning collection on if it was off.
+
+        Asking to inspect is asking to measure: opening the view used to
+        show nothing but an instruction to type /inspect on, which is a
+        step the key itself can take.
+        """
         if isinstance(self.screen, InspectScreen):
             self.screen.dismiss(None)
             return
-        screen = InspectScreen(self.inspection, enabled=self.inspect_enabled)
+        just_enabled = False
+        if not self.inspect_enabled:
+            self.config.setdefault("inspect", {})["enabled"] = True
+            self.persist_config()
+            if not len(self.inspection):
+                # Pick up the settings just written, without discarding
+                # anything already measured.
+                self.inspection = self._new_inspection()
+            self.write_system(
+                "INSPECTION ON - the next answer is measured. "
+                "/inspect off stops it."
+            )
+            self.refresh_status()
+            just_enabled = True
+        screen = InspectScreen(
+            self.inspection, enabled=True, just_enabled=just_enabled
+        )
         self._inspect_screen = screen
         self.push_screen(screen, lambda _result: self._forget_inspect_screen())
 

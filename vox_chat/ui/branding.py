@@ -167,6 +167,16 @@ Screen {
 InspectScreen { background: #16150f; }
 #inspect-title { padding: 1 1 0 1; color: #c9a15a; }
 #inspect-summary { padding: 0 1 1 1; color: #8b8266; }
+#inspect-legend {
+    display: none;
+    height: auto;
+    padding: 1 2;
+    margin: 0 1;
+    color: #cfc7b0;
+    background: #1c1a14;
+    border: round #6b6349;
+}
+#inspect-legend.visible { display: block; }
 #inspect-header { padding: 0 1; color: #8b8266; }
 #inspect-body { height: 1fr; padding: 0 1; }
 #inspect-keys {
@@ -228,6 +238,11 @@ Screen { background: #101014; color: #d6d6d6; }
 InspectScreen { background: #101014; }
 #inspect-title { padding: 1 1 0 1; color: #9aa7b8; }
 #inspect-summary { padding: 0 1 1 1; color: #8b8b98; }
+#inspect-legend {
+    display: none; height: auto; padding: 1 2; margin: 0 1;
+    background: #1a1a20; border: round #45454f;
+}
+#inspect-legend.visible { display: block; }
 #inspect-header { padding: 0 1; color: #8b8b98; }
 #inspect-body { height: 1fr; padding: 0 1; }
 #inspect-keys { height: 1; padding: 0 1; color: #8b8b98; background: #24242c; }
@@ -267,6 +282,11 @@ Screen { background: #f4f2ec; color: #26241e; }
 InspectScreen { background: #f4f2ec; }
 #inspect-title { padding: 1 1 0 1; color: #7a5c23; }
 #inspect-summary { padding: 0 1 1 1; color: #5c584a; }
+#inspect-legend {
+    display: none; height: auto; padding: 1 2; margin: 0 1;
+    background: #fffdf7; border: round #cbc5b4;
+}
+#inspect-legend.visible { display: block; }
 #inspect-header { padding: 0 1; color: #5c584a; }
 #inspect-body { height: 1fr; padding: 0 1; }
 #inspect-keys { height: 1; padding: 0 1; color: #5c584a; background: #dcd7c8; }

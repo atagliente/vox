@@ -124,13 +124,56 @@ async def test_the_screen_keeps_filling_while_the_answer_streams(app: VoxApp) ->
         await pilot.pause()
 
 
-async def test_the_screen_explains_an_empty_table(app: VoxApp) -> None:
+async def test_opening_the_view_turns_inspection_on(app: VoxApp) -> None:
+    """Asking to inspect is asking to measure: the key does both."""
     async with app.run_test(size=(120, 30)) as pilot:
         await pilot.pause()
+        assert app.inspect_enabled is False
+
+        await pilot.press("ctrl+t")
+        await pilot.pause()
+        await pilot.pause()
+
+        assert app.inspect_enabled is True, "the key enabled it"
+        assert app.inspect_top_k() == 5, "the next request will carry logprobs"
+        summary = str(app.screen.query_one("#inspect-summary").render())
+        assert "Inspection is now on" in summary
+        assert "esc" in summary and "ask a question" in summary, (
+            "the view has no input, so it says where the question goes"
+        )
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert "INSPECTION ON" in messages(app)[-1].message.content
+
+
+async def test_reopening_an_empty_view_does_not_claim_it_just_started(
+    app: VoxApp,
+) -> None:
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        app.run_command("/inspect on")
+        await pilot.pause()
+
         await pilot.press("ctrl+t")
         await pilot.pause()
         summary = str(app.screen.query_one("#inspect-summary").render())
-        assert "Inspection is off" in summary, "it says which of the two it is"
+        assert "Nothing measured yet" in summary
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_a_provider_refusal_is_shown_instead_of_the_invitation(
+    app: VoxApp,
+) -> None:
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        app.run_command("/inspect on")
+        app.inspection.note = "the provider rejected logprobs, so this answer was not measured"
+        await pilot.press("ctrl+t")
+        await pilot.pause()
+        summary = str(app.screen.query_one("#inspect-summary").render())
+        assert "rejected logprobs" in summary
         await pilot.press("escape")
         await pilot.pause()
 
@@ -295,3 +338,65 @@ async def test_f2_opens_and_closes_the_view(app: VoxApp) -> None:
         await pilot.press("f2")
         await pilot.pause()
         assert not isinstance(app.screen, InspectScreen)
+
+
+async def test_ctrl_l_opens_a_legend_for_every_column(app: VoxApp) -> None:
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        await pilot.press("ctrl+t")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, InspectScreen)
+
+        legend = screen.query_one("#inspect-legend")
+        assert not legend.has_class("visible"), "it starts closed"
+
+        await pilot.press("ctrl+l")
+        await pilot.pause()
+        assert legend.has_class("visible")
+
+        text = str(legend.render())
+        for column in ("#", "TOKEN", "P", "H", "MARGIN", "ALTERNATIVES"):
+            assert column in text, f"{column} is not explained"
+        assert "exp(logprob)" in text, "P says what it is computed from"
+        assert "does not return the tail" in text, "H says what it is over"
+        assert "runner-up" in text, "MARGIN says what it compares"
+        assert "not evidence that" in text, "and what none of it means"
+
+        await pilot.press("ctrl+l")
+        await pilot.pause()
+        assert not legend.has_class("visible"), "the same key closes it"
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_the_legend_quotes_the_criteria_actually_in_use(app: VoxApp) -> None:
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        app.config["inspect"].update(
+            entropy_threshold=1.5, margin_threshold=0.2, min_distance=7
+        )
+        await pilot.press("ctrl+t")
+        await pilot.pause()
+        await pilot.press("ctrl+l")
+        await pilot.pause()
+
+        text = str(app.screen.query_one("#inspect-legend").render())
+        assert "1.5 bits" in text
+        assert "0.2" in text
+        assert "7 tokens" in text
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+
+async def test_the_key_row_advertises_the_legend(app: VoxApp) -> None:
+    async with app.run_test(size=(120, 34)) as pilot:
+        await pilot.pause()
+        await pilot.press("ctrl+t")
+        await pilot.pause()
+        keys = str(app.screen.query_one("#inspect-keys").render())
+        assert "ctrl+l legend" in keys
+        await pilot.press("escape")
+        await pilot.pause()
