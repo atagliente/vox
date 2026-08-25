@@ -53,6 +53,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_tool_cycles": 8,
         "max_output_bytes": 8192,
     },
+    "inspect": {
+        "enabled": False,
+        "top_k": 5,
+        "entropy_threshold": 1.0,
+        "margin_threshold": 0.35,
+        "min_distance": 3,
+        "skip_punctuation": True,
+    },
     "ui": {
         "theme": "nasa",
         "show_timestamps": True,
@@ -187,6 +195,25 @@ def validate_config(data: Any) -> list[str]:
             value = agent.get(key, 1)
             if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
                 errors.append(f"agent.{key} must be a positive integer")
+
+    inspection = data.get("inspect", {})
+    if not isinstance(inspection, dict):
+        errors.append("inspect must be an object")
+    else:
+        for key in ("enabled", "skip_punctuation"):
+            if not isinstance(inspection.get(key, False), bool):
+                errors.append(f"inspect.{key} must be a boolean")
+        top_k = inspection.get("top_k", 5)
+        if not isinstance(top_k, int) or isinstance(top_k, bool) or not 1 <= top_k <= 20:
+            # The endpoint refuses anything above 20 with HTTP 400.
+            errors.append("inspect.top_k must be an integer between 1 and 20")
+        for key in ("entropy_threshold", "margin_threshold"):
+            value = inspection.get(key, 1.0)
+            if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+                errors.append(f"inspect.{key} must be a non-negative number")
+        distance = inspection.get("min_distance", 3)
+        if not isinstance(distance, int) or isinstance(distance, bool) or distance < 0:
+            errors.append("inspect.min_distance must be a non-negative integer")
 
     ui = data.get("ui", {})
     if not isinstance(ui, dict):

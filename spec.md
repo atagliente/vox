@@ -103,9 +103,13 @@ Minimum shortcuts:
 - `Ctrl+G` — stop the current generation
 - `Ctrl+B` — toggle the side panel
 - `Ctrl+Y` — copy the last code block of the answer
+- `Ctrl+I` — open the inspection view
+- `Ctrl+E` — export the session
 - `Ctrl+C`, `Ctrl+Shift+C` — copy the selection, or the last answer
 - `Ctrl+V`, `Ctrl+Shift+V` — paste the system clipboard
 - `Ctrl+Y` — copy the last code block of the answer
+- `Ctrl+I` — open the inspection view
+- `Ctrl+E` — export the session
 - `Ctrl+Q` — quit, asking for confirmation when there are unsaved changes; it
   is the only key that quits
 
@@ -280,6 +284,44 @@ helper (PowerShell, `pbcopy`/`pbpaste`, `wl-copy`, `xclip`, `xsel`,
 `termux-clipboard-*`), run without a shell and under a timeout, in a worker so
 the UI never blocks. When no helper exists the key reports the failure instead
 of doing nothing, and `vox doctor` lists what is available.
+
+## Token inspection
+
+Optional and off by default (`inspect.enabled`). When on, the request carries
+`logprobs` with `top_logprobs` (1 to 20; the endpoint refuses more), and the
+returned distribution is measured per token: probability, entropy over the
+returned top-k in bits, and the margin to the runner-up. A full-screen view
+fills while the answer streams, filterable to decision points, thinking or
+answer.
+
+A decision point is a position with entropy at or above the threshold, margin
+at or below it, that is not punctuation and is at least `min_distance` tokens
+after the previous one. All four are configuration and are reported alongside
+the numbers they produced.
+
+The phase of a token is taken from the delta its logprob arrived with; a chunk
+carrying a logprob but no text continues the phase already open. Only tokens
+arriving before any phase is established are unattributed.
+
+These are measurements of the output distribution. Nothing in the view or the
+report may describe a spread distribution as the model thinking, hesitating or
+deciding; the entropy figure must always be labelled as top-k, because the API
+does not return the tail of the vocabulary. Attention, activations and any
+other model internals are out of scope, as is regenerating from a decision
+point with a forced alternative.
+
+A provider that rejects logprobs is retried once without them and reported
+once. Inspection must never change the outcome of a chat.
+
+## Reports
+
+`/export` writes the session to `~/.vox/reports/` in HTML, JSON and Markdown.
+Each opens with the question, model, provider, endpoint, role and the
+parameters actually sent, followed by the exchange with thinking kept separate,
+then the statistics and the decision points, then provenance. The HTML is
+self-contained and carries no JavaScript, so it reads with scripting disabled.
+The JSON is a single documented schema. A session with inspection off still
+exports, and says so.
 
 ## Roles
 

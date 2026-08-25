@@ -28,8 +28,8 @@ from .tools import (
 from .usage import TurnUsage, estimate_tokens
 
 EventType = Literal[
-    "text", "reasoning", "tool_start", "tool_result", "tool_denied", "notice",
-    "usage", "assistant_done", "cancelled", "limit"
+    "text", "reasoning", "token", "tool_start", "tool_result", "tool_denied",
+    "notice", "usage", "assistant_done", "cancelled", "limit"
 ]
 
 ConfirmCallback = Callable[[str, str], bool]
@@ -45,6 +45,8 @@ class AgentEvent:
     tool_call: ToolCall | None = None
     messages: list[Message] = field(default_factory=list)
     usage: TurnUsage | None = None
+    token: Any | None = None
+    phase: str = ""
 
 
 def parse_arguments(raw: str) -> dict[str, Any]:
@@ -81,6 +83,7 @@ def run_turn(
     cancel: threading.Event | None = None,
     agent_enabled: bool = False,
     include_usage: bool = True,
+    top_logprobs: int | None = None,
 ) -> Iterator[AgentEvent]:
     """Drive one user turn, including any tool cycles it triggers.
 
@@ -147,6 +150,7 @@ def run_turn(
                 tools=TOOL_SCHEMAS if use_tools else None,
                 cancel=cancel,
                 include_usage=include_usage,
+                top_logprobs=top_logprobs,
             )
             for event in stream:
                 if event.type == "text":
@@ -230,6 +234,8 @@ def _relay(
     elif event.type == "reasoning":
         reasoning_parts.append(event.text)
         yield AgentEvent("reasoning", text=event.text)
+    elif event.type == "token":
+        yield AgentEvent("token", token=event.token, phase=event.phase)
     elif event.type == "tool_calls":
         tool_calls.extend(event.tool_calls)
         for call in event.tool_calls:

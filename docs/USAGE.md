@@ -125,7 +125,8 @@ python -m vox_chat         # same app, from a checkout
 | `Ctrl+C` / `Ctrl+V` | copy / paste | `Ctrl+S` | settings |
 | `Ctrl+Y` | copy last code block | `Ctrl+G` | stop generating |
 | `↑` / `↓` | input history | `Ctrl+B` | side panel |
-| `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+Q` | quit |
+| `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+I` / `Ctrl+E` | inspect / export |
+| | | `Ctrl+Q` | quit |
 
 `Enter` sends because `Ctrl+Enter` is not delivered by most terminals; it stays
 bound for the ones that do. The arrows only reach the history at the first and
@@ -335,6 +336,90 @@ Useful patterns:
 
 Each write, patch or command opens the confirmation dialog with the diff, so
 you decide what actually happens.
+
+### Inspecting the tokens
+
+`/inspect on` asks the provider for the distribution behind every token it
+emits; `Ctrl+I`, or `/inspect` with no argument, opens a full-screen table that
+fills while the answer streams and stays open afterwards. `Esc` goes back,
+`f` shows everything, `d` only the decision points, `t` the thinking and `a`
+the answer.
+
+Per token the table shows the probability the model gave the token it chose,
+the entropy of the returned top-k in bits, the margin to the runner-up, and the
+alternatives it passed over.
+
+```text
+INSPECT · qwen2.5:3b · top-k 5 · 40 tokens · 5 decision points
+mean p 0.80   mean top-k entropy 0.72 bit
+entropy is over the returned top-k, not the full vocabulary
+
+   #  TOKEN                  P      H  MARGIN   ALTERNATIVES
+  28  ' a'                0.36   2.03    0.18   ' known' 0.18  ' based' 0.16
+  29  ' simplified'       0.46   1.72    0.23   ' well' 0.22  ' fundamental' 0.12  ◄ DECISION
+  30  ' explanation'      0.86   0.76    0.80   ' scientific' 0.06  ' physical' 0.03
+```
+
+**What this is not.** These are measurements of the output distribution and
+nothing else: no attention, no activations, no model internals. A flat
+distribution is reported as a flat distribution — it is not evidence that the
+model was "hesitating" or "thinking", and neither the view nor the report ever
+says so. Entropy is computed over the returned top-k because the API does not
+return the tail of the vocabulary, which is why it is called top-k entropy
+everywhere it appears.
+
+**Decision points** are positions where the distribution was both spread and
+close: entropy at or above `entropy_threshold`, margin at or below
+`margin_threshold`, not pure punctuation, and at least `min_distance` tokens
+after the previous one. All four are configuration, printed in the report
+alongside the figures they produced:
+
+```json
+"inspect": {
+  "enabled": false,
+  "top_k": 5,
+  "entropy_threshold": 1.0,
+  "margin_threshold": 0.35,
+  "min_distance": 3,
+  "skip_punctuation": true
+}
+```
+
+`top_k` accepts 1 to 20; the endpoint refuses anything above 20 with HTTP 400,
+so the configuration refuses it first.
+
+**Thinking against answer.** When a model reasons, its thinking tokens carry
+logprobs too, so the view and the report give the mean probability of each
+phase separately. The phase comes from the delta each logprob arrived with — a
+chunk carrying a logprob but no text, about a quarter of them on a reasoning
+model, continues the phase already open rather than being guessed at.
+
+**Cost.** Off by default, because `top_logprobs` makes each response several
+times heavier and not every provider supports it. A provider that rejects the
+option is retried once without it, told about once, and the answer is
+unaffected — inspection never changes the outcome of a chat.
+
+### Saving a session
+
+`/export`, or `Ctrl+E`, writes the session to `~/.vox/reports/` as
+`vox-<timestamp>.html`, `.json` and `.md`. Ask for one with `/export html`.
+
+Each report opens with the question, the model, the provider and endpoint, the
+role, and the parameters actually sent — temperature, max tokens, context
+window, agent mode, timeout, any `extra_body`, and the inspection settings when
+they were on. Then the exchange, with thinking kept separate from answers. Then
+the statistics: tokens, wall time against time actually generating, tokens per
+second, mean and median probability, mean top-k entropy, the thinking-versus-
+answer comparison, and the decision point table. It closes with the VOX version,
+the timestamp and a reminder of what the entropy figure is measured over.
+
+The HTML is a single self-contained file that carries no JavaScript at all, so
+it reads correctly with scripting disabled. The JSON is one documented schema
+(`vox.report/1`) meant to be re-analysed by other tools. The Markdown lists only
+the decision points, because a full token table is unreadable there.
+
+A session with inspection off still exports: you get the exchange, the timings
+and a line saying there are no token figures.
 
 ### Reviewing a change before it happens
 

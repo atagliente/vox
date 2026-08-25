@@ -37,13 +37,26 @@ from .logging_setup import get_logger, setup_logging
 from .models import Message, Session
 from .prompts import PromptStore, find_variables, render
 from .history import InputHistory
+from .inspection import (
+    Alternative,
+    InspectionRun,
+    criteria_from_config,
+)
 from .roles import RoleStore
 from .sessions import SessionStore
 from .storage import global_config_path
+from . import report as reporting
 from .tools import Workspace
 from .usage import LiveMeter, UsageTracker
 from .ui import branding
-from .ui.modals import ConfirmModal, PickerItem, PickerModal, SettingsModal, TextPromptModal
+from .ui.inspect_screen import InspectScreen
+from .ui.modals import (
+    ConfirmModal,
+    PickerItem,
+    PickerModal,
+    SettingsModal,
+    TextPromptModal,
+)
 from .ui.widgets import (
     HeaderBar,
     KeyBar,
@@ -75,6 +88,8 @@ class VoxApp(App[None]):
         Binding("ctrl+g", "stop", "Stop", priority=True),
         Binding("ctrl+b", "toggle_panel", "Panel", priority=True),
         Binding("ctrl+y", "copy_code", "Copy code", priority=True),
+        Binding("ctrl+i", "open_inspect", "Inspect", priority=True),
+        Binding("ctrl+e", "export_report", "Export", priority=True),
         Binding("ctrl+q", "request_quit", "Quit", priority=True),
         Binding("ctrl+c", "copy_selection", "Copy", priority=True),
         Binding("ctrl+v", "paste_clipboard", "Paste", priority=True),
@@ -119,6 +134,8 @@ class VoxApp(App[None]):
         self.session = self._new_session()
         self._assistant_box: MessageBox | None = None
         self.code_blocks: list[code_blocks.CodeBlock] = []
+        self.inspection = self._new_inspection()
+        self._inspect_screen: InspectScreen | None = None
         self._panel_mode = "code"
 
     # ---------------------------------------------------------------- layout
@@ -495,6 +512,10 @@ class VoxApp(App[None]):
             role.temperature if role is not None else generation.get("temperature", 0.2)
         )
         self.cancel_event = threading.Event()
+        self.inspection = self._new_inspection()
+        if self._inspect_screen is not None:
+            self._inspect_screen.run = self.inspection
+            self._inspect_screen.refresh_view()
         self.generating = True
         self._assistant_box = None
         self.live_meter = LiveMeter()
@@ -527,6 +548,7 @@ class VoxApp(App[None]):
                 include_usage=bool(
                     self.config.get("generation", {}).get("include_usage", True)
                 ),
+                top_logprobs=self.inspect_top_k(),
             ):
                 self.call_from_thread(self.handle_agent_event, event)
         except LLMError as exc:
@@ -560,6 +582,8 @@ class VoxApp(App[None]):
             # break is the only thing that can change the blocks.
             if any(marker in event.text for marker in ("`", "~", "\n")):
                 self.refresh_code_blocks(self._assistant_box.message.content)
+        elif event.type == "token":
+            self.record_token(event.token, event.phase)
         elif event.type == "reasoning":
             self.show_reasoning(event.text)
         elif event.type == "tool_start" and event.tool_call is not None:
@@ -605,6 +629,74 @@ class VoxApp(App[None]):
             )
         self._reasoning_box.append_text(chunk)
         self.transcript.scroll_end(animate=False)
+
+    # --------------------------------------------------------------- inspect
+
+    def inspect_config(self) -> dict[str, Any]:
+        section = self.config.get("inspect", {})
+        return section if isinstance(section, dict) else {}
+
+    @property
+    def inspect_enabled(self) -> bool:
+        return bool(self.inspect_config().get("enabled", False))
+
+    def inspect_top_k(self) -> int | None:
+        """The top-k to ask the provider for, or None when inspection is off."""
+        if not self.inspect_enabled:
+            return None
+        return int(self.inspect_config().get("top_k", 5))
+
+    def _new_inspection(self) -> InspectionRun:
+        return InspectionRun(
+            model=str(self.config.get("active_model", "")),
+            provider=str(self.config.get("active_provider", "")),
+            top_k=int(self.inspect_config().get("top_k", 5)),
+            criteria=criteria_from_config(self.config),
+        )
+
+    def record_token(self, sample: Any, phase: str) -> None:
+        """Add one reported token to the current run and refresh the view."""
+        if sample is None:
+            return
+        alternatives = [
+            Alternative(token, logprob) for token, logprob in sample.alternatives
+        ]
+        self.inspection.add(
+            sample.text,
+            sample.logprob,
+            alternatives,
+            phase if phase in ("thinking", "answer") else "unattributed",
+        )
+        if self._inspect_screen is not None:
+            self._inspect_screen.refresh_view()
+
+    def action_open_inspect(self) -> None:
+        screen = InspectScreen(self.inspection, enabled=self.inspect_enabled)
+        self._inspect_screen = screen
+        self.push_screen(screen, lambda _result: self._forget_inspect_screen())
+
+    def _forget_inspect_screen(self) -> None:
+        self._inspect_screen = None
+
+    def cmd_inspect(self, argument: str) -> None:
+        value = argument.strip().lower()
+        if not value:
+            self.action_open_inspect()
+            return
+        if value not in ("on", "off"):
+            self.write_error("USAGE: /inspect [on|off]")
+            return
+        self.config.setdefault("inspect", {})["enabled"] = value == "on"
+        self.persist_config()
+        if value == "on":
+            top_k = self.inspect_config().get("top_k", 5)
+            self.write_system(
+                f"INSPECTION ON - the next answer is measured with top-k {top_k}. "
+                "Ctrl+I shows the table."
+            )
+        else:
+            self.write_system("INSPECTION OFF - requests carry no logprobs again")
+        self.refresh_status()
 
     def refresh_code_blocks(self, answer: str | None = None) -> None:
         """Update the code panel from ``answer``, or from the latest one.
@@ -657,7 +749,22 @@ class VoxApp(App[None]):
         self._reasoning_box = None
         self.refresh_code_blocks()
 
+    def note_logprob_refusal(self) -> None:
+        """Say once that the provider would not measure, and keep chatting."""
+        if self.client is None or not self.client.logprobs_refused:
+            return
+        if self.inspection.note:
+            return
+        self.inspection.note = (
+            "the provider rejected logprobs, so this answer was not measured"
+        )
+        self.write_error(
+            "INSPECTION UNAVAILABLE - this provider rejects logprobs. "
+            "The answer is unaffected."
+        )
+
     def finish_generation(self, error: str | None) -> None:
+        self.note_logprob_refusal()
         self.generating = False
         self._assistant_box = None
         self.live_meter = None
@@ -1180,6 +1287,91 @@ class VoxApp(App[None]):
             self.write_system(f"WORKSPACE: {self.workspace_path}")
             return
         self.set_workspace(argument)
+
+    # ---------------------------------------------------------------- export
+
+    def build_report(self) -> reporting.Report:
+        """Gather the session, its settings and its measurements in one place."""
+        from datetime import datetime
+
+        generation = self.config.get("generation", {})
+        provider = self.provider_block() or {}
+        role = self.role_store.get(str(self.config.get("active_role", "")))
+        parameters: dict[str, Any] = {
+            "temperature": (
+                role.temperature if role is not None
+                else generation.get("temperature", 0.2)
+            ),
+            "max_tokens": generation.get("max_tokens"),
+            "context_window": generation.get("context_window"),
+            "include_usage": generation.get("include_usage", True),
+            "agent_mode": bool(self.config.get("agent", {}).get("enabled", False)),
+            "workspace": str(self.workspace_path),
+            "timeout_seconds": provider.get("timeout_seconds"),
+        }
+        extra = provider.get("extra_body")
+        if isinstance(extra, dict) and extra:
+            parameters["extra_body"] = dict(extra)
+        if self.inspect_enabled:
+            parameters["inspect"] = self.inspect_config()
+
+        usage: dict[str, Any] = {
+            "turns": self.usage.turns,
+            "prompt_tokens": self.usage.prompt_tokens,
+            "completion_tokens": self.usage.completion_tokens,
+            "total_tokens": self.usage.total_tokens,
+            "wall_time_seconds": round(self.usage.elapsed, 2),
+            "generating_seconds": round(self.usage.generation_elapsed, 2),
+            "average_tokens_per_second": round(self.usage.average_tokens_per_second, 2),
+            "peak_tokens_per_second": round(self.usage.peak_tokens_per_second, 2),
+            "context_tokens_last_turn": self.usage.context_tokens,
+            "estimated_turns": self.usage.estimated_turns,
+        }
+        if self.usage.last is not None and self.usage.last.first_token_latency:
+            usage["last_first_token_latency_seconds"] = round(
+                self.usage.last.first_token_latency, 2
+            )
+
+        return reporting.Report(
+            title=f"VOX session · {self.config.get('active_model', '')}",
+            created_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+            provider=str(self.config.get("active_provider", "")),
+            endpoint=str(provider.get("base_url", "")),
+            model=str(self.config.get("active_model", "")),
+            role=str(self.config.get("active_role", "")),
+            parameters=parameters,
+            messages=list(self.session.messages),
+            usage=usage,
+            inspection=self.inspection if len(self.inspection) else None,
+            inspect_enabled=self.inspect_enabled,
+        )
+
+    def action_export_report(self) -> None:
+        self.export_report()
+
+    def export_report(self, formats: tuple[str, ...] = reporting.FORMATS) -> None:
+        """Write the session out. Never blocks on anything but the disk."""
+        try:
+            written = reporting.write(self.build_report(), formats=formats)
+        except (OSError, ValueError) as exc:
+            self.write_error(f"EXPORT FAILED - {exc}")
+            return
+        names = ", ".join(path.name for path in written)
+        self.write_system(f"SAVED {names} in {written[0].parent}")
+
+    def cmd_export(self, argument: str) -> None:
+        wanted = argument.strip().lower().split()
+        if not wanted:
+            self.export_report()
+            return
+        unknown = [fmt for fmt in wanted if fmt not in reporting.FORMATS]
+        if unknown:
+            self.write_error(
+                f"UNKNOWN FORMAT: {', '.join(unknown)} - "
+                f"use {', '.join(reporting.FORMATS)}"
+            )
+            return
+        self.export_report(tuple(wanted))
 
     def cmd_stats(self, argument: str) -> None:
         self.write_system(self.usage.report(self.context_window()))

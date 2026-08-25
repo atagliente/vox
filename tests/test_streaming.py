@@ -42,13 +42,40 @@ class FakeChoice:
     def __init__(self, delta: FakeDelta, finish_reason: str | None = None) -> None:
         self.delta = delta
         self.finish_reason = finish_reason
+        self.logprobs = None
+
+
+class FakeAlternative:
+    def __init__(self, token: str, logprob: float) -> None:
+        self.token = token
+        self.logprob = logprob
+
+
+class FakeLogprob:
+    def __init__(self, token: str, logprob: float,
+                 alternatives: list[FakeAlternative] | None = None) -> None:
+        self.token = token
+        self.logprob = logprob
+        self.top_logprobs = alternatives or []
+
+
+class FakeLogprobs:
+    def __init__(self, entries: list[FakeLogprob]) -> None:
+        self.content = entries
 
 
 class FakeChunk:
     def __init__(self, content: str | None = None,
                  tool_calls: list[FakeToolCall] | None = None,
-                 finish_reason: str | None = None) -> None:
-        self.choices = [FakeChoice(FakeDelta(content, tool_calls), finish_reason)]
+                 finish_reason: str | None = None,
+                 logprobs: list[FakeLogprob] | None = None,
+                 reasoning: str | None = None) -> None:
+        delta = FakeDelta(content, tool_calls)
+        if reasoning is not None:
+            delta.reasoning_content = reasoning
+        self.choices = [FakeChoice(delta, finish_reason)]
+        if logprobs is not None:
+            self.choices[0].logprobs = FakeLogprobs(logprobs)
 
 
 def text_chunks(*parts: str) -> list[FakeChunk]:
@@ -139,13 +166,15 @@ class FakeClient:
         self.calls: list[dict[str, Any]] = []
 
     def stream_chat(self, messages, model, temperature=0.2, max_tokens=None,
-                    tools=None, cancel=None, include_usage=True):
+                    tools=None, cancel=None, include_usage=True,
+                    top_logprobs=None):
         self.calls.append(
             {
                 "messages": list(messages),
                 "model": model,
                 "tools": tools,
                 "include_usage": include_usage,
+                "top_logprobs": top_logprobs,
             }
         )
         script = self.scripts.pop(0) if self.scripts else text_chunks("")
@@ -292,12 +321,14 @@ def test_tools_are_not_offered_when_agent_mode_is_off(workspace: Path) -> None:
 def test_a_provider_without_tool_support_degrades_gracefully(workspace: Path) -> None:
     class RefusingClient(FakeClient):
         def stream_chat(self, messages, model, temperature=0.2, max_tokens=None,
-                        tools=None, cancel=None, include_usage=True):
+                        tools=None, cancel=None, include_usage=True,
+                        top_logprobs=None):
             if tools:
                 raise LLMError("http", "provider returned HTTP 400",
                                "this model does not support tools")
             return super().stream_chat(
-                messages, model, temperature, max_tokens, None, cancel, include_usage
+                messages, model, temperature, max_tokens, None, cancel,
+                include_usage, top_logprobs
             )
 
     client = RefusingClient([text_chunks("plain answer")])
@@ -360,3 +391,123 @@ def test_a_preview_that_refuses_the_path_denies_the_call(workspace: Path) -> Non
     denied = [e for e in events if e.type in ("tool_result", "tool_denied")]
     assert "escapes the workspace" in denied[0].text
     assert not (workspace.parent / "escape.txt").exists()
+
+
+# --------------------------------------------------------------- logprobs
+
+
+def logprob_chunk(content: str, pairs: list[tuple[str, float]],
+                  reasoning: str | None = None) -> FakeChunk:
+    """A chunk carrying the distribution behind the token it delivers."""
+    import math
+
+    entries = [
+        FakeLogprob(
+            pairs[0][0],
+            math.log(pairs[0][1]),
+            [FakeAlternative(token, math.log(p)) for token, p in pairs],
+        )
+    ]
+    return FakeChunk(content=content, reasoning=reasoning, logprobs=entries)
+
+
+def test_logprobs_become_token_events_with_their_distribution() -> None:
+    chunks = [
+        logprob_chunk("The", [("The", 0.9), ("A", 0.1)]),
+        logprob_chunk(" sky", [(" sky", 0.5), (" sun", 0.3), (" air", 0.2)]),
+        FakeChunk(finish_reason="stop"),
+    ]
+    events = [event for event in consume_stream(chunks) if event.type == "token"]
+    assert [event.token.text for event in events] == ["The", " sky"]
+    assert events[0].phase == "answer"
+    assert len(events[1].token.alternatives) == 3
+    assert events[1].token.alternatives[0][0] == " sky"
+
+
+def test_a_stream_without_logprobs_produces_no_token_events() -> None:
+    events = list(consume_stream(text_chunks("plain")))
+    assert not [event for event in events if event.type == "token"]
+
+
+def test_tokens_are_attributed_to_the_phase_they_arrived_with() -> None:
+    chunks = [
+        logprob_chunk("", [("Hmm", 0.6), ("Wait", 0.4)], reasoning="Hmm"),
+        logprob_chunk("Yes", [("Yes", 0.8), ("No", 0.2)]),
+        FakeChunk(finish_reason="stop"),
+    ]
+    phases = [e.phase for e in consume_stream(chunks) if e.type == "token"]
+    assert phases == ["thinking", "answer"]
+
+
+def test_inline_think_tags_also_mark_the_phase() -> None:
+    chunks = [
+        logprob_chunk("<think>step", [("<think>step", 0.9), ("x", 0.1)]),
+        logprob_chunk("</think>done", [("</think>done", 0.9), ("y", 0.1)]),
+        FakeChunk(finish_reason="stop"),
+    ]
+    phases = [e.phase for e in consume_stream(chunks) if e.type == "token"]
+    assert phases[0] == "thinking", "the tag opened before this token arrived"
+
+
+def test_the_turn_relays_token_events_and_passes_top_k_through(workspace: Path) -> None:
+    client = FakeClient([[logprob_chunk("hi", [("hi", 0.7), ("yo", 0.3)]),
+                          FakeChunk(finish_reason="stop")]])
+    events = list(
+        run_turn(
+            client=client,
+            messages=[Message(role="user", content="go")],
+            model="fake",
+            temperature=0.1,
+            max_tokens=None,
+            workspace=Workspace(workspace),
+            agent_config=AGENT_CONFIG,
+            confirm=lambda name, body: True,
+            agent_enabled=False,
+            top_logprobs=5,
+        )
+    )
+    assert client.calls[0]["top_logprobs"] == 5
+    tokens = [event for event in events if event.type == "token"]
+    assert len(tokens) == 1 and tokens[0].token.text == "hi"
+
+
+def test_by_default_no_logprobs_are_requested(workspace: Path) -> None:
+    """Inspection off must leave the request exactly as it was."""
+    client = FakeClient([text_chunks("plain")])
+    turn(client, Workspace(workspace), lambda name, body: True)
+    assert client.calls[0]["top_logprobs"] is None
+
+
+def test_a_logprob_without_text_continues_the_phase() -> None:
+    """Measured on qwen3.5:4b: about a quarter of chunks carry a logprob and
+    an empty reasoning string. They are still thinking, not unattributed."""
+    import math
+
+    silent = FakeChunk(
+        logprobs=[FakeLogprob("\n", math.log(0.9),
+                              [FakeAlternative("\n", math.log(0.9))])]
+    )
+    chunks = [
+        logprob_chunk("", [("Hmm", 0.6), ("Wait", 0.4)], reasoning="Hmm"),
+        silent,
+        logprob_chunk("", [("so", 0.7), ("then", 0.3)], reasoning="so"),
+        logprob_chunk("No", [("No", 0.99), ("Yes", 0.01)]),
+        silent,
+        FakeChunk(finish_reason="stop"),
+    ]
+    phases = [event.phase for event in consume_stream(chunks) if event.type == "token"]
+    assert phases == ["thinking", "thinking", "thinking", "answer", "answer"]
+
+
+def test_tokens_before_any_delta_are_unattributed() -> None:
+    """Only what arrives before the model has said which phase it is in."""
+    import math
+
+    orphan = FakeChunk(
+        logprobs=[FakeLogprob("?", math.log(0.5),
+                              [FakeAlternative("?", math.log(0.5)),
+                               FakeAlternative("!", math.log(0.5))])]
+    )
+    events = list(consume_stream([orphan, FakeChunk(finish_reason="stop")]))
+    tokens = [event for event in events if event.type == "token"]
+    assert [event.phase for event in tokens] == ["unattributed"]

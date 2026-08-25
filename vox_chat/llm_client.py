@@ -36,7 +36,7 @@ class LLMError(Exception):
 
 
 EventType = Literal[
-    "text", "reasoning", "tool_calls", "usage", "done", "cancelled"
+    "text", "reasoning", "token", "tool_calls", "usage", "done", "cancelled"
 ]
 
 
@@ -49,6 +49,8 @@ class StreamEvent:
     tool_calls: list[ToolCall] = field(default_factory=list)
     finish_reason: str | None = None
     usage: TokenUsage | None = None
+    token: TokenSample | None = None
+    phase: str = ""
 
 
 def _delta_of(chunk: Any) -> Any:
@@ -80,6 +82,38 @@ def _reasoning_of(delta: Any) -> str | None:
     return None
 
 
+@dataclass(frozen=True)
+class TokenSample:
+    """One emitted token and the distribution it came from, as reported."""
+
+    text: str
+    logprob: float
+    alternatives: tuple[tuple[str, float], ...] = ()
+
+
+def _tokens_of(chunk: Any) -> list[TokenSample]:
+    """Read the logprobs block a chunk carries, if the provider sent one."""
+    choices = getattr(chunk, "choices", None)
+    if not choices:
+        return []
+    logprobs = getattr(choices[0], "logprobs", None)
+    entries = getattr(logprobs, "content", None) if logprobs is not None else None
+    if not entries:
+        return []
+    samples: list[TokenSample] = []
+    for entry in entries:
+        text = getattr(entry, "token", None)
+        logprob = getattr(entry, "logprob", None)
+        if text is None or logprob is None:
+            continue
+        alternatives = tuple(
+            (getattr(alt, "token", ""), float(getattr(alt, "logprob", 0.0)))
+            for alt in (getattr(entry, "top_logprobs", None) or [])
+        )
+        samples.append(TokenSample(str(text), float(logprob), alternatives))
+    return samples
+
+
 def _usage_of(chunk: Any) -> TokenUsage | None:
     """Read the usage block providers append to the final chunk, if any."""
     counted = getattr(chunk, "usage", None)
@@ -105,6 +139,8 @@ def consume_stream(
     finish_reason: str | None = None
     reported: TokenUsage | None = None
     splitter = ThinkSplitter()
+    # Nothing has told us which phase we are in until a delta does.
+    phase = "unattributed"
 
     for chunk in chunks:
         if cancel is not None and cancel.is_set():
@@ -128,6 +164,17 @@ def consume_stream(
             for kind, piece in splitter.feed(text):
                 yield StreamEvent("reasoning" if kind == "reasoning" else "text",
                                   text=piece)
+        # Logprobs ride along with the delta that produced them, which is the
+        # only honest way to tell a thinking token from an answer token. A
+        # chunk that carries a logprob but no text — measured to be about a
+        # quarter of them on a reasoning model — does not change the phase,
+        # so the one already open continues.
+        if thought or splitter.thinking:
+            phase = "thinking"
+        elif text:
+            phase = "answer"
+        for token in _tokens_of(chunk):
+            yield StreamEvent("token", token=token, phase=phase)
         for fragment in getattr(delta, "tool_calls", None) or []:
             index = getattr(fragment, "index", 0) or 0
             slot = pending.setdefault(index, {"id": "", "name": "", "arguments": ""})
@@ -181,6 +228,8 @@ class LLMClient:
         self.base_url = base_url
         self.timeout = float(timeout)
         self.extra_body: dict[str, Any] = dict(extra_body or {})
+        self.logprobs_refused = False
+        """Set when the provider rejected a request carrying logprobs."""
         self._api_key = api_key or "not-needed"
         self._client = OpenAI(
             base_url=base_url, api_key=self._api_key, timeout=self.timeout
@@ -316,12 +365,15 @@ class LLMClient:
         tools: list[dict[str, Any]] | None = None,
         cancel: threading.Event | None = None,
         include_usage: bool = True,
+        top_logprobs: int | None = None,
     ) -> Iterator[StreamEvent]:
         """Stream a completion, yielding text deltas then any tool calls.
 
         With ``include_usage`` the provider is asked to append exact token
-        counts to the final chunk; providers that reject the option are
-        retried once without it.
+        counts to the final chunk; with ``top_logprobs`` it is asked for the
+        distribution behind each token. Providers that reject either option
+        are retried once without it, so an ordinary chat never fails because
+        of a measurement.
         """
         payload: dict[str, Any] = {
             "model": model,
@@ -336,6 +388,9 @@ class LLMClient:
             payload["tool_choice"] = "auto"
         if include_usage:
             payload["stream_options"] = {"include_usage": True}
+        if top_logprobs:
+            payload["logprobs"] = True
+            payload["top_logprobs"] = int(top_logprobs)
         if self.extra_body:
             # Provider-specific extras, e.g. Ollama keep_alive.
             payload["extra_body"] = dict(self.extra_body)
@@ -351,9 +406,17 @@ class LLMClient:
                 try:
                     stream = request_client.chat.completions.create(**payload)
                 except openai.APIStatusError as exc:
-                    if not include_usage or not _rejects_stream_options(exc):
+                    retried = False
+                    if top_logprobs and _rejects_logprobs(exc):
+                        payload.pop("logprobs", None)
+                        payload.pop("top_logprobs", None)
+                        self.logprobs_refused = True
+                        retried = True
+                    elif include_usage and _rejects_stream_options(exc):
+                        payload.pop("stream_options", None)
+                        retried = True
+                    if not retried:
                         raise
-                    payload.pop("stream_options", None)
                     stream = request_client.chat.completions.create(**payload)
             except openai.APITimeoutError as exc:
                 if cancel is not None and cancel.is_set():
@@ -449,6 +512,13 @@ def _status_detail(exc: openai.APIStatusError) -> str:
             return str(error["message"])
         return json.dumps(body)[:500]
     return str(exc)
+
+
+def _rejects_logprobs(exc: openai.APIStatusError) -> bool:
+    """True when the provider refused the measurement, not the request."""
+    if exc.status_code not in (400, 404, 422, 501):
+        return False
+    return "logprob" in f"{exc} {_status_detail(exc)}".lower()
 
 
 def _rejects_stream_options(exc: openai.APIStatusError) -> bool:

@@ -91,7 +91,8 @@ server has **no authentication** — only do this on a network you trust.
 | `Ctrl+C` / `Ctrl+V` | copy / paste | `Ctrl+S` | settings |
 | `Ctrl+Y` | copy last code block | `Ctrl+G` | stop generating |
 | `↑` / `↓` | input history | `Ctrl+B` | side panel |
-| `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+Q` | quit |
+| `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+I` / `Ctrl+E` | inspect / export |
+| | | `Ctrl+Q` | quit |
 
 The bottom row shows this legend at all times.
 
@@ -104,6 +105,8 @@ The bottom row shows this legend at all times.
 | `/session-save [name]`, `/session-load <name>` | sessions live in `~/.vox/sessions/` |
 | `/code [n]` | show the answer's code blocks, copy one by number |
 | `/stats` | tokens, context fill, speed |
+| `/inspect [on\|off]` | per-token measurements, live (`Ctrl+I` opens the view) |
+| `/export [html\|json\|md]` | save the session and its figures (`Ctrl+E`) |
 | `/warm` | preload the model on the server |
 | `/agent on\|off`, `/workspace <path>` | coding-agent mode |
 | `/config`, `/settings`, `/connect`, `/stop` | configuration and connection |
@@ -115,6 +118,36 @@ laid out flush left, without the fences, updating as the answer streams — drag
 your terminal copies exactly the code. `Ctrl+Y` copies the last block to the
 system clipboard, `/code` lists them, `/code 2` copies the second, `/panel
 index` switches the panel back to sessions, prompts and roles.
+
+## Looking at the numbers
+
+`/inspect on` asks the provider for the distribution behind each token, and
+`Ctrl+I` opens a full-screen table that fills while the answer streams: the
+probability the model gave each token, how spread the returned top-k was, the
+gap to the runner-up, and the alternatives it passed over. Positions that were
+flat and close are marked as decision points.
+
+```text
+INSPECT · qwen2.5:3b · top-k 5 · 40 tokens · 5 decision points
+mean p 0.80   mean top-k entropy 0.72 bit
+
+  28  ' a'            0.36   2.03    0.18   ' known' 0.18  ' based' 0.16
+  29  ' simplified'   0.46   1.72    0.23   ' well' 0.22  ' fundamental' 0.12  ◄ DECISION
+```
+
+These are measurements of the output distribution, nothing more: a flat
+distribution is a flat distribution, not evidence of the model "hesitating".
+Entropy is computed over the returned top-k, because the API does not return
+the tail of the vocabulary, and every label says so.
+
+`/export` writes the session to `~/.vox/reports/`: the question, model and the
+parameters actually sent at the top, then the exchange, then the statistics and
+the decision points. HTML, JSON and Markdown, all three by default. The HTML is
+one self-contained file with no JavaScript at all.
+
+Off by default, because logprobs make each response several times heavier and
+not every provider supports them. One that refuses is retried without them and
+says so once; the chat is unaffected.
 
 ## Leaving
 
