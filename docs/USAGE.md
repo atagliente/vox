@@ -125,7 +125,7 @@ python -m vox_chat         # same app, from a checkout
 | `Ctrl+C` / `Ctrl+V` | copy / paste | `Ctrl+S` | settings |
 | `Ctrl+Y` | copy last code block | `Ctrl+G` | stop generating |
 | `↑` / `↓` | input history | `Ctrl+B` | side panel |
-| `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+I` / `Ctrl+E` | inspect / export |
+| `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+T` / `Ctrl+E` | inspect / export |
 | | | `Ctrl+Q` | quit |
 
 `Enter` sends because `Ctrl+Enter` is not delivered by most terminals; it stays
@@ -340,8 +340,13 @@ you decide what actually happens.
 ### Inspecting the tokens
 
 `/inspect on` asks the provider for the distribution behind every token it
-emits; `Ctrl+I`, or `/inspect` with no argument, opens a full-screen table that
-fills while the answer streams and stays open afterwards. `Esc` goes back,
+emits; `Ctrl+T` — or `F2`, or `/inspect` with no argument — opens a full-screen table
+that fills while the answer streams and stays open afterwards. Pressing the
+same key again closes it.
+
+It is `Ctrl+T` rather than the more obvious `Ctrl+I` because terminals send the
+same byte for `Ctrl+I` as for `Tab`: Textual reports it as `tab`, so a binding
+on `ctrl+i` never fires. `Esc` goes back,
 `f` shows everything, `d` only the decision points, `t` the thinking and `a`
 the answer.
 

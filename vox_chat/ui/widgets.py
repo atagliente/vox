@@ -246,7 +246,7 @@ class KeyBar(Static):
         ("^Q", "quit"),
         ("^G", "stop"),
         ("^Y", "copy code"),
-        ("^I", "inspect"),
+        ("^T", "inspect"),
         ("^E", "export"),
         ("alt+enter", "new line"),
         ("^N", "new"),

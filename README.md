@@ -91,7 +91,7 @@ server has **no authentication** — only do this on a network you trust.
 | `Ctrl+C` / `Ctrl+V` | copy / paste | `Ctrl+S` | settings |
 | `Ctrl+Y` | copy last code block | `Ctrl+G` | stop generating |
 | `↑` / `↓` | input history | `Ctrl+B` | side panel |
-| `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+I` / `Ctrl+E` | inspect / export |
+| `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+T` / `Ctrl+E` | inspect / export |
 | | | `Ctrl+Q` | quit |
 
 The bottom row shows this legend at all times.
@@ -105,7 +105,7 @@ The bottom row shows this legend at all times.
 | `/session-save [name]`, `/session-load <name>` | sessions live in `~/.vox/sessions/` |
 | `/code [n]` | show the answer's code blocks, copy one by number |
 | `/stats` | tokens, context fill, speed |
-| `/inspect [on\|off]` | per-token measurements, live (`Ctrl+I` opens the view) |
+| `/inspect [on\|off]` | per-token measurements, live (`Ctrl+T` opens the view) |
 | `/export [html\|json\|md]` | save the session and its figures (`Ctrl+E`) |
 | `/warm` | preload the model on the server |
 | `/agent on\|off`, `/workspace <path>` | coding-agent mode |
@@ -122,7 +122,7 @@ index` switches the panel back to sessions, prompts and roles.
 ## Looking at the numbers
 
 `/inspect on` asks the provider for the distribution behind each token, and
-`Ctrl+I` opens a full-screen table that fills while the answer streams: the
+`Ctrl+T` opens a full-screen table that fills while the answer streams: the
 probability the model gave each token, how spread the returned top-k was, the
 gap to the runner-up, and the alternatives it passed over. Positions that were
 flat and close are marked as decision points.

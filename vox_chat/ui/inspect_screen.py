@@ -28,7 +28,6 @@ class InspectScreen(Screen[None]):
 
     BINDINGS = [
         Binding("escape", "close", "Back", priority=True),
-        Binding("ctrl+i", "close", "Back", show=False, priority=True),
         Binding("q", "close", "Back", show=False),
         Binding("d", "filter('decisions')", "Decisions"),
         Binding("t", "filter('thinking')", "Thinking"),

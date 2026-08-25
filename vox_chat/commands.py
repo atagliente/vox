@@ -139,7 +139,7 @@ def help_text() -> str:
             "  ctrl+b      side panel       ctrl+w  save session",
             "  ctrl+c      copy             ctrl+v  paste",
             "  ctrl+y      copy last code block",
-            "  ctrl+i      inspect          ctrl+e  export",
+            "  ctrl+t      inspect          ctrl+e  export",
             "  ctrl+q      quit",
             "",
             "Start a message with // to send text that begins with a slash.",

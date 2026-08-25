@@ -91,7 +91,7 @@ async def test_the_screen_shows_the_measurements(app: VoxApp) -> None:
     async with app.run_test(size=(120, 30)) as pilot:
         await pilot.pause()
         app.handle_agent_event(token_event(FLAT))
-        await pilot.press("ctrl+i")
+        await pilot.press("ctrl+t")
         await pilot.pause()
         await pilot.pause()
 
@@ -111,7 +111,7 @@ async def test_the_screen_shows_the_measurements(app: VoxApp) -> None:
 async def test_the_screen_keeps_filling_while_the_answer_streams(app: VoxApp) -> None:
     async with app.run_test(size=(120, 30)) as pilot:
         await pilot.pause()
-        await pilot.press("ctrl+i")
+        await pilot.press("ctrl+t")
         await pilot.pause()
         screen = app.screen
         assert isinstance(screen, InspectScreen)
@@ -127,7 +127,7 @@ async def test_the_screen_keeps_filling_while_the_answer_streams(app: VoxApp) ->
 async def test_the_screen_explains_an_empty_table(app: VoxApp) -> None:
     async with app.run_test(size=(120, 30)) as pilot:
         await pilot.pause()
-        await pilot.press("ctrl+i")
+        await pilot.press("ctrl+t")
         await pilot.pause()
         summary = str(app.screen.query_one("#inspect-summary").render())
         assert "Inspection is off" in summary, "it says which of the two it is"
@@ -140,7 +140,7 @@ async def test_filters_narrow_the_table(app: VoxApp) -> None:
         await pilot.pause()
         app.handle_agent_event(token_event([("calm", 0.99), ("x", 0.01)], "thinking"))
         app.handle_agent_event(token_event(FLAT))
-        await pilot.press("ctrl+i")
+        await pilot.press("ctrl+t")
         await pilot.pause()
         screen = app.screen
         assert isinstance(screen, InspectScreen)
@@ -258,3 +258,40 @@ async def test_exporting_an_unmeasured_session_still_works(app: VoxApp) -> None:
         html = next(reports_dir().glob("*.html")).read_text(encoding="utf-8")
         assert "Inspection was off" in html
         assert "no inspection" in html
+
+
+async def test_the_inspect_key_is_one_a_terminal_can_actually_send(app: VoxApp) -> None:
+    """Regression: ctrl+i is the same byte as tab, so Textual reports it as
+    tab and a binding on ctrl+i never fires in a real terminal."""
+    from textual.keys import KEY_ALIASES
+
+    bound = {binding.key for binding in VoxApp.BINDINGS}
+    assert "ctrl+t" in bound and "f2" in bound
+    assert "ctrl+i" not in bound, "it would never be delivered"
+
+    ambiguous = {alias for aliases in KEY_ALIASES.values() for alias in aliases}
+    assert not (bound & ambiguous), f"a binding shares a byte with another key: {bound & ambiguous}"
+
+
+async def test_tab_still_belongs_to_the_input(app: VoxApp) -> None:
+    async with app.run_test(size=(100, 28)) as pilot:
+        await pilot.pause()
+        app.input_area.focus()
+        await pilot.press("tab")
+        await pilot.pause()
+        await pilot.pause()
+        assert not isinstance(app.screen, InspectScreen), (
+            "tab must not open the inspection view"
+        )
+
+
+async def test_f2_opens_and_closes_the_view(app: VoxApp) -> None:
+    async with app.run_test(size=(100, 28)) as pilot:
+        await pilot.pause()
+        await pilot.press("f2")
+        await pilot.pause()
+        await pilot.pause()
+        assert isinstance(app.screen, InspectScreen)
+        await pilot.press("f2")
+        await pilot.pause()
+        assert not isinstance(app.screen, InspectScreen)

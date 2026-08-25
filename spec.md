@@ -103,12 +103,12 @@ Minimum shortcuts:
 - `Ctrl+G` — stop the current generation
 - `Ctrl+B` — toggle the side panel
 - `Ctrl+Y` — copy the last code block of the answer
-- `Ctrl+I` — open the inspection view
+- `Ctrl+T` — open the inspection view
 - `Ctrl+E` — export the session
 - `Ctrl+C`, `Ctrl+Shift+C` — copy the selection, or the last answer
 - `Ctrl+V`, `Ctrl+Shift+V` — paste the system clipboard
 - `Ctrl+Y` — copy the last code block of the answer
-- `Ctrl+I` — open the inspection view
+- `Ctrl+T` — open the inspection view
 - `Ctrl+E` — export the session
 - `Ctrl+Q` — quit, asking for confirmation when there are unsaved changes; it
   is the only key that quits

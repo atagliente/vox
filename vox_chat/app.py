@@ -88,7 +88,10 @@ class VoxApp(App[None]):
         Binding("ctrl+g", "stop", "Stop", priority=True),
         Binding("ctrl+b", "toggle_panel", "Panel", priority=True),
         Binding("ctrl+y", "copy_code", "Copy code", priority=True),
-        Binding("ctrl+i", "open_inspect", "Inspect", priority=True),
+        # Not ctrl+i: terminals send the same byte for it as for tab, so
+        # Textual reports it as "tab" and the binding never fires.
+        Binding("ctrl+t", "open_inspect", "Inspect", priority=True),
+        Binding("f2", "open_inspect", "Inspect", show=False, priority=True),
         Binding("ctrl+e", "export_report", "Export", priority=True),
         Binding("ctrl+q", "request_quit", "Quit", priority=True),
         Binding("ctrl+c", "copy_selection", "Copy", priority=True),
@@ -671,6 +674,10 @@ class VoxApp(App[None]):
             self._inspect_screen.refresh_view()
 
     def action_open_inspect(self) -> None:
+        """Toggle the view: the app binding wins over the screen's own keys."""
+        if isinstance(self.screen, InspectScreen):
+            self.screen.dismiss(None)
+            return
         screen = InspectScreen(self.inspection, enabled=self.inspect_enabled)
         self._inspect_screen = screen
         self.push_screen(screen, lambda _result: self._forget_inspect_screen())
@@ -692,7 +699,7 @@ class VoxApp(App[None]):
             top_k = self.inspect_config().get("top_k", 5)
             self.write_system(
                 f"INSPECTION ON - the next answer is measured with top-k {top_k}. "
-                "Ctrl+I shows the table."
+                "Ctrl+T shows the table."
             )
         else:
             self.write_system("INSPECTION OFF - requests carry no logprobs again")
