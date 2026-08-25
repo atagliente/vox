@@ -102,7 +102,7 @@ The bottom row shows this legend at all times.
 | --- | --- |
 | `/model [name]`, `/provider [name]` | switch, without restarting |
 | `/role [name]`, `/prompts`, `/sessions` | pick a persona, a saved prompt, a session |
-| `/session-save [name]`, `/session-load <name>` | sessions live in `~/.vox/sessions/` |
+| `/session-save [name]`, `/session-load <name>` | sessions live next to your work |
 | `/code [n]` | show the answer's code blocks, copy one by number |
 | `/stats` | tokens, context fill, speed |
 | `/inspect [on\|off]` | per-token measurements, live (`Ctrl+T` opens the view) |
@@ -140,7 +140,8 @@ distribution is a flat distribution, not evidence of the model "hesitating".
 Entropy is computed over the returned top-k, because the API does not return
 the tail of the vocabulary, and every label says so.
 
-`/export` writes the session to `~/.vox/reports/`: the question, model and the
+`/export` writes the session **into the directory you started VOX in**, as
+`vox-<timestamp>.html`, `.json` and `.md`: the question, model and the
 parameters actually sent at the top, then the exchange, then the statistics and
 the decision points. HTML, JSON and Markdown, all three by default. The HTML is
 one self-contained file with no JavaScript at all.
@@ -148,6 +149,30 @@ one self-contained file with no JavaScript at all.
 Off until you ask for it, because logprobs make each response several times
 heavier and not every provider supports them; `/inspect off` stops it again. One that refuses is retried without them and
 says so once; the chat is unaffected.
+
+## Where your files go
+
+Anything produced by a conversation lands in the directory you launched from,
+so results stay with the work they belong to:
+
+```text
+~/code/project/
+├── vox-20260825-143205.html      an export
+├── vox-20260825-143205.json
+├── vox-20260825-143205.md
+├── vox-session-refactor.json     a saved session
+└── src/
+```
+
+Everything is prefixed `vox-`, so one line ignores the lot:
+
+```bash
+echo 'vox-*' >> .gitignore
+```
+
+What stays in `~/.vox` is what belongs to you rather than to a project:
+configuration, roles, saved prompts, input history and logs. A project can
+still override any setting in its own `.vox/config.json`.
 
 ## Leaving
 

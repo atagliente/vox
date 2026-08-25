@@ -411,8 +411,20 @@ unaffected — inspection never changes the outcome of a chat.
 
 ### Saving a session
 
-`/export`, or `Ctrl+E`, writes the session to `~/.vox/reports/` as
-`vox-<timestamp>.html`, `.json` and `.md`. Ask for one with `/export html`.
+`/export`, or `Ctrl+E`, writes the session **into the directory you started VOX
+in** as `vox-<timestamp>.html`, `.json` and `.md`. Ask for one with
+`/export html`.
+
+Saved sessions go to the same place, as `vox-session-<name>.json`, and
+`/sessions` lists the ones belonging to the directory you are in — not a pile
+shared by every project. `/workspace <path>` moves both, so exports and
+sessions follow wherever you point it.
+
+Everything written this way is prefixed `vox-`, which makes it one line to
+ignore in version control, and means a project's own `package.json` or
+`tsconfig.json` is never mistaken for a session. What remains in `~/.vox` is
+what belongs to you rather than to a project: configuration, roles, prompts,
+input history and logs.
 
 Each report opens with the question, the model, the provider and endpoint, the
 role, and the parameters actually sent — temperature, max tokens, context

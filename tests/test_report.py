@@ -139,6 +139,15 @@ def test_inspection_on_but_empty_says_so() -> None:
     assert "no token data arrived" in html
 
 
+def test_reports_default_to_the_current_directory(tmp_path: Path,
+                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    """They belong to the work, not to a hidden folder in the home."""
+    monkeypatch.chdir(tmp_path)
+    written = reporting.write(sample_report(), formats=("md",), stem="here")
+    assert written[0] == tmp_path / "here.md"
+    assert written[0].exists()
+
+
 def test_the_default_stem_is_sortable() -> None:
     from datetime import datetime
 

@@ -1,5 +1,7 @@
 """The end-of-chat report, in HTML, JSON and Markdown.
 
+Written into the directory VOX was started in, as vox-<timestamp>.<ext>.
+
 One structure, three writers, the same figures in each. The HTML carries no
 JavaScript at all, which is the simplest way to keep the promise that it reads
 correctly with JavaScript disabled.
@@ -17,7 +19,7 @@ from typing import Any, Sequence
 from . import __version__
 from .inspection import InspectionRun
 from .models import Message
-from .storage import vox_home, write_json_atomic
+from .storage import write_json_atomic
 
 FORMATS = ("html", "json", "md")
 
@@ -29,10 +31,6 @@ _ROLE_LABEL = {
     "error": "ERROR",
     "reasoning": "THINKING",
 }
-
-
-def reports_dir() -> Path:
-    return vox_home() / "reports"
 
 
 def default_stem(when: datetime | None = None) -> str:
@@ -376,7 +374,9 @@ def write_html(report: Report, path: Path) -> Path:
 def write(report: Report, formats: Sequence[str] = FORMATS,
           directory: Path | None = None, stem: str | None = None) -> list[Path]:
     """Write the report in each requested format; returns the files written."""
-    target = Path(directory) if directory is not None else reports_dir()
+    # Reports belong to the work, so they land in the current directory
+    # unless the caller names another one.
+    target = Path(directory) if directory is not None else Path.cwd()
     name = stem or default_stem()
     written: list[Path] = []
     for fmt in formats:

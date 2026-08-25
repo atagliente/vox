@@ -1,5 +1,7 @@
-"""Session persistence under ``~/.vox/sessions/``.
+"""Session persistence.
 
+Sessions belong to the work, so they are written into the directory VOX was
+started in, named ``vox-session-<name>.json`` so one glob ignores them all.
 Writes go through :func:`vox_chat.storage.write_json_atomic`; a corrupt file
 is reported and skipped instead of blocking startup.
 """
@@ -38,15 +40,28 @@ class SessionInfo:
     error: str | None = None
 
 
-class SessionStore:
-    """Save, load, list and delete sessions."""
+SESSION_PREFIX = "vox-session-"
 
-    def __init__(self, directory: Path | None = None) -> None:
+
+class SessionStore:
+    """Save, load, list and delete sessions in one directory."""
+
+    def __init__(self, directory: Path | None = None,
+                 prefix: str = SESSION_PREFIX) -> None:
         self.directory = Path(directory) if directory is not None else sessions_dir()
+        self.prefix = prefix
         self.warnings: list[str] = []
 
     def path_for(self, name: str) -> Path:
-        return self.directory / f"{slugify(name)}.json"
+        stem = slugify(name)
+        if self.prefix and stem.startswith(self.prefix):
+            return self.directory / f"{stem}.json"
+        return self.directory / f"{self.prefix}{stem}.json"
+
+    def name_of(self, path: Path) -> str:
+        """The name to pass back to load(), taken from a file name."""
+        stem = path.stem
+        return stem[len(self.prefix):] if self.prefix and stem.startswith(self.prefix) else stem
 
     def save(self, session: Session, name: str | None = None) -> Path:
         """Persist ``session``; returns the file it was written to."""
@@ -81,16 +96,16 @@ class SessionStore:
         if not self.directory.exists():
             return []
         entries: list[SessionInfo] = []
-        for path in sorted(self.directory.glob("*.json")):
+        for path in sorted(self.directory.glob(f"{self.prefix}*.json")):
             result = read_json_safe(path, None)
             if result.error is not None or not isinstance(result.data, dict):
                 message = result.error or "not a JSON object"
                 self.warnings.append(f"{path.name}: {message}")
                 entries.append(
                     SessionInfo(
-                        name=path.stem,
+                        name=self.name_of(path),
                         path=path,
-                        title=path.stem,
+                        title=self.name_of(path),
                         updated_at="",
                         model="",
                         role="",
@@ -102,9 +117,9 @@ class SessionStore:
             data = result.data
             entries.append(
                 SessionInfo(
-                    name=path.stem,
+                    name=self.name_of(path),
                     path=path,
-                    title=str(data.get("title") or path.stem),
+                    title=str(data.get("title") or self.name_of(path)),
                     updated_at=str(data.get("updated_at") or ""),
                     model=str(data.get("model") or ""),
                     role=str(data.get("role") or ""),

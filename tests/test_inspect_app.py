@@ -13,7 +13,6 @@ from vox_chat.app import VoxApp
 from vox_chat.config import default_config, load_config
 from vox_chat.llm_client import TokenSample
 from vox_chat.models import Message as ChatMessage
-from vox_chat.report import reports_dir
 from vox_chat.storage import global_config_path
 from vox_chat.ui.inspect_screen import InspectScreen
 from vox_chat.ui.widgets import MessageBox
@@ -228,12 +227,12 @@ async def test_export_writes_all_three_formats(app: VoxApp) -> None:
         await pilot.press("ctrl+e")
         await pilot.pause()
 
-        assert sorted(path.suffix for path in reports_dir().glob("*")) == [
+        assert sorted(path.suffix for path in app.workspace_path.glob("vox-*")) == [
             ".html", ".json", ".md"
         ]
         assert "SAVED" in messages(app)[-1].message.content
 
-        html = next(reports_dir().glob("*.html")).read_text(encoding="utf-8")
+        html = next(app.workspace_path.glob("*.html")).read_text(encoding="utf-8")
         assert "why is the sky blue?" in html
         assert "Scattering." in html
         assert "<script" not in html.lower()
@@ -259,7 +258,7 @@ async def test_export_accepts_one_format_and_refuses_nonsense(app: VoxApp) -> No
         await pilot.pause()
         app.run_command("/export md")
         await pilot.pause()
-        assert [path.suffix for path in reports_dir().glob("*")] == [".md"]
+        assert [path.suffix for path in app.workspace_path.glob("vox-*")] == [".md"]
 
         app.run_command("/export pdf")
         await pilot.pause()
@@ -298,7 +297,7 @@ async def test_exporting_an_unmeasured_session_still_works(app: VoxApp) -> None:
         app.run_command("/export html")
         await pilot.pause()
 
-        html = next(reports_dir().glob("*.html")).read_text(encoding="utf-8")
+        html = next(app.workspace_path.glob("*.html")).read_text(encoding="utf-8")
         assert "Inspection was off" in html
         assert "no inspection" in html
 

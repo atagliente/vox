@@ -71,7 +71,7 @@ def test_updated_at_moves_forward_on_save() -> None:
 def test_listing_tolerates_a_corrupt_file() -> None:
     store = SessionStore()
     store.save(make_session(), "good")
-    (sessions_dir() / "broken.json").write_text("{oops", encoding="utf-8")
+    (sessions_dir() / "vox-session-broken.json").write_text("{oops", encoding="utf-8")
 
     entries = store.list()
     names = {entry.name for entry in entries}
@@ -84,7 +84,7 @@ def test_listing_tolerates_a_corrupt_file() -> None:
 def test_loading_a_corrupt_session_raises_but_does_not_crash_startup() -> None:
     store = SessionStore()
     (sessions_dir()).mkdir(parents=True, exist_ok=True)
-    (sessions_dir() / "bad.json").write_text("[]", encoding="utf-8")
+    (sessions_dir() / "vox-session-bad.json").write_text("[]", encoding="utf-8")
     with pytest.raises(ValueError):
         store.load("bad")
     with pytest.raises(FileNotFoundError):
@@ -102,3 +102,33 @@ def test_session_file_is_utf8_json(tmp_path: Path) -> None:
     path = store.save(make_session(), "utf8")
     data = json.loads(path.read_text(encoding="utf-8"))
     assert "àèìòù ✓" in data["messages"][0]["content"]
+
+
+def test_sessions_are_named_so_one_glob_ignores_them(tmp_path: Path) -> None:
+    """They sit next to the work, so they have to be recognisable."""
+    store = SessionStore(tmp_path)
+    path = store.save(make_session(), "refactor plan")
+    assert path == tmp_path / "vox-session-refactor-plan.json"
+    assert path.name.startswith("vox-")
+
+    assert store.load("refactor plan").title == "my session"
+    # The listing hands back the slug, which load() accepts as it stands.
+    assert [entry.name for entry in store.list()] == ["refactor-plan"]
+    assert store.load("refactor-plan").title == "my session"
+
+
+def test_other_json_in_the_directory_is_left_alone(tmp_path: Path) -> None:
+    (tmp_path / "package.json").write_text('{"name": "mine"}', encoding="utf-8")
+    (tmp_path / "tsconfig.json").write_text("{}", encoding="utf-8")
+    store = SessionStore(tmp_path)
+    store.save(make_session(), "mine")
+
+    assert [entry.name for entry in store.list()] == ["mine"]
+    assert store.warnings == [], "a project's own JSON is not a corrupt session"
+    assert (tmp_path / "package.json").read_text(encoding="utf-8") == '{"name": "mine"}'
+
+
+def test_a_name_already_carrying_the_prefix_is_not_doubled(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path)
+    path = store.save(make_session(), "vox-session-plan")
+    assert path.name == "vox-session-plan.json"

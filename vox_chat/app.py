@@ -116,7 +116,9 @@ class VoxApp(App[None]):
         self.show_splash = show_splash and bool(self.config.get("ui", {}).get("splash", True))
         self.role_store = RoleStore()
         self.prompt_store = PromptStore()
-        self.session_store = SessionStore()
+        # Sessions and reports belong to the work, so they follow the
+        # directory VOX was started in rather than the home.
+        self.session_store = SessionStore(self.workspace_path)
         self.history = InputHistory()
         self.workspace = Workspace(self.workspace_path)
 
@@ -930,7 +932,12 @@ class VoxApp(App[None]):
             for entry in entries
         ]
         choice = await self.push_screen_wait(
-            PickerModal("SESSIONS", items, "no saved sessions")
+            PickerModal(
+                "SESSIONS",
+                items,
+                f"no sessions in {self.workspace_path}\n"
+                "they are saved here, next to the work",
+            )
         )
         if choice:
             self.load_session(choice)
@@ -1059,6 +1066,7 @@ class VoxApp(App[None]):
             return
         self.workspace_path = candidate.resolve()
         self.workspace = Workspace(self.workspace_path)
+        self.session_store = SessionStore(self.workspace_path)
         if announce:
             self.write_system(f"WORKSPACE SET - {self.workspace_path}")
         self.refresh_status()
@@ -1380,7 +1388,9 @@ class VoxApp(App[None]):
     def export_report(self, formats: tuple[str, ...] = reporting.FORMATS) -> None:
         """Write the session out. Never blocks on anything but the disk."""
         try:
-            written = reporting.write(self.build_report(), formats=formats)
+            written = reporting.write(
+                self.build_report(), formats=formats, directory=self.workspace_path
+            )
         except (OSError, ValueError) as exc:
             self.write_error(f"EXPORT FAILED - {exc}")
             return

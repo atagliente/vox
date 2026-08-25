@@ -13,6 +13,18 @@ machine and version named, not estimated.
 
 ## Unreleased — 0.1.0
 
+### Results follow the work
+
+**2026-08-25**
+
+- Exports and saved sessions are written **into the directory VOX was started
+  in**, not into `~/.vox`: `vox-<timestamp>.{html,json,md}` and
+  `vox-session-<name>.json`. `/workspace` moves both.
+- The `vox-` prefix means one `.gitignore` line covers them, and a project's
+  own `package.json` is never read as a session.
+- What stays in `~/.vox` is what belongs to the operator rather than to a
+  project: configuration, roles, prompts, input history and logs.
+
 ### Token inspection and reports
 
 **2026-08-25** · [`ebcc1f5`](https://github.com/atagliente/vox/commit/ebcc1f5),

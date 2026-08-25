@@ -120,7 +120,10 @@ async def test_session_save_and_load_round_trip(offline_app: VoxApp) -> None:
         offline_app.dirty = True
         offline_app.save_session("smoke")
         await pilot.pause()
-        assert (sessions_dir() / "smoke.json").exists()
+        # Saved next to the work, not in the home directory.
+        saved = offline_app.workspace_path / "vox-session-smoke.json"
+        assert saved.exists()
+        assert not (sessions_dir() / "vox-session-smoke.json").exists()
         assert offline_app.dirty is False
 
         offline_app.run_command("/new")

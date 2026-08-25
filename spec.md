@@ -315,7 +315,10 @@ once. Inspection must never change the outcome of a chat.
 
 ## Reports
 
-`/export` writes the session to `~/.vox/reports/` in HTML, JSON and Markdown.
+`/export` writes the session into the directory VOX was started in, as
+`vox-<timestamp>` in HTML, JSON and Markdown. Results belong to the work, not
+to a hidden folder in the home; the `vox-` prefix keeps them one glob away from
+being ignored.
 Each opens with the question, model, provider, endpoint, role and the
 parameters actually sent, followed by the exchange with thinking kept separate,
 then the statistics and the decision points, then provenance. The HTML is
@@ -343,7 +346,8 @@ are reported before sending. Substitution never uses `eval()`.
 
 ## Sessions
 
-Each session is a JSON file under `~/.vox/sessions/` holding its id and title,
+Each session is a JSON file named `vox-session-<name>.json` in the directory
+VOX was started in holding its id and title,
 creation and modification dates, provider, model and role, the associated
 workspace, the full message history including tool calls and their results, and
 the agent-mode state. Writes are atomic (temporary file, then replace).
