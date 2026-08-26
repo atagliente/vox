@@ -13,6 +13,27 @@ machine and version named, not estimated.
 
 ## Unreleased — 0.1.0
 
+### Linux, properly
+
+**2026-08-25**
+
+- **Python 3.11 is enough.** It was 3.12, which Debian 12 does not carry: its
+  stock `python3` is 3.11, so the installer refused on a perfectly capable
+  machine. Every module parses under 3.11 rules and no 3.12-only API is used —
+  checked with `ast.parse(feature_version=(3, 11))` across all 27 modules, not
+  by running the suite on 3.11.
+- **The installer installs what is missing.** It detects the package manager
+  (apt, dnf, pacman, zypper, apk, brew, pkg), and offers to add a Python, or
+  the `python3-venv` that Debian and Ubuntu ship separately and without which
+  `python3 -m venv` fails. It shows the exact command, asks before running
+  anything with `sudo`, and says plainly what skipping costs — whether that is
+  fatal (venv) or not (the clipboard helper).
+- Verified on Ubuntu 24.04 through WSL: a full install into a temporary prefix,
+  and a stubbed interpreter reproducing Debian's missing `venv` to check the
+  diagnosis rather than assume it.
+- A test keeps `install.sh` at LF endings: a CRLF copy dies on Debian with
+  `set: Illegal option`, which is exactly what a Windows checkout can produce.
+
 ### Results follow the work
 
 **2026-08-25**

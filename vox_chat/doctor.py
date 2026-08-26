@@ -28,7 +28,7 @@ from .storage import vox_home
 
 Status = Literal["OK", "FAIL", "WARN", "--"]
 
-_MIN_PYTHON = (3, 12)
+_MIN_PYTHON = (3, 11)
 _REQUIRED = ("openai", "textual", "rich")
 
 
@@ -53,7 +53,7 @@ def check_python() -> Check:
     version = sys.version_info
     detail = f"{platform.python_version()} ({sys.executable})"
     if (version.major, version.minor) < _MIN_PYTHON:
-        return Check("FAIL", "PYTHON", detail + " - 3.12 or newer required")
+        return Check("FAIL", "PYTHON", detail + " - 3.11 or newer required")
     return Check("OK", "PYTHON", detail)
 
 

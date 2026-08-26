@@ -5,7 +5,8 @@
 #   sh install.sh --yes        no questions asked
 #   sh install.sh --uninstall  remove the command
 #
-# POSIX sh only, no sudo, idempotent: running it twice is harmless.
+# POSIX sh only, idempotent: running it twice is harmless. It never uses sudo
+# without asking, and always shows the exact command it would run.
 
 set -eu
 
@@ -75,10 +76,12 @@ fi
 
 # ------------------------------------------------------------------ python
 
+MIN_PYTHON="3.11"
+
 find_python() {
-    for candidate in python3.13 python3.12 python3 python; do
+    for candidate in python3.14 python3.13 python3.12 python3.11 python3 python; do
         if command -v "$candidate" >/dev/null 2>&1; then
-            if "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3, 12) else 1)' 2>/dev/null; then
+            if "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3, 11) else 1)' 2>/dev/null; then
                 printf '%s' "$candidate"
                 return 0
             fi
@@ -87,17 +90,159 @@ find_python() {
     return 1
 }
 
-python_hint() {
-    case "$PLATFORM" in
-        Termux)  say "  pkg install python" ;;
-        Darwin)  say "  brew install python@3.12" ;;
-        Linux)
-            say "  Debian/Ubuntu: sudo apt install python3.12 python3.12-venv"
-            say "  Fedora:        sudo dnf install python3.12"
-            say "  Arch:          sudo pacman -S python"
-            ;;
-        *)       say "  install Python 3.12 or newer from https://python.org" ;;
+report_python_found() {
+    # Say what is there, so "not found" never looks like a mystery.
+    for candidate in python3 python; do
+        command -v "$candidate" >/dev/null 2>&1 || continue
+        version=$("$candidate" -c 'import platform; print(platform.python_version())' 2>/dev/null)
+        [ -n "$version" ] && say "  ${DIM}$candidate is $version, older than $MIN_PYTHON${RESET}"
+    done
+}
+
+# ------------------------------------------------------- package management
+
+PACKAGE_MANAGER=""
+SUDO=""
+
+detect_package_manager() {
+    for manager in apt-get dnf yum pacman zypper apk brew pkg; do
+        if command -v "$manager" >/dev/null 2>&1; then
+            PACKAGE_MANAGER="$manager"
+            break
+        fi
+    done
+    # Termux and root need no sudo; everyone else does, if it is there.
+    if [ "$IS_TERMUX" -eq 0 ] && [ "$(id -u 2>/dev/null || echo 1)" -ne 0 ]; then
+        case "$PACKAGE_MANAGER" in
+            brew|pkg|"") SUDO="" ;;
+            *) command -v sudo >/dev/null 2>&1 && SUDO="sudo" ;;
+        esac
+    fi
+}
+
+install_command() {
+    # install_command <package>... -> prints the command that would install them
+    case "$PACKAGE_MANAGER" in
+        apt-get) printf '%s apt-get install -y %s' "$SUDO" "$*" ;;
+        dnf)     printf '%s dnf install -y %s' "$SUDO" "$*" ;;
+        yum)     printf '%s yum install -y %s' "$SUDO" "$*" ;;
+        pacman)  printf '%s pacman -S --needed --noconfirm %s' "$SUDO" "$*" ;;
+        zypper)  printf '%s zypper --non-interactive install %s' "$SUDO" "$*" ;;
+        apk)     printf '%s apk add %s' "$SUDO" "$*" ;;
+        brew)    printf 'brew install %s' "$*" ;;
+        pkg)     printf 'pkg install -y %s' "$*" ;;
+        *)       printf '' ;;
     esac
+}
+
+run_install() {
+    # Ask before touching the system, and always show the exact command.
+    command=$(install_command "$@")
+    if [ -z "$command" ]; then
+        warn "no package manager found; install these yourself: $*"
+        return 1
+    fi
+    say ""
+    say "Missing packages: $*"
+    say "  ${DIM}$command${RESET}"
+    if [ -n "$SUDO" ] && ! command -v sudo >/dev/null 2>&1; then
+        warn "sudo is not available; run that as root and start again"
+        return 1
+    fi
+    if ! ask "Run it now?"; then
+        # What being skipped costs depends on the caller, so it says so.
+        warn "skipped"
+        return 1
+    fi
+    # shellcheck disable=SC2086
+    if [ "$PACKAGE_MANAGER" = "apt-get" ]; then
+        ${SUDO} apt-get update >/dev/null 2>&1 || true
+    fi
+    if eval "$command"; then
+        ok "installed: $*"
+        return 0
+    fi
+    warn "the package manager refused; see its output above"
+    return 1
+}
+
+python_packages() {
+    # What this platform calls a usable Python, venv and pip included.
+    case "$PACKAGE_MANAGER" in
+        apt-get) printf 'python3 python3-venv python3-pip' ;;
+        dnf|yum) printf 'python3 python3-pip' ;;
+        pacman)  printf 'python python-pip' ;;
+        zypper)  printf 'python3 python3-pip' ;;
+        apk)     printf 'python3 py3-pip' ;;
+        brew)    printf 'python' ;;
+        pkg)     printf 'python' ;;
+        *)       printf '' ;;
+    esac
+}
+
+venv_packages() {
+    # Debian splits venv and ensurepip out of the interpreter package.
+    version=$("$1" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)
+    case "$PACKAGE_MANAGER" in
+        apt-get)
+            if [ -n "$version" ]; then
+                # python3.11-venv on Debian 12, python3.12-venv on Ubuntu 24.04.
+                printf 'python3-venv python%s-venv python3-pip' "$version"
+            else
+                printf 'python3-venv python3-pip'
+            fi
+            ;;
+        *) printf '' ;;
+    esac
+}
+
+clipboard_packages() {
+    # Copy and paste need a helper on Linux; without one the keys report a
+    # failure instead of working. Not required to run VOX.
+    case "$PACKAGE_MANAGER" in
+        apt-get|dnf|yum|zypper) printf 'xclip' ;;
+        pacman) printf 'xclip' ;;
+        apk)    printf 'xclip' ;;
+        pkg)    printf 'termux-api' ;;
+        *)      printf '' ;;
+    esac
+}
+
+offer_clipboard_helper() {
+    [ "$PLATFORM" = "Darwin" ] && return 0          # pbcopy is always there
+    for helper in xclip xsel wl-copy termux-clipboard-set; do
+        command -v "$helper" >/dev/null 2>&1 && return 0
+    done
+    packages=$(clipboard_packages)
+    [ -z "$packages" ] && return 0
+    say ""
+    warn "no clipboard helper found: ctrl+c and ctrl+v will report a failure"
+    run_install $packages || warn "carry on without it; everything else works"
+}
+
+ensure_venv_support() {
+    # A Python that cannot build a venv is no use to us; on Debian that is a
+    # missing package rather than a broken interpreter, so offer to add it.
+    "$1" -c 'import venv, ensurepip' 2>/dev/null && return 0
+    warn "$1 has no venv or ensurepip module"
+    packages=$(venv_packages "$1")
+    if [ -z "$packages" ]; then
+        warn "install the venv module for $1 and start again"
+        return 1
+    fi
+    # Try the version-specific name too; apt ignores the ones that do not exist.
+    for package in $packages; do
+        run_install "$package" >/dev/null 2>&1 && break
+    done
+    if "$1" -c 'import venv, ensurepip' 2>/dev/null; then
+        ok "venv is available now"
+        return 0
+    fi
+    if ! run_install $packages; then
+        warn "VOX needs the venv module to install itself"
+        return 1
+    fi
+    "$1" -c 'import venv, ensurepip' 2>/dev/null
 }
 
 # --------------------------------------------------------------- uninstall
@@ -131,12 +276,32 @@ say "PLATFORM: $PLATFORM"
 
 [ "$UNINSTALL" -eq 1 ] && do_uninstall
 
+detect_package_manager
+[ -n "$PACKAGE_MANAGER" ] && say "${DIM}package manager: $PACKAGE_MANAGER${RESET}"
+
 PY=$(find_python) || {
-    printf '%s[FAIL]%s Python 3.12 or newer not found. Install it with:\n' "$RED" "$RESET" >&2
-    python_hint
-    exit 1
+    warn "no Python $MIN_PYTHON or newer on this system"
+    report_python_found
+    packages=$(python_packages)
+    if [ -n "$packages" ] && run_install $packages; then
+        PY=$(find_python) || true
+    fi
 }
+
+if [ -z "${PY:-}" ]; then
+    printf '%s[FAIL]%s VOX needs Python %s or newer.\n' "$RED" "$RESET" "$MIN_PYTHON" >&2
+    say ""
+    say "Your distribution may not carry one. Two ways that always work:"
+    say "  ${DIM}curl -LsSf https://astral.sh/uv/install.sh | sh && uv python install 3.12${RESET}"
+    say "  ${DIM}or pyenv: https://github.com/pyenv/pyenv${RESET}"
+    say "On Debian 12 the stock python3 is 3.11, which is enough — install it with:"
+    say "  ${DIM}sudo apt-get install python3 python3-venv python3-pip${RESET}"
+    exit 1
+fi
 ok "python: $PY ($("$PY" -c 'import platform; print(platform.python_version())'))"
+
+ensure_venv_support "$PY" || die "cannot create virtual environments with $PY"
+offer_clipboard_helper
 
 SRC=$(script_dir)
 if [ -n "$SRC" ] && [ -f "$SRC/pyproject.toml" ]; then
@@ -162,7 +327,11 @@ install_with_pipx() {
 install_with_venv() {
     say "${DIM}installing into $VENV_DIR ...${RESET}"
     if [ ! -d "$VENV_DIR" ]; then
-        "$PY" -m venv "$VENV_DIR" || die "cannot create the virtual environment (on Debian install python3-venv)"
+        if ! "$PY" -m venv "$VENV_DIR"; then
+            # Almost always a missing python3-venv on Debian and friends.
+            ensure_venv_support "$PY" || die "cannot create a virtual environment"
+            "$PY" -m venv "$VENV_DIR" || die "cannot create a virtual environment"
+        fi
     fi
     "$VENV_DIR/bin/python" -m pip install --upgrade pip >/dev/null 2>&1 || true
     "$VENV_DIR/bin/python" -m pip install --upgrade "$TARGET" >/dev/null || die "pip install failed"

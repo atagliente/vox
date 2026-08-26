@@ -135,3 +135,15 @@ def test_api_keys_are_masked_for_display() -> None:
     redacted = redacted_copy(default_config())
     assert redacted["providers"]["local-ollama"]["api_key"] == "****ma"
     assert default_config()["providers"]["local-ollama"]["api_key"] == "ollama"
+
+
+def test_the_installer_keeps_unix_line_endings() -> None:
+    """A CRLF install.sh dies on Debian with "set: Illegal option"."""
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parent.parent / "install.sh"
+    if not script.exists():
+        pytest.skip("running outside a checkout")
+    data = script.read_bytes()
+    assert b"\r\n" not in data, "install.sh must stay LF or sh cannot read it"
+    assert data.startswith(b"#!/bin/sh\n")

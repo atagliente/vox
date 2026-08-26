@@ -3,7 +3,7 @@
     VOX preflight installer for Windows.
 
 .DESCRIPTION
-    Verifies Python 3.12+, installs VOX (pipx when available, otherwise a
+    Verifies Python 3.11+, installs VOX (pipx when available, otherwise a
     dedicated virtual environment), puts a `vox` launcher on the user PATH and
     runs the system check. Never needs administrator rights: only the *user*
     PATH is touched.
@@ -48,19 +48,20 @@ function Confirm-Step($question) {
 }
 
 function Find-Python {
-    # Prefer the launcher, then any python on PATH; require 3.12 or newer.
+    # Prefer the launcher, then any python on PATH; require 3.11 or newer.
     $candidates = @()
     if (Get-Command py -ErrorAction SilentlyContinue) {
         $candidates += ,@('py', @('-3.13'))
         $candidates += ,@('py', @('-3.12'))
+        $candidates += ,@('py', @('-3.11'))
         $candidates += ,@('py', @('-3'))
     }
-    foreach ($name in @('python3.12', 'python')) {
+    foreach ($name in @('python3.12', 'python3.11', 'python3', 'python')) {
         if (Get-Command $name -ErrorAction SilentlyContinue) { $candidates += ,@($name, @()) }
     }
     foreach ($candidate in $candidates) {
         $exe = $candidate[0]; $prefixArgs = $candidate[1]
-        $probe = @($prefixArgs) + @('-c', 'import sys; sys.exit(0 if sys.version_info[:2] >= (3,12) else 1)')
+        $probe = @($prefixArgs) + @('-c', 'import sys; sys.exit(0 if sys.version_info[:2] >= (3,11) else 1)')
         try { & $exe @probe 2>$null } catch { continue }
         if ($LASTEXITCODE -eq 0) { return [pscustomobject]@{ Exe = $exe; Args = $prefixArgs } }
     }
@@ -96,7 +97,7 @@ if ($Uninstall) { Invoke-Uninstall }
 
 $python = Find-Python
 if (-not $python) {
-    Write-Fail 'Python 3.12 or newer not found.'
+    Write-Fail 'Python 3.11 or newer not found.'
     Write-Host '  Install it from https://python.org/downloads or with: winget install Python.Python.3.12'
     exit 1
 }

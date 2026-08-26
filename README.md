@@ -12,7 +12,7 @@ Termux.
 
 ## Requirements
 
-- Python 3.12 or newer
+- Python 3.11 or newer — the installer offers to fetch it if it is missing
 - A running OpenAI-compatible server — for Ollama: `ollama serve`
 
 ## Quick start
@@ -33,6 +33,10 @@ It checks Python, installs through `pipx` (or a private virtual environment in
 `~/.vox/venv`), puts a `vox` launcher on your user `PATH`, then runs the check
 below.
 
+On Linux it also offers to install what is missing — on Debian and Ubuntu that
+is usually `python3-venv`, which ships separately from `python3` — showing the
+exact command and asking before it runs anything with `sudo`.
+
 **2. Check.**
 
 ```bash
@@ -40,7 +44,7 @@ vox doctor
 ```
 
 ```text
-[ OK ] PYTHON   3.12.5
+[ OK ] PYTHON   3.12.3
 [ OK ] DEPS     openai 3.3.1 | textual 8.2.8 | rich 15.0.0
 [ OK ] CONFIG   /home/you/.vox
 [FAIL] LINK     cannot reach provider: http://localhost:11434/v1
