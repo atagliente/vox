@@ -149,6 +149,13 @@ run_install() {
         warn "sudo is not available; run that as root and start again"
         return 1
     fi
+    # sudo without a terminal waits for a password nobody can type, which
+    # looks exactly like a hang. Check first, and say so instead.
+    if [ -n "$SUDO" ] && ! sudo -n true 2>/dev/null && [ ! -t 0 ]; then
+        warn "sudo needs a password and there is no terminal to type it in"
+        say "  ${DIM}run the command above yourself, then start this again${RESET}"
+        return 1
+    fi
     if ! ask "Run it now?"; then
         # What being skipped costs depends on the caller, so it says so.
         warn "skipped"

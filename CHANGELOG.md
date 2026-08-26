@@ -32,6 +32,9 @@ and Termux, needs Python 3.11, and installs with one command.
   `python3 -m venv` fails. It shows the exact command, asks before running
   anything with `sudo`, and says plainly what skipping costs — whether that is
   fatal (venv) or not (the clipboard helper).
+- **sudo never blocks.** With `--yes` and no terminal — a piped install, or
+  CI — `sudo` would sit waiting for a password nobody could type, which looks
+  exactly like a hang. It now checks with `sudo -n` first and says so instead.
 - Verified on Ubuntu 24.04 through WSL: a full install into a temporary prefix,
   and a stubbed interpreter reproducing Debian's missing `venv` to check the
   diagnosis rather than assume it.
