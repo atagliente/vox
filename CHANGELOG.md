@@ -2,16 +2,20 @@
 
 Everything worth knowing about how VOX got here, newest first.
 
-Nothing has been released yet: every entry below belongs to the unreleased
-0.1.0. Dates are the day the work landed on `main`. Version numbers will follow
-[semantic versioning](https://semver.org) once there is a release to number.
+Versions follow [semantic versioning](https://semver.org). Dates are the day
+the work landed on `main`.
 
 Where an entry says a figure — a timing, a token count — it was measured on the
 machine and version named, not estimated.
 
 ---
 
-## Unreleased — 0.1.0
+## 0.1.0 — 2026-08-25
+
+The first release: a terminal chat client for coding against any
+OpenAI-compatible endpoint, with an optional coding agent, live measurement of
+the output distribution, and saveable reports. Runs on Linux, macOS, Windows
+and Termux, needs Python 3.11, and installs with one command.
 
 ### Linux, properly
 
