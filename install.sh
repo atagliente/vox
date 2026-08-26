@@ -331,15 +331,42 @@ install_with_pipx() {
     return 0
 }
 
+create_venv() {
+    if ! "$PY" -m venv "$VENV_DIR"; then
+        # Almost always a missing python3-venv on Debian and friends.
+        ensure_venv_support "$PY" || return 1
+        "$PY" -m venv "$VENV_DIR" || return 1
+    fi
+    [ -x "$VENV_DIR/bin/python" ]
+}
+
+ensure_pip() {
+    # A half-built environment left by an earlier failed attempt has no pip,
+    # and every later command then fails with "No module named pip".
+    "$VENV_DIR/bin/python" -c 'import pip' 2>/dev/null && return 0
+    say "${DIM}the virtual environment has no pip; repairing it...${RESET}"
+    if "$VENV_DIR/bin/python" -m ensurepip --upgrade >/dev/null 2>&1 &&
+       "$VENV_DIR/bin/python" -c 'import pip' 2>/dev/null; then
+        ok "pip restored"
+        return 0
+    fi
+    warn "rebuilding the virtual environment from scratch"
+    rm -rf "$VENV_DIR"
+    ensure_venv_support "$PY" || return 1
+    create_venv || return 1
+    "$VENV_DIR/bin/python" -c 'import pip' 2>/dev/null
+}
+
 install_with_venv() {
     say "${DIM}installing into $VENV_DIR ...${RESET}"
-    if [ ! -d "$VENV_DIR" ]; then
-        if ! "$PY" -m venv "$VENV_DIR"; then
-            # Almost always a missing python3-venv on Debian and friends.
-            ensure_venv_support "$PY" || die "cannot create a virtual environment"
-            "$PY" -m venv "$VENV_DIR" || die "cannot create a virtual environment"
-        fi
+    if [ -d "$VENV_DIR" ] && [ ! -x "$VENV_DIR/bin/python" ]; then
+        warn "$VENV_DIR is not a usable environment; replacing it"
+        rm -rf "$VENV_DIR"
     fi
+    if [ ! -d "$VENV_DIR" ]; then
+        create_venv || die "cannot create a virtual environment with $PY"
+    fi
+    ensure_pip || die "no pip in $VENV_DIR, and it could not be repaired"
     "$VENV_DIR/bin/python" -m pip install --upgrade pip >/dev/null 2>&1 || true
     "$VENV_DIR/bin/python" -m pip install --upgrade "$TARGET" >/dev/null || die "pip install failed"
     mkdir -p "$BIN_DIR"

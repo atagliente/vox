@@ -32,6 +32,11 @@ and Termux, needs Python 3.11, and installs with one command.
   `python3 -m venv` fails. It shows the exact command, asks before running
   anything with `sudo`, and says plainly what skipping costs — whether that is
   fatal (venv) or not (the clipboard helper).
+- **A half-built environment repairs itself.** A failed first attempt can
+  leave a virtual environment with no pip, and every later command then dies
+  with `No module named pip`. The installer now checks for pip, restores it
+  with `ensurepip`, and rebuilds the environment from scratch if that is not
+  enough.
 - **sudo never blocks.** With `--yes` and no terminal — a piped install, or
   CI — `sudo` would sit waiting for a password nobody could type, which looks
   exactly like a hang. It now checks with `sudo -n` first and says so instead.
