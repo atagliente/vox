@@ -1,16 +1,23 @@
-"""The end-of-chat report, in HTML, JSON and Markdown.
+"""The end-of-chat report, in HTML, JSON, Markdown and TOON.
 
 Written into the directory VOX was started in, as vox-<timestamp>.<ext>.
 
-One structure, three writers, the same figures in each. The HTML carries no
+One structure, four writers, the same figures in each. The HTML carries no
 JavaScript at all, which is the simplest way to keep the promise that it reads
 correctly with JavaScript disabled.
+
+TOON (Token-Oriented Object Notation) is a line-oriented, indentation-based
+encoding of the JSON data model (spec v4.1, https://toonformat.dev/). It is
+added as a fourth format because it is the most token-efficient rendering of
+the same figures for an LLM to read back.
 """
 
 from __future__ import annotations
 
 import html
 import json
+import math
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -21,7 +28,7 @@ from .inspection import InspectionRun
 from .models import Message
 from .storage import write_json_atomic
 
-FORMATS = ("html", "json", "md")
+FORMATS = ("html", "json", "md", "toon")
 
 _ROLE_LABEL = {
     "user": "QUESTION",
@@ -368,6 +375,369 @@ def write_html(report: Report, path: Path) -> Path:
     return path
 
 
+# --------------------------------------------------------------------- TOON
+
+# TOON, Token-Oriented Object Notation, spec v4.1 (https://toonformat.dev/).
+# A line-oriented, indentation-based encoding of the JSON data model. The
+# report's figures are rendered here from the very same dict that JSON uses,
+# so every format shows the same numbers.
+
+_INDENT_SIZE = 2
+_TOON_DOC_DELIMITER = ","
+
+_UNQUOTED_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
+# An unquoted token that would decode as a number must be quoted (spec §7.2).
+_TOON_NUMBER_LIKE_RE = re.compile(
+    r"^[+-]?[0-9]+(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?$", re.IGNORECASE
+)
+_TOON_ESCAPES = {
+    "\\": "\\\\",
+    '"': '\\"',
+    "\n": "\\n",
+    "\r": "\\r",
+    "\t": "\\t",
+}
+
+
+def _toon_indent(depth: int) -> str:
+    return " " * (_INDENT_SIZE * depth)
+
+
+def _toon_quote(s: str) -> str:
+    """Quote and escape a string per TOON §7.1."""
+    out = ['"']
+    for ch in s:
+        esc = _TOON_ESCAPES.get(ch)
+        if esc is not None:
+            out.append(esc)
+        elif ord(ch) < 0x20:
+            out.append("\\u%04x" % ord(ch))
+        else:
+            out.append(ch)
+    out.append('"')
+    return "".join(out)
+
+
+def _toon_needs_quotes(s: str, delimiter: str) -> bool:
+    """TOON §7.2: the conditions under which a string value must be quoted."""
+    if s == "":
+        return True
+    if s[0] in " \t" or s[-1] in " \t":
+        return True
+    if s in ("true", "false", "null"):
+        return True
+    if _TOON_NUMBER_LIKE_RE.match(s):
+        return True
+    for ch in ':"\\[]{}':
+        if ch in s:
+            return True
+    if delimiter in s:
+        return True
+    if any(ord(ch) < 0x20 for ch in s):
+        return True
+    if s[0] in "#-":
+        return True
+    return False
+
+
+def _toon_string(s: str, delimiter: str) -> str:
+    return _toon_quote(s) if _toon_needs_quotes(s, delimiter) else s
+
+
+def _toon_key(key: str) -> str:
+    """Encode an object key / field name per TOON §7.3."""
+    if _UNQUOTED_KEY_RE.match(key):
+        return key
+    return _toon_quote(key)
+
+
+def _toon_number(value: int | float) -> str:
+    """Canonical number form (§2): integers, -0→0, floats without exponents."""
+    if isinstance(value, int):
+        return str(value)
+    if math.isnan(value) or math.isinf(value):
+        return "null"
+    if value == 0:
+        value = 0.0
+    if value.is_integer():
+        return str(int(value))
+    return repr(value)
+
+
+def _toon_scalar(value: Any, delimiter: str) -> str:
+    """Render a primitive (null/bool/number/string) as a TOON token."""
+    if value is None:
+        return "null"
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if isinstance(value, (int, float)):
+        return _toon_number(value)
+    return _toon_string(str(value), delimiter)
+
+
+def _is_primitive(value: Any) -> bool:
+    return value is None or isinstance(value, (bool, int, float, str))
+
+
+def _is_uniform_column(column: Sequence[Any]) -> bool:
+    """A column is uniform-primitive or nested-uniform (§9.3)."""
+    if not column:
+        return False
+    if all(_is_primitive(v) for v in column):
+        return True
+    if all(isinstance(v, dict) and v for v in column):
+        subkeys = set(column[0])
+        if any(set(v) != subkeys for v in column):
+            return False
+        return all(
+            _is_uniform_column([v[k] for v in column]) for k in column[0]
+        )
+    return False
+
+
+def _is_tabular(elements: Sequence[Any]) -> bool:
+    """Does this array of objects qualify for the tabular form (§9.3)?"""
+    if not elements:
+        return False
+    if any(not isinstance(v, dict) or not v for v in elements):
+        return False
+    keys = set(elements[0])
+    if not keys or any(set(v) != keys for v in elements):
+        return False
+    return all(_is_uniform_column([v[k] for v in elements]) for k in elements[0])
+
+
+def _is_keyed_tabular(mapping: dict[str, Any]) -> bool:
+    """Does this object qualify for the keyed tabular form (§9.5)?"""
+    values = list(mapping.values())
+    if len(values) < 2:
+        return False
+    if any(not isinstance(v, dict) or not v for v in values):
+        return False
+    keys = set(values[0])
+    if any(set(v) != keys for v in values):
+        return False
+    return all(_is_uniform_column([v[k] for v in values]) for k in values[0])
+
+
+def _field_entry(k: str, elements: Sequence[dict[str, Any]]) -> Any:
+    """One field in a tabular header: a leaf name or a (name, [entries]) group."""
+    column = [e[k] for e in elements]
+    if all(_is_primitive(v) for v in column):
+        return k
+    return (k, [_field_entry(sk, [e[k] for e in elements]) for sk in elements[0][k]])
+
+
+def _field_entries(elements: Sequence[dict[str, Any]]) -> list[Any]:
+    return [_field_entry(k, elements) for k in elements[0]]
+
+
+def _field_header(entry: Any, delimiter: str) -> str:
+    """Render a field entry for the header's brace list."""
+    if isinstance(entry, str):
+        return _toon_key(entry)
+    name, subs = entry
+    inner = delimiter.join(_field_header(s, delimiter) for s in subs)
+    return f"{_toon_key(name)}{{{inner}}}"
+
+
+def _row_cells(element: dict[str, Any], fields: Sequence[Any],
+               delimiter: str) -> list[str]:
+    """Leaf cells for one tabular/entry row, in depth-first pre-order."""
+    cells: list[str] = []
+    for entry in fields:
+        if isinstance(entry, str):
+            cells.append(_toon_scalar(element[entry], delimiter))
+        else:
+            name, subs = entry
+            cells.extend(_row_cells(element[name], subs, delimiter))
+    return cells
+
+
+def _delim_symbol(delimiter: str) -> str:
+    """The optional delimiter symbol declared inside the header brackets."""
+    return "" if delimiter == "," else delimiter
+
+
+def _toon_object(mapping: dict[str, Any], depth: int,
+                 lines: list[str], delimiter: str) -> None:
+    for key, value in mapping.items():
+        _toon_field(key, value, depth, lines, delimiter)
+
+
+def _toon_field(key: str, value: Any, depth: int,
+                lines: list[str], delimiter: str) -> None:
+    prefix = _toon_indent(depth)
+    if isinstance(value, dict):
+        if value and _is_keyed_tabular(value):
+            _toon_keyed_field(key, value, depth, lines, delimiter)
+        else:
+            lines.append(f"{prefix}{_toon_key(key)}:")
+            if value:
+                _toon_object(value, depth + 1, lines, delimiter)
+    elif isinstance(value, list):
+        _toon_array_field(key, value, depth, lines, delimiter)
+    else:
+        lines.append(f"{prefix}{_toon_key(key)}: {_toon_scalar(value, delimiter)}")
+
+
+def _toon_keyed_field(key: str, value: dict[str, Any], depth: int,
+                      lines: list[str], delimiter: str) -> None:
+    entries = list(value.items())
+    fields = _field_entries([v for _, v in entries])
+    fieldstr = delimiter.join(_field_header(f, delimiter) for f in fields)
+    header = (
+        f"{_toon_indent(depth)}{_toon_key(key)}"
+        f"[{len(entries)}:{_delim_symbol(delimiter)}]{{{fieldstr}}}:"
+    )
+    lines.append(header)
+    for entry_key, entry_value in entries:
+        cells = _row_cells(entry_value, fields, delimiter)
+        lines.append(
+            f"{_toon_indent(depth + 1)}{_toon_key(entry_key)}: "
+            f"{delimiter.join(cells)}"
+        )
+
+
+def _toon_array_field(key: str, value: list[Any], depth: int,
+                      lines: list[str], delimiter: str) -> None:
+    prefix = _toon_indent(depth)
+    if not value:
+        lines.append(f"{prefix}{_toon_key(key)}: []")
+    elif _is_tabular(value):
+        fields = _field_entries(value)
+        fieldstr = delimiter.join(_field_header(f, delimiter) for f in fields)
+        lines.append(
+            f"{prefix}{_toon_key(key)}"
+            f"[{len(value)}{_delim_symbol(delimiter)}]{{{fieldstr}}}:"
+        )
+        for element in value:
+            lines.append(_toon_indent(depth + 1) + delimiter.join(
+                _row_cells(element, fields, delimiter)
+            ))
+    elif all(_is_primitive(e) for e in value):
+        inline = delimiter.join(_toon_scalar(e, delimiter) for e in value)
+        lines.append(
+            f"{prefix}{_toon_key(key)}"
+            f"[{len(value)}{_delim_symbol(delimiter)}]: {inline}"
+        )
+    else:
+        lines.append(
+            f"{prefix}{_toon_key(key)}"
+            f"[{len(value)}{_delim_symbol(delimiter)}]:"
+        )
+        for element in value:
+            _toon_list_item(element, depth + 1, lines, delimiter)
+
+
+def _toon_list_item(element: Any, depth: int,
+                    lines: list[str], delimiter: str) -> None:
+    """One element of a list-form array at ``depth`` (§9.2, §9.4, §10)."""
+    prefix = _toon_indent(depth)
+    if isinstance(element, dict):
+        if not element:
+            lines.append(prefix + "-")
+            return
+        items = list(element.items())
+        first_key, first_value = items[0]
+        _toon_list_object_first(prefix, first_key, first_value, depth,
+                                lines, delimiter)
+        for key, value in items[1:]:
+            _toon_field(key, value, depth + 1, lines, delimiter)
+    elif isinstance(element, list):
+        if not element:
+            lines.append(prefix + f"- [0{_delim_symbol(delimiter)}]:")
+        elif all(_is_primitive(e) for e in element):
+            inline = delimiter.join(_toon_scalar(e, delimiter) for e in element)
+            lines.append(
+                f"{prefix}- [{len(element)}{_delim_symbol(delimiter)}]: {inline}"
+            )
+        else:
+            lines.append(f"{prefix}- [{len(element)}{_delim_symbol(delimiter)}]:")
+            for e in element:
+                _toon_list_item(e, depth + 1, lines, delimiter)
+    else:
+        lines.append(prefix + "- " + _toon_scalar(element, delimiter))
+
+
+def _toon_list_object_first(prefix: str, key: str, value: Any, depth: int,
+                            lines: list[str], delimiter: str) -> None:
+    """The first field of a list-item object sits on the hyphen line (§10)."""
+    if isinstance(value, dict):
+        if value and _is_keyed_tabular(value):
+            entries = list(value.items())
+            fields = _field_entries([v for _, v in entries])
+            fieldstr = delimiter.join(_field_header(f, delimiter) for f in fields)
+            lines.append(
+                f"{prefix}- {_toon_key(key)}"
+                f"[{len(entries)}:{_delim_symbol(delimiter)}]{{{fieldstr}}}:"
+            )
+            for entry_key, entry_value in entries:
+                cells = _row_cells(entry_value, fields, delimiter)
+                lines.append(
+                    f"{_toon_indent(depth + 2)}{_toon_key(entry_key)}: "
+                    f"{delimiter.join(cells)}"
+                )
+        else:
+            lines.append(f"{prefix}- {_toon_key(key)}:")
+            if value:
+                _toon_object(value, depth + 2, lines, delimiter)
+    elif isinstance(value, list):
+        _toon_list_object_array(prefix, key, value, depth, lines, delimiter)
+    else:
+        lines.append(f"{prefix}- {_toon_key(key)}: {_toon_scalar(value, delimiter)}")
+
+
+def _toon_list_object_array(prefix: str, key: str, value: list[Any], depth: int,
+                            lines: list[str], delimiter: str) -> None:
+    if not value:
+        lines.append(f"{prefix}- {_toon_key(key)}: []")
+    elif _is_tabular(value):
+        fields = _field_entries(value)
+        fieldstr = delimiter.join(_field_header(f, delimiter) for f in fields)
+        lines.append(
+            f"{prefix}- {_toon_key(key)}"
+            f"[{len(value)}{_delim_symbol(delimiter)}]{{{fieldstr}}}:"
+        )
+        for element in value:
+            lines.append(_toon_indent(depth + 2) + delimiter.join(
+                _row_cells(element, fields, delimiter)
+            ))
+    elif all(_is_primitive(e) for e in value):
+        inline = delimiter.join(_toon_scalar(e, delimiter) for e in value)
+        lines.append(
+            f"{prefix}- {_toon_key(key)}"
+            f"[{len(value)}{_delim_symbol(delimiter)}]: {inline}"
+        )
+    else:
+        lines.append(
+            f"{prefix}- {_toon_key(key)}"
+            f"[{len(value)}{_delim_symbol(delimiter)}]:"
+        )
+        for element in value:
+            _toon_list_item(element, depth + 2, lines, delimiter)
+
+
+def render_toon(report: Report) -> str:
+    """Render the report as a TOON document (spec v4.1).
+
+    The figures come from the same ``Report.to_dict`` the JSON writer uses,
+    so the TOON output carries exactly the same data.
+    """
+    lines: list[str] = []
+    _toon_object(report.to_dict(), 0, lines, _TOON_DOC_DELIMITER)
+    return "\n".join(lines)
+
+
+def write_toon(report: Report, path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # TOON forbids a trailing newline (§12).
+    path.write_text(render_toon(report), encoding="utf-8", newline="\n")
+    return path
+
+
 # ------------------------------------------------------------------ writing
 
 
@@ -387,6 +757,8 @@ def write(report: Report, formats: Sequence[str] = FORMATS,
             written.append(write_markdown(report, path))
         elif fmt == "html":
             written.append(write_html(report, path))
+        elif fmt == "toon":
+            written.append(write_toon(report, path))
         else:
             raise ValueError(f"unknown report format: {fmt}")
     return written
