@@ -408,31 +408,32 @@ async def test_the_universe_says_what_to_do_when_offline(app: VoxApp) -> None:
         app.run_command("/universe")
         await pilot.pause()
         summary = text_of(app.screen, "#universe-summary")
-        assert "Ctrl+O" in summary
+        assert "F3" in summary
         assert text_of(app.screen, "#universe-rows") == ""
 
 
 async def test_the_keys_are_bound_to_the_same_actions_as_the_commands(
     app: VoxApp,
 ) -> None:
-    """Regression: this terminal never delivered ctrl+shift+<letter>, so the
-    keys that matter are ctrl+o and the function keys."""
+    """Regression: neither ctrl+shift+<letter> nor ctrl+o reached the app on a
+    real terminal, so the mesh is on function keys and nothing else."""
     from textual.widgets import TextArea
 
     bound: dict[str, list[str]] = {}
     for binding in VoxApp.BINDINGS:
         bound.setdefault(binding.action, []).append(binding.key)
-    assert {"ctrl+o", "f3", "ctrl+shift+o"} <= set(bound["toggle_mesh"])
-    assert {"f4", "ctrl+shift+u"} <= set(bound["open_universe"])
+    assert bound["toggle_mesh"] == ["f3"]
+    assert bound["open_universe"] == ["f4"]
 
-    # ctrl+u belongs to the input box; taking it would break editing.
+    # No ctrl combination at all, and nothing the input box already owns.
+    mesh_keys = set(bound["toggle_mesh"]) | set(bound["open_universe"])
+    assert not any(key.startswith("ctrl") for key in mesh_keys)
     input_keys = {key for binding in TextArea.BINDINGS for key in binding.key.split(",")}
-    assert "ctrl+u" in input_keys
-    assert not (set(bound["toggle_mesh"]) | set(bound["open_universe"])) & input_keys
+    assert not mesh_keys & input_keys
 
     async with app.run_test() as pilot:
         await pilot.pause()
-        await pilot.press("ctrl+o")
+        await pilot.press("f3")
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert app.mesh.online is True
@@ -445,7 +446,7 @@ async def test_the_keys_are_bound_to_the_same_actions_as_the_commands(
         await pilot.pause()
         assert not isinstance(app.screen, UniverseScreen)
 
-        await pilot.press("ctrl+o")
+        await pilot.press("f3")
         await pilot.pause()
         assert app.mesh.online is False
 

@@ -70,14 +70,14 @@ async def test_the_header_says_whether_this_machine_is_on_the_mesh(
 ) -> None:
     async with offline_app.run_test(size=(130, 30)) as pilot:
         await pilot.pause()
-        assert "LOCAL" in str(offline_app.query_one("#header").render())
+        assert "Universe: LOCAL" in str(offline_app.query_one("#header").render())
 
         # No socket is bound here: only the word in the header is under test.
         offline_app.mesh.agent = SimpleNamespace(stop=lambda: None)
         offline_app.refresh_header()
         await pilot.pause()
         rendered = str(offline_app.query_one("#header").render())
-        assert "ON LINE" in rendered and "LOCAL" not in rendered
+        assert "Universe: ON-LINE" in rendered and "LOCAL" not in rendered
 
 
 async def test_help_command_answers(offline_app: VoxApp) -> None:

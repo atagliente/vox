@@ -36,7 +36,7 @@ def _frame(lines: list[str], width: int | None = None) -> str:
     return "\n".join([top, *body, bottom])
 
 
-ON_MESH = "ON LINE"
+ON_MESH = "ON-LINE"
 OFF_MESH = "LOCAL"
 
 
@@ -45,13 +45,18 @@ def header_lines(link: str, mesh: str, provider: str, model: str,
     """The two information rows shown at the top of the screen.
 
     ``mesh`` says whether this machine is announcing itself to other agents —
-    ON LINE — or talking to nobody but its own provider: LOCAL. The API key is
-    never shown anywhere.
+    ON-LINE — or talking to nobody but its own provider: LOCAL. No API key,
+    masked or otherwise, is ever shown here.
     """
     return [
         f"VOX {__version__}{_SEPARATOR}LINK {link}",
         _SEPARATOR.join(
-            [f"PROVIDER {provider}", f"MODEL {model}", f"ROLE {role}", mesh]
+            [
+                f"PROVIDER {provider}",
+                f"MODEL {model}",
+                f"ROLE {role}",
+                f"Universe: {mesh}",
+            ]
         ),
     ]
 

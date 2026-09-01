@@ -248,7 +248,7 @@ class KeyBar(Static):
         ("^Y", "copy code"),
         ("^T", "inspect"),
         ("^E", "export"),
-        ("^O", "online"),
+        ("F3", "online"),
         ("F4", "universe"),
         ("alt+enter", "new line"),
         ("^N", "new"),

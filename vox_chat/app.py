@@ -94,15 +94,10 @@ class VoxApp(App[None]):
         Binding("ctrl+t", "open_inspect", "Inspect", priority=True),
         Binding("f2", "open_inspect", "Inspect", show=False, priority=True),
         Binding("ctrl+e", "export_report", "Export", priority=True),
-        # Most terminals never deliver ctrl+shift+<letter>, so ctrl+o and the
-        # function keys are the ones that actually work; the ctrl+shift pair
-        # stays for the terminals that do send it. ctrl+u is left alone: the
-        # input box uses it to delete to the start of the line.
-        Binding("ctrl+o", "toggle_mesh", "Online", priority=True),
-        Binding("f3", "toggle_mesh", "Online", show=False, priority=True),
-        Binding("ctrl+shift+o", "toggle_mesh", "Online", show=False, priority=True),
+        # Function keys only. ctrl+shift+<letter> was not delivered here, and
+        # neither was ctrl+o; a function key travels through every terminal.
+        Binding("f3", "toggle_mesh", "Online", priority=True),
         Binding("f4", "open_universe", "Universe", priority=True),
-        Binding("ctrl+shift+u", "open_universe", "Universe", show=False, priority=True),
         Binding("ctrl+q", "request_quit", "Quit", priority=True),
         Binding("ctrl+c", "copy_selection", "Copy", priority=True),
         Binding("ctrl+v", "paste_clipboard", "Paste", priority=True),

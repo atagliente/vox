@@ -142,7 +142,7 @@ def help_text() -> str:
             "  ctrl+c      copy             ctrl+v  paste",
             "  ctrl+y      copy last code block",
             "  ctrl+t      inspect          ctrl+e  export",
-            "  ctrl+o      mesh online/off  f4      universe",
+            "  f3          mesh online/off  f4      universe",
             "  ctrl+q      quit",
             "",
             "Start a message with // to send text that begins with a slash.",
