@@ -22,6 +22,7 @@ dependencies = [
   "openai>=1.30",
   "textual>=0.60",
   "rich>=13.0",
+  "cryptography>=42",
 ]
 
 [project.optional-dependencies]

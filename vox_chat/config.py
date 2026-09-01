@@ -61,6 +61,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "min_distance": 3,
         "skip_punctuation": True,
     },
+    "mesh": {
+        "enabled": False,
+        "agent_id": "",
+        "name": "vox",
+        "verbs": ["infer"],
+        "announce_interval": 60.0,
+        "group": "239.17.42.1",
+        "port": 45177,
+        "pki_dir": "",
+        "auto_provision": True,
+    },
     "ui": {
         "theme": "nasa",
         "show_timestamps": True,
@@ -214,6 +225,37 @@ def validate_config(data: Any) -> list[str]:
         distance = inspection.get("min_distance", 3)
         if not isinstance(distance, int) or isinstance(distance, bool) or distance < 0:
             errors.append("inspect.min_distance must be a non-negative integer")
+
+    mesh = data.get("mesh", {})
+    if not isinstance(mesh, dict):
+        errors.append("mesh must be an object")
+    else:
+        for key in ("enabled", "auto_provision"):
+            if not isinstance(mesh.get(key, False), bool):
+                errors.append(f"mesh.{key} must be a boolean")
+        for key in ("agent_id", "name", "group", "pki_dir"):
+            if not isinstance(mesh.get(key, ""), str):
+                errors.append(f"mesh.{key} must be a string")
+        # A configuration written before the mesh existed simply has no block;
+        # each key falls back to its default rather than being reported missing.
+        verbs = mesh.get("verbs", ["infer"])
+        if not isinstance(verbs, list) or not all(isinstance(v, str) for v in verbs):
+            errors.append("mesh.verbs must be a list of strings")
+        elif not verbs:
+            errors.append("mesh.verbs must name at least one verb")
+        interval = mesh.get("announce_interval", 60.0)
+        if (not isinstance(interval, (int, float)) or isinstance(interval, bool)
+                or interval <= 0):
+            errors.append("mesh.announce_interval must be a positive number")
+        port = mesh.get("port", 45177)
+        if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+            errors.append("mesh.port must be a port number")
+        # The announce group has to be multicast, or nobody hears it.
+        group = mesh.get("group", "239.17.42.1")
+        if isinstance(group, str):
+            first = group.split(".")[0]
+            if not first.isdigit() or not 224 <= int(first) <= 239:
+                errors.append("mesh.group must be a multicast address (224-239.x.x.x)")
 
     ui = data.get("ui", {})
     if not isinstance(ui, dict):

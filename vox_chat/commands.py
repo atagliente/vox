@@ -46,6 +46,8 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("panel", "/panel code|index", "Switch the side panel"),
     CommandSpec("connect", "/connect", "Re-check the provider connection"),
     CommandSpec("warm", "/warm", "Preload the active model on the server"),
+    CommandSpec("mesh", "/mesh [on|off]", "Join or leave the agent mesh"),
+    CommandSpec("universe", "/universe", "Agents on the mesh, with their category"),
     CommandSpec("stop", "/stop", "Stop the current generation"),
     CommandSpec("exit", "/exit", "Quit VOX", ("quit", "q")),
 )
@@ -140,6 +142,8 @@ def help_text() -> str:
             "  ctrl+c      copy             ctrl+v  paste",
             "  ctrl+y      copy last code block",
             "  ctrl+t      inspect          ctrl+e  export",
+            "  ctrl+shift+o  join or leave the mesh",
+            "  ctrl+shift+u  the universe of agents",
             "  ctrl+q      quit",
             "",
             "Start a message with // to send text that begins with a slash.",

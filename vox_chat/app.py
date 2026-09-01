@@ -34,6 +34,7 @@ from .config import (
 )
 from .llm_client import LLMClient, LLMError
 from .logging_setup import get_logger, setup_logging
+from .mesh import MeshController, MeshError, MeshSettings
 from .models import Message, Session
 from .prompts import PromptStore, find_variables, render
 from .history import InputHistory
@@ -50,6 +51,7 @@ from .tools import Workspace
 from .usage import LiveMeter, UsageTracker
 from .ui import branding
 from .ui.inspect_screen import InspectScreen
+from .ui.universe_screen import UniverseScreen
 from .ui.modals import (
     ConfirmModal,
     PickerItem,
@@ -93,6 +95,10 @@ class VoxApp(App[None]):
         Binding("ctrl+t", "open_inspect", "Inspect", priority=True),
         Binding("f2", "open_inspect", "Inspect", show=False, priority=True),
         Binding("ctrl+e", "export_report", "Export", priority=True),
+        # Terminals differ on whether they deliver ctrl+shift+<letter>;
+        # /mesh and /universe do the same from the command line.
+        Binding("ctrl+shift+o", "toggle_mesh", "Online", priority=True),
+        Binding("ctrl+shift+u", "open_universe", "Universe", priority=True),
         Binding("ctrl+q", "request_quit", "Quit", priority=True),
         Binding("ctrl+c", "copy_selection", "Copy", priority=True),
         Binding("ctrl+v", "paste_clipboard", "Paste", priority=True),
@@ -139,6 +145,8 @@ class VoxApp(App[None]):
         self.session = self._new_session()
         self._assistant_box: MessageBox | None = None
         self.code_blocks: list[code_blocks.CodeBlock] = []
+        self.mesh = MeshController(MeshSettings.from_config(self.config))
+        self._universe_screen: UniverseScreen | None = None
         self.inspection = self._new_inspection()
         self._inspect_screen: InspectScreen | None = None
         self._panel_mode = "code"
@@ -259,6 +267,9 @@ class VoxApp(App[None]):
             f"{self.config.get('active_model', '')} "
             f"[{self.config.get('active_role', '')}]"
         )
+        mesh = self.mesh.status_line()
+        if mesh:
+            extra = f"{extra}  ·  {mesh}" if extra else mesh
         usage = self.usage_summary()
         if usage:
             extra = f"{extra}  ·  {usage}" if extra else usage
@@ -1411,6 +1422,86 @@ class VoxApp(App[None]):
             return
         self.export_report(tuple(wanted))
 
+    # ------------------------------------------------------------------ mesh
+
+    def action_toggle_mesh(self) -> None:
+        """Ctrl+Shift+O: join the mesh, or leave it."""
+        if self.mesh.online:
+            self.mesh.stop()
+            self.config.setdefault("mesh", {})["enabled"] = False
+            self.persist_config()
+            self.set_mesh_border(False)
+            self.write_system("MESH OFFLINE - no longer announcing")
+            self.refresh_status()
+            return
+        self.write_system("JOINING THE MESH…")
+        self.start_mesh()
+
+    @work(thread=True, group="mesh")
+    def start_mesh(self) -> None:
+        """Certificates and sockets both block, so this is off the UI thread."""
+        try:
+            detail = self.mesh.start()
+        except MeshError as exc:
+            self.mesh.last_error = str(exc)
+            self.call_from_thread(self.write_error, f"MESH FAILED - {exc}")
+            return
+        except OSError as exc:
+            self.mesh.last_error = str(exc)
+            self.call_from_thread(self.write_error, f"MESH FAILED - {exc}")
+            return
+        self.call_from_thread(self.mesh_started, detail)
+
+    def mesh_started(self, detail: str) -> None:
+        self.config.setdefault("mesh", {})["enabled"] = True
+        self.persist_config()
+        self.set_mesh_border(True)
+        # Going online is an announcement on the local network, so it says so.
+        self.write_system(f"MESH ONLINE - {detail}")
+        self.write_system(self.mesh.sharing_note())
+        self.refresh_status()
+        if self._universe_screen is not None:
+            self._universe_screen.refresh_view()
+
+    def set_mesh_border(self, online: bool) -> None:
+        """The red border is the standing reminder that we are announcing."""
+        try:
+            self.screen_stack[0].set_class(online, "mesh-online")
+        except IndexError:  # pragma: no cover - before the screen exists
+            pass
+
+    def action_open_universe(self) -> None:
+        """Ctrl+Shift+U: who else is out there."""
+        if isinstance(self.screen, UniverseScreen):
+            self.screen.dismiss(None)
+            return
+        screen = UniverseScreen(self.mesh)
+        self._universe_screen = screen
+        self.push_screen(screen, lambda _result: self._forget_universe_screen())
+
+    def _forget_universe_screen(self) -> None:
+        self._universe_screen = None
+
+    def cmd_mesh(self, argument: str) -> None:
+        value = argument.strip().lower()
+        if not value:
+            state = "ONLINE" if self.mesh.online else "OFFLINE"
+            self.write_system(
+                f"MESH IS {state} - {self.mesh.agent_id} · {self.mesh.category} "
+                f"- /mesh on|off"
+            )
+            return
+        if value not in ("on", "off"):
+            self.write_error("USAGE: /mesh [on|off]")
+            return
+        if (value == "on") == self.mesh.online:
+            self.write_system(f"MESH IS ALREADY {value.upper()}")
+            return
+        self.action_toggle_mesh()
+
+    def cmd_universe(self, argument: str) -> None:
+        self.action_open_universe()
+
     def cmd_stats(self, argument: str) -> None:
         self.write_system(self.usage.report(self.context_window()))
 
@@ -1481,6 +1572,7 @@ class VoxApp(App[None]):
         """Stop everything we own before the screen goes away."""
         self._shutting_down = True
         self._preloading = None
+        self.mesh.stop()
         self.cancel_event.set()
         self._stop_status_timer()
         if self.client is not None:

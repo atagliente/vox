@@ -136,6 +136,43 @@ def check_model(loaded: LoadedConfig, models: list[str]) -> Check:
     )
 
 
+def check_mesh(loaded: LoadedConfig) -> Check:
+    """What the mesh would find if it were asked to go online right now."""
+    from .mesh import MeshSettings, pki_dir, psk_path, PSK_ENV
+
+    settings = MeshSettings.from_config(loaded.data)
+    where = f"{settings.group}:{settings.port}"
+    if importlib.util.find_spec("cryptography") is None:
+        return Check("FAIL", "MESH", f"{where} - cryptography not installed")
+
+    from .mesh import category_for
+
+    parts = [where, f"{settings.resolved_agent_id()} ({category_for(settings.verbs)})"]
+    directory = pki_dir(settings)
+    certificate = directory / f"{settings.resolved_agent_id()}.crt"
+    if certificate.exists():
+        try:
+            from .discovery.identity import Identity
+
+            identity = Identity.load(settings.resolved_agent_id(), directory)
+            parts.append(f"cert valid until {identity.expires_at():%Y-%m-%d %H:%M}")
+        except Exception as exc:  # the certificate is there but unusable
+            return Check("WARN", "MESH", f"{where} - {certificate}: {exc}")
+    elif settings.auto_provision:
+        parts.append("no certificate yet; one is issued on going online")
+    else:
+        return Check(
+            "WARN", "MESH", f"{where} - no certificate and auto_provision is off"
+        )
+    if os.environ.get(PSK_ENV, "").strip():
+        parts.append(f"key from ${PSK_ENV}")
+    elif psk_path().exists():
+        parts.append(f"key from {psk_path()}")
+    else:
+        parts.append("no shared key yet; a local one is generated on going online")
+    return Check("OK", "MESH", " - ".join(parts))
+
+
 def run_checks(workspace: Path | None = None, timeout: float = 5.0) -> list[Check]:
     """Run every check in order and return the report lines."""
     checks = [
@@ -151,6 +188,7 @@ def run_checks(workspace: Path | None = None, timeout: float = 5.0) -> list[Chec
     link, models = check_link(loaded, timeout=timeout)
     checks.append(link)
     checks.append(check_model(loaded, models))
+    checks.append(check_mesh(loaded))
     return checks
 
 

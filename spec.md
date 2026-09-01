@@ -382,6 +382,35 @@ Mandatory safety rules:
 
 A configurable limit on tool cycles per request (default 8) prevents loops.
 
+## Agent mesh
+
+VOX can join a peer-to-peer mesh of agents on the local network segment. It is
+off until asked: nothing is announced before the operator presses the key.
+
+- `Ctrl+Shift+O` (`/mesh on|off`) joins or leaves. Joining writes the agent id,
+  the category, the group and the port to the transcript — announcing presence
+  on a network is not something to do silently — and names the two files a
+  second machine needs.
+- While online the screen carries the `mesh-online` class: a red border, in
+  every theme, and `MESH ONLINE · n agents, n active` in the status bar.
+- `Ctrl+Shift+U` (`/universe`) opens a live table of every agent seen, with its
+  category, state, address, age and verbs. `Ctrl+L` shows a legend.
+- Terminals that do not deliver `Ctrl+Shift+<letter>` are expected; the slash
+  commands are the documented way in.
+
+The protocol lives in `vox_chat/discovery/`, vendored with only its imports
+changed: signed multicast announcements (239.17.42.1:45177, TTL 1), a WHOIS
+handshake over mTLS where the certificate SAN must equal the announced agent
+id, a category derived deterministically from the declared verbs, and a
+registry with PROBATION → ACTIVE → SUSPECT → DEAD.
+
+`vox_chat/mesh.py` is the only part the interface talks to. It owns the
+identity (`~/.vox/pki`, a 24h certificate reissued past half life), the
+pre-shared key (`$DISCOVERY_PSK`, else `~/.vox/mesh-psk` at 0600), and the
+agent's life. Start and stop happen in a worker thread, because socket setup
+and certificate generation block; a failure is reported to the transcript and
+leaves the chat untouched.
+
 ## Quality rules
 
 - Type hints on internal APIs; `dataclasses` where they add clarity.
@@ -402,8 +431,11 @@ global/project merge; rejection of invalid JSON without losing the previous
 configuration; role CRUD; prompt CRUD and safe variable substitution; atomic
 session save and load; workspace path confinement; rejection of `../` and
 external symlinks; command timeout and result rendering; streaming fragment
-assembly; slash command parsing. No test requires a real inference server:
-fakes and mocks are used throughout.
+assembly; slash command parsing; mesh settings, identity provisioning and the
+controller against a stubbed discovery agent. No test requires a real inference
+server or a real socket: fakes and mocks are used throughout. The vendored
+discovery suite binds real multicast and TLS sockets, so it runs only under
+`VOX_TEST_MESH=1`.
 
 ## Installation
 

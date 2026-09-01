@@ -96,6 +96,7 @@ server has **no authentication** — only do this on a network you trust.
 | `Ctrl+Y` | copy last code block | `Ctrl+G` | stop generating |
 | `↑` / `↓` | input history | `Ctrl+B` | side panel |
 | `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+T` / `Ctrl+E` | inspect / export |
+| `Ctrl+Shift+O` | join / leave the mesh | `Ctrl+Shift+U` | the universe |
 | | | `Ctrl+Q` | quit |
 
 The bottom row shows this legend at all times.
@@ -112,6 +113,7 @@ The bottom row shows this legend at all times.
 | `/inspect [on\|off]` | per-token measurements, live (`Ctrl+T` opens the view) |
 | `/export [html\|json\|md]` | save the session and its figures (`Ctrl+E`) |
 | `/warm` | preload the model on the server |
+| `/mesh [on\|off]`, `/universe` | join the agent mesh, see who else is there |
 | `/agent on\|off`, `/workspace <path>` | coding-agent mode |
 | `/config`, `/settings`, `/connect`, `/stop` | configuration and connection |
 
@@ -207,6 +209,96 @@ tools. [More in the guide](docs/USAGE.md). Everything is confined to the workspa
 symlinks pointing outside and shell operators are refused, and commands run
 under a timeout.
 
+## The mesh
+
+`Ctrl+Shift+O` puts VOX on the local agent mesh. The border turns red for as
+long as it is announcing, and the status bar counts the agents it can see.
+`Ctrl+Shift+U` opens the universe: everyone seen, with their category and
+state. `Ctrl+Shift+O` again takes it back offline.
+
+![The universe screen](docs/universe.svg)
+
+Some terminals do not deliver `Ctrl+Shift+<letter>` at all — only those
+speaking the Kitty keyboard protocol, and Windows Terminal in win32-input
+mode, reliably do. `/mesh on`, `/mesh off` and `/universe` do the same thing
+from the command line.
+
+### How agents find each other
+
+```text
+   ┌─────────────────────┐                          ┌─────────────────────┐
+   │  VOX  (PROCESSOR)   │                          │ ingestor-01 (SOURCE)│
+   │  verbs: infer       │                          │ verbs: ingest       │
+   └──────────┬──────────┘                          └──────────┬──────────┘
+              │                                                │
+              │  1. ANNOUNCE — UDP multicast 239.17.42.1:45177, TTL 1
+              │     {agent_id, incarnation, whois_port, caps_digest, ts, nonce}
+              │     signed HMAC-SHA256 with the shared key
+              ▼                                                ▼
+         ╔══════════════════ the local network segment ══════════════════╗
+         ║   every member hears every announcement; TTL 1 means it       ║
+         ║   never leaves this segment — no router, no cloud VPC         ║
+         ╚═══════════════════════════════════════════════════════════════╝
+              │                                                │
+              │  2. the listener checks signature, timestamp and nonce,
+              │     then asks the registry: new? restarted? just a heartbeat?
+              │
+              │  3. WHOIS — unicast, mTLS, only when the answer is
+              │     "new" or "restarted"
+              │     ┌────────────────────────────────────────────┐
+              ├────▶│ client checks: peer cert SAN == announced   │
+              │     │                agent_id  (impersonation)   │
+              │     │ server checks: cert signed by our CA        │
+              │     │                (a stranger cannot ask)      │
+              │     │ server checks: authorizer(agent_id)         │
+              │     │                (a member is not everyone)  │
+              │     └────────────────────────────────────────────┘
+              │     answer: {name, capabilities: {verbs: [...]}, ...}
+              ▼
+   4. CLASSIFY — the category comes from the declared verbs, so every node
+      reaches the same answer:
+        ingest, publish            → SOURCE
+        transform, enrich, infer   → PROCESSOR
+        store, index, notify       → SINK
+        schedule, dispatch         → ORCHESTRATOR
+        observe, audit             → OBSERVER  (visible, never routed work)
+
+   5. the announcement keeps arriving; it is the heartbeat. The WHOIS is what
+      is skipped for a peer already known:
+
+        PROBATION ──whois ok──▶ ACTIVE ──3 intervals silent──▶ SUSPECT
+             │                    ▲                                │
+             │                    └────── an announcement ─────────┘
+             └──whois refused──▶ dropped, and not asked again
+                                                 5 intervals ──▶ DEAD
+```
+
+The `caps_digest` in the announcement is how a peer says its capabilities
+changed: a different digest sends it back to PROBATION and a fresh WHOIS
+follows. `incarnation` is the process's life; a restart is not a heartbeat,
+so everything cached about that peer is thrown away.
+
+### Talking to what you find
+
+Discovery answers *who is out there and what can they do*. The WHOIS channel
+carries descriptors, not work: `agent.peers_for("transform")` gives the active,
+non-passive agents that declared that verb, and the endpoint to reach each of
+them. The work protocol on top of that is yours to choose — the categories are
+there so a router never sends a job to an OBSERVER.
+
+### What a second machine needs
+
+Two nodes see each other only if they share **both** the certificate authority
+(`~/.vox/pki/ca.crt`) and the pre-shared key (`~/.vox/mesh-psk`, or
+`$DISCOVERY_PSK`). VOX creates its own on the first `Ctrl+Shift+O` and tells
+you where they are; until they are copied you have a mesh of one. The key
+alone is not enough: an intruder holding it can announce, and still fails the
+mTLS handshake without a certificate from the same CA.
+
+Everything is on by request only — VOX announces nothing until you press the
+key. `vox doctor` shows the group, the port, the agent id, the certificate
+expiry and where the key comes from.
+
 ## Development
 
 ```bash
@@ -220,6 +312,8 @@ No test needs a running inference server.
 
 - [docs/USAGE.md](docs/USAGE.md) — full guide: every option, roles and prompts,
   usage figures, themes, reasoning, agent details
+- [vox_chat/discovery/README.md](vox_chat/discovery/README.md) — the mesh
+  protocol, its security model and what is still open
 - [spec.md](spec.md) — the specification the implementation follows
 - [CHANGELOG.md](CHANGELOG.md) — what changed, when, and what was measured to
   justify it

@@ -126,6 +126,7 @@ python -m vox_chat         # same app, from a checkout
 | `Ctrl+Y` | copy last code block | `Ctrl+G` | stop generating |
 | `↑` / `↓` | input history | `Ctrl+B` | side panel |
 | `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+T` / `Ctrl+E` | inspect / export |
+| `Ctrl+Shift+O` | join / leave the mesh | `Ctrl+Shift+U` | the universe |
 | | | `Ctrl+Q` | quit |
 
 `Enter` sends because `Ctrl+Enter` is not delivered by most terminals; it stays
@@ -149,6 +150,7 @@ restarts. A key legend is always visible on the bottom row.
 | `/agent on\|off`, `/workspace <path>` | control coding-agent mode |
 | `/stats` | token usage, context fill and speed for the session |
 | `/warm` | preload the active model on the server |
+| `/mesh [on\|off]`, `/universe` | join the agent mesh, see who is on it |
 | `/connect`, `/stop`, `/new`, `/clear`, `/exit` | connection and session control |
 
 Send a message that really starts with a slash by prefixing it with `//`.
@@ -467,6 +469,122 @@ for the dialog you are actually looking at.
 
 `Esc` cancels any dialog or picker. `Ctrl+C` decides nothing there: it is the
 copy key, so a dialog keeps waiting for a real answer.
+
+### The agent mesh
+
+VOX can join a peer-to-peer mesh of agents on the local network. It announces
+nothing until you ask: `Ctrl+Shift+O`, or `/mesh on`.
+
+```text
+> /mesh on
+SYS ▸ JOINING THE MESH…
+SYS ▸ MESH ONLINE - vox-<user>-<host> · PROCESSOR · announcing on
+      239.17.42.1:45177 every 60s
+SYS ▸ a second machine joins only with the same ~/.vox/pki/ca.crt and the same
+      key from ~/.vox/mesh-psk
+```
+
+The border turns red for as long as VOX is announcing, and the status bar
+counts what it sees: `MESH ONLINE · 3 agents, 2 active`. `Ctrl+Shift+O` again,
+or `/mesh off`, takes it back offline; the choice is written to the
+configuration, but going online is never automatic.
+
+`Ctrl+Shift+U` (or `/universe`) opens the universe:
+
+```text
+UNIVERSE · vox-mesh-01 · PROCESSOR · 3 agents · 2 active
+
+AGENT               CATEGORY      STATE      ADDRESS                   SEEN   VERBS
+legacy              —             PROBATION  10.0.0.2:41000            0.9s   —
+ingestor            SOURCE        ACTIVE     10.0.0.1:41000            2.1s   ingest
+watcher             OBSERVER      SUSPECT    10.0.0.9:41000           91.4s   observe
+```
+
+It refreshes on its own once a second. `Ctrl+L` explains the states and the
+categories; `Esc` closes it.
+
+**Terminals differ.** Many do not deliver `Ctrl+Shift+<letter>` at all — only
+those speaking the Kitty keyboard protocol, and Windows Terminal in
+win32-input mode, reliably do. If nothing happens when you press them, use
+`/mesh` and `/universe`; they are the same code path.
+
+#### How it works
+
+The whole protocol is in
+[vox_chat/discovery/README.md](../vox_chat/discovery/README.md), and the README
+carries a diagram of it. The short version:
+
+1. every agent multicasts a signed announcement to `239.17.42.1:45177` with a
+   TTL of 1, so it never leaves the local segment;
+2. a listener checks the HMAC signature, the timestamp and the nonce;
+3. a peer that is new or has restarted is interrogated over mTLS — the WHOIS —
+   and the answer carries the verbs it declares;
+4. the category is derived from those verbs, identically on every node;
+5. the announcement then serves as the heartbeat: three intervals of silence
+   make a peer SUSPECT, five make it DEAD.
+
+#### Configuration
+
+```json
+"mesh": {
+  "enabled": false,
+  "agent_id": "",
+  "name": "vox",
+  "verbs": ["infer"],
+  "announce_interval": 60.0,
+  "group": "239.17.42.1",
+  "port": 45177,
+  "pki_dir": "",
+  "auto_provision": true
+}
+```
+
+`agent_id` defaults to `vox-<user>-<host>`; it has to be a valid DNS label,
+because it goes into the certificate as a SAN. Changing `verbs` changes the
+category VOX announces — `infer` makes it a PROCESSOR.
+
+#### Keys and certificates
+
+With `auto_provision` on, the first `Ctrl+Shift+O` creates
+`~/.vox/pki/ca.{crt,key}`, issues a 24-hour certificate for this agent, and
+generates `~/.vox/mesh-psk` (mode 0600). That gives you a working mesh of one.
+
+A second machine joins only with **both**:
+
+- the same `ca.crt` — copy it into its `~/.vox/pki/`, and issue it a
+  certificate from the same CA;
+- the same pre-shared key — copy `mesh-psk`, or set `$DISCOVERY_PSK` on both.
+
+The key alone is not enough. An intruder holding it can announce itself and
+still fails the mTLS handshake, because its certificate is not from your CA;
+it is logged, dropped, and not asked again.
+
+Certificates are short-lived on purpose: a day is the most practical form of
+revocation when there is no CRL. VOX reissues automatically once one is past
+half its life.
+
+To see a real second agent, the vendored runner starts one:
+
+```bash
+export DISCOVERY_PSK="$(cat ~/.vox/mesh-psk)"
+python3 -m vox_chat.discovery.run_agent --name ingestor \
+    --agent-id ingestor-01 --pki ~/.vox/pki --verbs ingest --interval 5
+```
+
+Issue it a certificate from the same CA first, or it will announce and never
+be admitted.
+
+#### Limits worth knowing
+
+- **Multicast does not cross routers**, and cloud VPCs disable it. Beyond one
+  L2 segment this needs a seed list or a registry, which is not built yet.
+- **The pre-shared key is all-or-nothing**: whoever holds it can announce as
+  anyone. Only the mTLS handshake tells the impostors apart.
+- **The WHOIS authorizer is permissive by default**: every mesh member may ask
+  VOX to describe itself. The descriptor holds the agent id, the name and the
+  declared verbs — nothing about your conversation, your model or your files.
+- Discovery answers *who is there*; it carries no work. What agents do with
+  each other after they have found each other is not part of this.
 
 ### Coding-agent mode
 

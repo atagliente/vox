@@ -164,6 +164,23 @@ Screen {
     color: #c9a15a;
     background: #24211a;
 }
+Screen.mesh-online { border: solid #c0392b; }
+UniverseScreen { background: #16150f; }
+#universe-title { padding: 1 1 0 1; color: #c9a15a; }
+#universe-summary { padding: 0 1 1 1; color: #8b8266; }
+#universe-header { padding: 0 1; color: #8b8266; }
+#universe-body { height: 1fr; padding: 0 1; }
+#universe-keys { height: 1; padding: 0 1; color: #8b8266; background: #24211a; }
+#universe-legend {
+    display: none;
+    height: auto;
+    padding: 1 2;
+    margin: 0 1;
+    color: #cfc7b0;
+    background: #1c1a14;
+    border: round #6b6349;
+}
+#universe-legend.visible { display: block; }
 InspectScreen { background: #16150f; }
 #inspect-title { padding: 1 1 0 1; color: #c9a15a; }
 #inspect-summary { padding: 0 1 1 1; color: #8b8266; }
@@ -235,6 +252,18 @@ Screen { background: #101014; color: #d6d6d6; }
 #input { height: auto; min-height: 3; max-height: 10; }
 #status { height: 1; padding: 0 1; background: #1a1a20; color: #8b8b98; }
 #keybar { height: 1; padding: 0 1; background: #24242c; color: #a8b0bd; }
+Screen.mesh-online { border: solid #c0392b; }
+UniverseScreen { background: #101014; }
+#universe-title { padding: 1 1 0 1; color: #9aa7b8; }
+#universe-summary { padding: 0 1 1 1; color: #8b8b98; }
+#universe-header { padding: 0 1; color: #8b8b98; }
+#universe-body { height: 1fr; padding: 0 1; }
+#universe-keys { height: 1; padding: 0 1; color: #8b8b98; background: #24242c; }
+#universe-legend {
+    display: none; height: auto; padding: 1 2; margin: 0 1;
+    background: #1a1a20; border: round #45454f;
+}
+#universe-legend.visible { display: block; }
 InspectScreen { background: #101014; }
 #inspect-title { padding: 1 1 0 1; color: #9aa7b8; }
 #inspect-summary { padding: 0 1 1 1; color: #8b8b98; }
@@ -279,6 +308,18 @@ Screen { background: #f4f2ec; color: #26241e; }
 #input { height: auto; min-height: 3; max-height: 10; }
 #status { height: 1; padding: 0 1; background: #e6e2d6; color: #5c584a; }
 #keybar { height: 1; padding: 0 1; background: #dcd7c8; color: #4a463a; }
+Screen.mesh-online { border: solid #c0392b; }
+UniverseScreen { background: #f4f2ec; }
+#universe-title { padding: 1 1 0 1; color: #7a5c23; }
+#universe-summary { padding: 0 1 1 1; color: #5c584a; }
+#universe-header { padding: 0 1; color: #5c584a; }
+#universe-body { height: 1fr; padding: 0 1; }
+#universe-keys { height: 1; padding: 0 1; color: #5c584a; background: #dcd7c8; }
+#universe-legend {
+    display: none; height: auto; padding: 1 2; margin: 0 1;
+    background: #fffdf7; border: round #cbc5b4;
+}
+#universe-legend.visible { display: block; }
 InspectScreen { background: #f4f2ec; }
 #inspect-title { padding: 1 1 0 1; color: #7a5c23; }
 #inspect-summary { padding: 0 1 1 1; color: #5c584a; }

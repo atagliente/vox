@@ -10,6 +10,51 @@ machine and version named, not estimated.
 
 ---
 
+## Unreleased
+
+### The agent mesh
+
+**2026-09-01**
+
+- **VOX can join a peer-to-peer mesh of agents.** `Ctrl+Shift+O` (or
+  `/mesh on`) starts a discovery agent: a signed announcement multicast to
+  239.17.42.1:45177 with a TTL of 1, a WHOIS handshake over mTLS for every peer
+  that is new or has restarted, and a registry that moves peers
+  PROBATION -> ACTIVE -> SUSPECT -> DEAD. The border turns red for as long as
+  VOX is announcing, and the status bar counts what it sees.
+- **`Ctrl+Shift+U` (or `/universe`) shows who is out there**, with the category
+  each peer's declared verbs produce, its state, address, age and verbs. It
+  refreshes once a second while open; `Ctrl+L` explains the states and the
+  taxonomy.
+- **Going online says exactly what it did** — the agent id, the category, the
+  group and the interval — and names the two files a second machine needs, the
+  CA certificate and the pre-shared key. Announcing presence on a network is
+  not something to do quietly.
+- **The identity provisions itself.** The first join creates `~/.vox/pki/ca.crt`
+  and a 24-hour certificate whose SAN is the agent id, and generates
+  `~/.vox/mesh-psk` at mode 0600 unless `$DISCOVERY_PSK` is set. The
+  certificate is reissued once past half its life; short lives are the only
+  practical revocation here.
+- **Measured, not assumed.** Two real agents on one machine: VOX (PROCESSOR,
+  `infer`) and a second agent declaring `ingest`. It appeared as NEW, completed
+  the WHOIS over mTLS, was classified SOURCE and went ACTIVE within a second at
+  a 2s announce interval; after the peer was killed the reaper moved it to
+  SUSPECT at ~7s and DEAD at ~11s, exactly the 3 and 5 intervals the registry
+  promises.
+- **The keys may not arrive.** Many terminals do not distinguish
+  `Ctrl+Shift+<letter>` from `Ctrl+<letter>`; only those speaking the Kitty
+  keyboard protocol, and Windows Terminal in win32-input mode, deliver them.
+  `/mesh` and `/universe` are the documented way in, and the same code path.
+- `cryptography` becomes a required dependency, and `vox doctor` gains a MESH
+  line: the group and port, the agent id and its category, the certificate
+  expiry, and where the pre-shared key comes from.
+- The discovery package is vendored under `vox_chat/discovery/` with only its
+  imports changed, and translated into English along with its own suite, which
+  binds real sockets and therefore runs only under `VOX_TEST_MESH=1`. 31 new
+  tests cover the layer VOX added, none of them touching the network.
+
+---
+
 ## 0.1.0 — 2026-08-25
 
 The first release: a terminal chat client for coding against any

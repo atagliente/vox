@@ -1,0 +1,237 @@
+"""
+The WHOIS phase: a point-to-point unicast conversation after an announcement.
+
+The multicast announcement only says "I exist, I am X". Who you are and what
+you can do is asked here, over mTLS.
+
+Three checks are what make TLS worth having in this setting:
+
+  1. CLIENT -> SERVER  the server certificate must carry, as a SAN, the
+     agent_id seen in the announcement. `check_hostname` enforces it once
+     `server_hostname=expected_agent_id` is passed. Without it, anyone on the
+     network can answer in place of the legitimate peer.
+
+  2. SERVER -> CLIENT  `CERT_REQUIRED` turns away anyone who cannot present a
+     certificate signed by the internal CA. This is the "mutual" half of mTLS:
+     without it you would have an encrypted channel to anybody at all.
+
+  3. AUTHORISATION     the identity in the client certificate goes through an
+     `authorizer`. Being a member of the mesh must not imply the right to
+     interrogate everyone: authentication and authorisation stay separate.
+
+The application-level consistency check on `agent_id` in the descriptor stays
+as defence in depth: redundant next to point 1, but it catches a misconfigured
+TLS context.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import socket
+import socketserver
+import ssl
+import threading
+from typing import Callable
+
+from .identity import Identity, IdentityError, client_context, peer_agent_id, server_context
+
+log = logging.getLogger("discovery.whois")
+
+TAXONOMY_VERSION = "v1"
+
+# A declarative taxonomy: the agent declares the verbs it supports and the
+# category is derived. Deterministic and reproducible, unlike a classification
+# left to a model, where the same agent lands in a different category on every
+# restart.
+VERB_TO_CATEGORY = {
+    "ingest": "SOURCE",
+    "publish": "SOURCE",
+    "transform": "PROCESSOR",
+    "enrich": "PROCESSOR",
+    "infer": "PROCESSOR",
+    "store": "SINK",
+    "index": "SINK",
+    "notify": "SINK",
+    "schedule": "ORCHESTRATOR",
+    "dispatch": "ORCHESTRATOR",
+    "observe": "OBSERVER",
+    "audit": "OBSERVER",
+}
+
+# OBSERVERs listen and take no work: they stay out of routing even when they
+# are perfectly healthy.
+PASSIVE_CATEGORIES = {"OBSERVER"}
+
+MAX_DESCRIPTOR_BYTES = 64 * 1024
+HANDSHAKE_TIMEOUT = 5.0
+
+# A callable given the client's agent_id, deciding whether to serve it.
+Authorizer = Callable[[str], bool]
+
+
+def classify(capabilities: dict) -> str:
+    """Derive the category from the declared verbs. No magic heuristics."""
+    verbs = capabilities.get("verbs") or []
+    categories = {VERB_TO_CATEGORY[v] for v in verbs if v in VERB_TO_CATEGORY}
+    if not categories:
+        return "UNKNOWN"
+    if len(categories) == 1:
+        return next(iter(categories))
+    # An agent that does several things: the most "downstream" category wins,
+    # so the router does not send it work outside its main trade.
+    for candidate in ("ORCHESTRATOR", "OBSERVER", "SINK", "PROCESSOR", "SOURCE"):
+        if candidate in categories:
+            return candidate
+    return "UNKNOWN"
+
+
+class _Handler(socketserver.StreamRequestHandler):
+    timeout = HANDSHAKE_TIMEOUT
+
+    def handle(self) -> None:
+        try:
+            caller = peer_agent_id(self.connection, self.server.trust_domain)
+        except (IdentityError, AttributeError) as exc:
+            log.warning("whois: cannot identify the client: %s", exc)
+            return
+
+        if not self.server.authorizer(caller):
+            log.warning("whois: %s is not authorised", caller)
+            self._reply({"error": "forbidden"})
+            return
+
+        try:
+            line = self.rfile.readline(MAX_DESCRIPTOR_BYTES)
+            if not line:
+                return
+            request = json.loads(line)
+            if request.get("op") != "WHOIS":
+                self._reply({"error": "unsupported op"})
+                return
+            log.debug("whois: serving %s", caller)
+            self._reply({"ok": True, "descriptor": self.server.descriptor})
+        except (json.JSONDecodeError, ValueError, socket.timeout, OSError):
+            # A malformed or slow peer: close without any noise.
+            return
+
+    def _reply(self, payload: dict) -> None:
+        try:
+            self.wfile.write(json.dumps(payload, separators=(",", ":")).encode() + b"\n")
+            self.wfile.flush()
+        except OSError:
+            pass
+
+
+class _TLSServer(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+    def get_request(self):
+        """Accept, and complete the TLS handshake before reaching the handler.
+
+        The handshake happens here rather than in the handler thread, but with
+        an explicit timeout: a client that opens a connection and then says
+        nothing must not be able to hold the listener. A failed handshake
+        becomes an OSError, which socketserver drops without taking the server
+        down.
+        """
+        sock, address = self.socket.accept()
+        sock.settimeout(HANDSHAKE_TIMEOUT)
+        try:
+            tls_sock = self.ssl_context.wrap_socket(sock, server_side=True)
+        except (ssl.SSLError, OSError) as exc:
+            log.debug("TLS handshake refused from %s: %s", address[0], exc)
+            try:
+                sock.close()
+            finally:
+                raise OSError("handshake failed") from exc
+        return tls_sock, address
+
+
+class WhoisServer:
+    """Serves this agent's descriptor, over mTLS, to whoever asks for it."""
+
+    def __init__(
+        self,
+        descriptor: dict,
+        identity: Identity,
+        host: str = "0.0.0.0",
+        port: int = 0,
+        authorizer: Authorizer | None = None,
+    ):
+        self._identity = identity
+        self._server = _TLSServer((host, port), _Handler)
+        self._server.descriptor = descriptor
+        self._server.ssl_context = server_context(identity)
+        self._server.trust_domain = identity.trust_domain
+        # By default anyone holding a valid certificate from the CA may ask.
+        # Replace this with a real policy (by category, by tenant) as soon as
+        # the mesh stops being uniformly trusted.
+        self._server.authorizer = authorizer or (lambda agent_id: True)
+        self._thread: threading.Thread | None = None
+
+    @property
+    def port(self) -> int:
+        return self._server.server_address[1]
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._server.serve_forever,
+                                        name="whois-server", daemon=True)
+        self._thread.start()
+
+    def reload_identity(self, identity: Identity) -> None:
+        """Swap the TLS context in after a certificate renewal.
+
+        Connections already open carry on with the old context; new ones use
+        the fresh certificate. No restart, and no window of unavailability.
+        """
+        self._identity = identity
+        self._server.ssl_context = server_context(identity)
+
+    def stop(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+
+
+def query(
+    address: str,
+    port: int,
+    expected_agent_id: str,
+    identity: Identity,
+    timeout: float = 5.0,
+) -> dict:
+    """Interrogate a peer over mTLS.
+
+    Raises ssl.SSLCertVerificationError if the peer's certificate was not
+    issued by the internal CA, or does not carry `expected_agent_id` in its
+    SANs.
+    """
+    context = client_context(identity)
+    with socket.create_connection((address, port), timeout=timeout) as raw_sock:
+        # server_hostname is the agent_id, not the IP: this is exactly what
+        # binds the multicast announcement to the certificate's identity.
+        with context.wrap_socket(raw_sock, server_hostname=expected_agent_id) as sock:
+            sock.settimeout(timeout)
+            sock.sendall(json.dumps({"op": "WHOIS"}).encode() + b"\n")
+
+            chunks, total = [], 0
+            while total < MAX_DESCRIPTOR_BYTES:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if b"\n" in chunk:
+                    break
+
+    payload = json.loads(b"".join(chunks).decode())
+    if not payload.get("ok"):
+        raise ValueError(f"whois refused: {payload.get('error')}")
+
+    descriptor = payload["descriptor"]
+    # Defence in depth: TLS has already checked the SAN, but a misconfigured
+    # context must not go unnoticed.
+    if descriptor.get("agent_id") != expected_agent_id:
+        raise ValueError("the agent_id in the descriptor does not match the announcement")
+    return descriptor
