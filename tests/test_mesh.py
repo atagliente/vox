@@ -408,32 +408,46 @@ async def test_the_universe_says_what_to_do_when_offline(app: VoxApp) -> None:
         app.run_command("/universe")
         await pilot.pause()
         summary = text_of(app.screen, "#universe-summary")
-        assert "Ctrl+Shift+O" in summary
+        assert "Ctrl+O" in summary
         assert text_of(app.screen, "#universe-rows") == ""
 
 
 async def test_the_keys_are_bound_to_the_same_actions_as_the_commands(
     app: VoxApp,
 ) -> None:
-    """The terminal may swallow ctrl+shift+<letter>; the wiring is still ours."""
-    bound = {binding.key: binding.action for binding in VoxApp.BINDINGS}
-    assert bound["ctrl+shift+o"] == "toggle_mesh"
-    assert bound["ctrl+shift+u"] == "open_universe"
+    """Regression: this terminal never delivered ctrl+shift+<letter>, so the
+    keys that matter are ctrl+o and the function keys."""
+    from textual.widgets import TextArea
+
+    bound: dict[str, list[str]] = {}
+    for binding in VoxApp.BINDINGS:
+        bound.setdefault(binding.action, []).append(binding.key)
+    assert {"ctrl+o", "f3", "ctrl+shift+o"} <= set(bound["toggle_mesh"])
+    assert {"f4", "ctrl+shift+u"} <= set(bound["open_universe"])
+
+    # ctrl+u belongs to the input box; taking it would break editing.
+    input_keys = {key for binding in TextArea.BINDINGS for key in binding.key.split(",")}
+    assert "ctrl+u" in input_keys
+    assert not (set(bound["toggle_mesh"]) | set(bound["open_universe"])) & input_keys
 
     async with app.run_test() as pilot:
         await pilot.pause()
-        await pilot.press("ctrl+shift+o")
+        await pilot.press("ctrl+o")
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert app.mesh.online is True
 
-        await pilot.press("ctrl+shift+u")
+        await pilot.press("f4")
         await pilot.pause()
         assert isinstance(app.screen, UniverseScreen)
         # The same key closes it again.
-        await pilot.press("ctrl+shift+u")
+        await pilot.press("f4")
         await pilot.pause()
         assert not isinstance(app.screen, UniverseScreen)
+
+        await pilot.press("ctrl+o")
+        await pilot.pause()
+        assert app.mesh.online is False
 
 
 async def test_the_mesh_is_stopped_when_vox_shuts_down(app: VoxApp) -> None:

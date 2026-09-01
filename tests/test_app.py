@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -47,12 +48,36 @@ async def test_the_app_starts_without_a_provider(offline_app: VoxApp) -> None:
         assert "MODE CHAT" in status
 
 
-async def test_the_api_key_is_never_displayed(offline_app: VoxApp) -> None:
+async def test_the_api_key_is_never_displayed(workspace: Path) -> None:
+    """The header used to show a masked key; now it shows nothing of it."""
+    config = default_config()
+    config["providers"]["local-ollama"]["base_url"] = UNREACHABLE
+    config["providers"]["local-ollama"]["timeout_seconds"] = 2
+    config["providers"]["local-ollama"]["api_key"] = "sk-do-not-print-me"
+    global_config_path().write_text(json.dumps(config), encoding="utf-8")
+    app = VoxApp(loaded=load_config(workspace), workspace=workspace)
+
+    async with app.run_test(size=(130, 30)) as pilot:
+        await pilot.pause()
+        rendered = str(app.query_one("#header").render())
+        assert "sk-do-not-print-me" not in rendered
+        assert "do-not-print-me" not in rendered
+        assert "LOGON" not in rendered, "the slot now carries the mesh state"
+
+
+async def test_the_header_says_whether_this_machine_is_on_the_mesh(
+    offline_app: VoxApp,
+) -> None:
     async with offline_app.run_test(size=(130, 30)) as pilot:
         await pilot.pause()
+        assert "LOCAL" in str(offline_app.query_one("#header").render())
+
+        # No socket is bound here: only the word in the header is under test.
+        offline_app.mesh.agent = SimpleNamespace(stop=lambda: None)
+        offline_app.refresh_header()
+        await pilot.pause()
         rendered = str(offline_app.query_one("#header").render())
-        assert "LOGON ****ma" in rendered
-        assert "LOGON ollama" not in rendered
+        assert "ON LINE" in rendered and "LOCAL" not in rendered
 
 
 async def test_help_command_answers(offline_app: VoxApp) -> None:

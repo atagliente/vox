@@ -41,10 +41,17 @@ machine and version named, not estimated.
   a 2s announce interval; after the peer was killed the reaper moved it to
   SUSPECT at ~7s and DEAD at ~11s, exactly the 3 and 5 intervals the registry
   promises.
-- **The keys may not arrive.** Many terminals do not distinguish
-  `Ctrl+Shift+<letter>` from `Ctrl+<letter>`; only those speaking the Kitty
-  keyboard protocol, and Windows Terminal in win32-input mode, deliver them.
-  `/mesh` and `/universe` are the documented way in, and the same code path.
+- **The keys are `Ctrl+O` and `F4`.** `Ctrl+Shift+O` and `Ctrl+Shift+U` were
+  tried first and did not arrive: most terminals do not distinguish
+  `Ctrl+Shift+<letter>` from `Ctrl+<letter>`, and only those speaking the Kitty
+  keyboard protocol, or Windows Terminal in win32-input mode, deliver them.
+  Both remain bound for the terminals that do, `F3` mirrors `Ctrl+O`, and
+  `Ctrl+U` is left to the input box, which uses it to delete to the start of
+  the line. `/mesh` and `/universe` are the same code path either way.
+- **The header says where you stand.** Its last field was a masked API key,
+  which told nobody anything; it now reads `LOCAL` when VOX talks only to its
+  own provider and `ON LINE` while it is announcing itself to other agents. No
+  key, masked or otherwise, is displayed anywhere.
 - `cryptography` becomes a required dependency, and `vox doctor` gains a MESH
   line: the group and port, the agent id and its category, the certificate
   expiry, and where the pre-shared key comes from.

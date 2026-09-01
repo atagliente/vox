@@ -25,7 +25,6 @@ from .config import (
     LoadedConfig,
     active_provider,
     load_config,
-    mask_secret,
     open_in_editor,
     redacted_copy,
     reload_from_disk,
@@ -95,10 +94,15 @@ class VoxApp(App[None]):
         Binding("ctrl+t", "open_inspect", "Inspect", priority=True),
         Binding("f2", "open_inspect", "Inspect", show=False, priority=True),
         Binding("ctrl+e", "export_report", "Export", priority=True),
-        # Terminals differ on whether they deliver ctrl+shift+<letter>;
-        # /mesh and /universe do the same from the command line.
-        Binding("ctrl+shift+o", "toggle_mesh", "Online", priority=True),
-        Binding("ctrl+shift+u", "open_universe", "Universe", priority=True),
+        # Most terminals never deliver ctrl+shift+<letter>, so ctrl+o and the
+        # function keys are the ones that actually work; the ctrl+shift pair
+        # stays for the terminals that do send it. ctrl+u is left alone: the
+        # input box uses it to delete to the start of the line.
+        Binding("ctrl+o", "toggle_mesh", "Online", priority=True),
+        Binding("f3", "toggle_mesh", "Online", show=False, priority=True),
+        Binding("ctrl+shift+o", "toggle_mesh", "Online", show=False, priority=True),
+        Binding("f4", "open_universe", "Universe", priority=True),
+        Binding("ctrl+shift+u", "open_universe", "Universe", show=False, priority=True),
         Binding("ctrl+q", "request_quit", "Quit", priority=True),
         Binding("ctrl+c", "copy_selection", "Copy", priority=True),
         Binding("ctrl+v", "paste_clipboard", "Paste", priority=True),
@@ -214,12 +218,6 @@ class VoxApp(App[None]):
             self.write_error(str(exc))
             return None
 
-    def masked_key(self) -> str:
-        provider = self.provider_block()
-        if provider is None:
-            return "********"
-        return mask_secret(str(provider.get("api_key", "")))
-
     def link_label(self) -> str:
         provider = self.provider_block()
         base = str(provider.get("base_url", "?")) if provider else "?"
@@ -244,7 +242,7 @@ class VoxApp(App[None]):
             return
         header.update_state(
             link=self.link_label(),
-            logon=self.masked_key(),
+            mesh=branding.ON_MESH if self.mesh.online else branding.OFF_MESH,
             provider=str(self.config.get("active_provider", "")),
             model=str(self.config.get("active_model", "")),
             role=str(self.config.get("active_role", "")),
@@ -1432,6 +1430,7 @@ class VoxApp(App[None]):
             self.persist_config()
             self.set_mesh_border(False)
             self.write_system("MESH OFFLINE - no longer announcing")
+            self.refresh_header()
             self.refresh_status()
             return
         self.write_system("JOINING THE MESH…")
@@ -1459,6 +1458,7 @@ class VoxApp(App[None]):
         # Going online is an announcement on the local network, so it says so.
         self.write_system(f"MESH ONLINE - {detail}")
         self.write_system(self.mesh.sharing_note())
+        self.refresh_header()
         self.refresh_status()
         if self._universe_screen is not None:
             self._universe_screen.refresh_view()

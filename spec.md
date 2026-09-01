@@ -387,16 +387,20 @@ A configurable limit on tool cycles per request (default 8) prevents loops.
 VOX can join a peer-to-peer mesh of agents on the local network segment. It is
 off until asked: nothing is announced before the operator presses the key.
 
-- `Ctrl+Shift+O` (`/mesh on|off`) joins or leaves. Joining writes the agent id,
+- `Ctrl+O` (`/mesh on|off`) joins or leaves. Joining writes the agent id,
   the category, the group and the port to the transcript — announcing presence
   on a network is not something to do silently — and names the two files a
   second machine needs.
 - While online the screen carries the `mesh-online` class: a red border, in
-  every theme, and `MESH ONLINE · n agents, n active` in the status bar.
-- `Ctrl+Shift+U` (`/universe`) opens a live table of every agent seen, with its
+  every theme, and `MESH ONLINE · n agents, n active` in the status bar. The
+  header's last field reads `LOCAL` or `ON LINE` accordingly; no API key,
+  masked or otherwise, is ever shown on screen.
+- `F4` (`/universe`) opens a live table of every agent seen, with its
   category, state, address, age and verbs. `Ctrl+L` shows a legend.
-- Terminals that do not deliver `Ctrl+Shift+<letter>` are expected; the slash
-  commands are the documented way in.
+- `F3` mirrors `Ctrl+O`, and `Ctrl+Shift+O` / `Ctrl+Shift+U` stay bound for the
+  terminals that deliver them — most do not, which is why the plain keys are
+  the documented ones. `Ctrl+U` is left to the input box. The slash commands
+  are always the fallback.
 
 The protocol lives in `vox_chat/discovery/`, vendored with only its imports
 changed: signed multicast announcements (239.17.42.1:45177, TTL 1), a WHOIS

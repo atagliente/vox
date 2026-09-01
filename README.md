@@ -96,7 +96,7 @@ server has **no authentication** — only do this on a network you trust.
 | `Ctrl+Y` | copy last code block | `Ctrl+G` | stop generating |
 | `↑` / `↓` | input history | `Ctrl+B` | side panel |
 | `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+T` / `Ctrl+E` | inspect / export |
-| `Ctrl+Shift+O` | join / leave the mesh | `Ctrl+Shift+U` | the universe |
+| `Ctrl+O` | join / leave the mesh | `F4` | the universe |
 | | | `Ctrl+Q` | quit |
 
 The bottom row shows this legend at all times.
@@ -211,17 +211,19 @@ under a timeout.
 
 ## The mesh
 
-`Ctrl+Shift+O` puts VOX on the local agent mesh. The border turns red for as
+`Ctrl+O` puts VOX on the local agent mesh. The border turns red for as
 long as it is announcing, and the status bar counts the agents it can see.
-`Ctrl+Shift+U` opens the universe: everyone seen, with their category and
-state. `Ctrl+Shift+O` again takes it back offline.
+`F4` opens the universe: everyone seen, with their category and state.
+`Ctrl+O` again takes it back offline.
 
 ![The universe screen](docs/universe.svg)
 
-Some terminals do not deliver `Ctrl+Shift+<letter>` at all — only those
-speaking the Kitty keyboard protocol, and Windows Terminal in win32-input
-mode, reliably do. `/mesh on`, `/mesh off` and `/universe` do the same thing
-from the command line.
+`F3` does the same as `Ctrl+O`, and `Ctrl+Shift+O` / `Ctrl+Shift+U` still
+work on the terminals that send them — most do not, which is why the plain
+keys are the documented ones. `/mesh on`, `/mesh off` and `/universe` are the
+same code path if a key is swallowed. The header says which side of the fence
+you are on: **LOCAL** when VOX talks only to its own provider, **ON LINE**
+while it is announcing itself to other agents.
 
 ### How agents find each other
 
@@ -290,7 +292,7 @@ there so a router never sends a job to an OBSERVER.
 
 Two nodes see each other only if they share **both** the certificate authority
 (`~/.vox/pki/ca.crt`) and the pre-shared key (`~/.vox/mesh-psk`, or
-`$DISCOVERY_PSK`). VOX creates its own on the first `Ctrl+Shift+O` and tells
+`$DISCOVERY_PSK`). VOX creates its own on the first `Ctrl+O` and tells
 you where they are; until they are copied you have a mesh of one. The key
 alone is not enough: an intruder holding it can announce, and still fails the
 mTLS handshake without a certificate from the same CA.

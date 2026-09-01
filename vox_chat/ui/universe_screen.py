@@ -95,7 +95,7 @@ class UniverseScreen(Screen[None]):
         controller = self.controller
         if not controller.online:
             return Text(
-                "Not on the mesh. Ctrl+Shift+O goes online — it announces this "
+                "Not on the mesh. Ctrl+O goes online — it announces this "
                 "machine on the local network segment — and this list fills as "
                 "agents answer."
             )

@@ -126,7 +126,7 @@ python -m vox_chat         # same app, from a checkout
 | `Ctrl+Y` | copy last code block | `Ctrl+G` | stop generating |
 | `↑` / `↓` | input history | `Ctrl+B` | side panel |
 | `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+T` / `Ctrl+E` | inspect / export |
-| `Ctrl+Shift+O` | join / leave the mesh | `Ctrl+Shift+U` | the universe |
+| `Ctrl+O` | join / leave the mesh | `F4` | the universe |
 | | | `Ctrl+Q` | quit |
 
 `Enter` sends because `Ctrl+Enter` is not delivered by most terminals; it stays
@@ -473,7 +473,7 @@ copy key, so a dialog keeps waiting for a real answer.
 ### The agent mesh
 
 VOX can join a peer-to-peer mesh of agents on the local network. It announces
-nothing until you ask: `Ctrl+Shift+O`, or `/mesh on`.
+nothing until you ask: `Ctrl+O`, or `/mesh on`.
 
 ```text
 > /mesh on
@@ -484,12 +484,12 @@ SYS ▸ a second machine joins only with the same ~/.vox/pki/ca.crt and the same
       key from ~/.vox/mesh-psk
 ```
 
-The border turns red for as long as VOX is announcing, and the status bar
-counts what it sees: `MESH ONLINE · 3 agents, 2 active`. `Ctrl+Shift+O` again,
+The border turns red for as long as VOX is announcing, the top row switches
+from `LOCAL` to `ON LINE`, and the status bar counts what it sees: `MESH ONLINE · 3 agents, 2 active`. `Ctrl+O` again,
 or `/mesh off`, takes it back offline; the choice is written to the
 configuration, but going online is never automatic.
 
-`Ctrl+Shift+U` (or `/universe`) opens the universe:
+`F4` (or `/universe`) opens the universe:
 
 ```text
 UNIVERSE · vox-mesh-01 · PROCESSOR · 3 agents · 2 active
@@ -503,10 +503,13 @@ watcher             OBSERVER      SUSPECT    10.0.0.9:41000           91.4s   ob
 It refreshes on its own once a second. `Ctrl+L` explains the states and the
 categories; `Esc` closes it.
 
-**Terminals differ.** Many do not deliver `Ctrl+Shift+<letter>` at all — only
-those speaking the Kitty keyboard protocol, and Windows Terminal in
-win32-input mode, reliably do. If nothing happens when you press them, use
-`/mesh` and `/universe`; they are the same code path.
+**On the keys.** `Ctrl+O` and `F4` are used because most terminals never
+deliver `Ctrl+Shift+<letter>` — only those speaking the Kitty keyboard
+protocol, and Windows Terminal in win32-input mode, do. `F3` is a second way
+to toggle the mesh, and `Ctrl+Shift+O` / `Ctrl+Shift+U` remain bound for
+terminals that send them. If a key does nothing, `/mesh` and `/universe` are
+the same code path. `Ctrl+U` is deliberately left alone: the input box uses it
+to delete to the start of the line.
 
 #### How it works
 
@@ -545,7 +548,7 @@ category VOX announces — `infer` makes it a PROCESSOR.
 
 #### Keys and certificates
 
-With `auto_provision` on, the first `Ctrl+Shift+O` creates
+With `auto_provision` on, the first `Ctrl+O` creates
 `~/.vox/pki/ca.{crt,key}`, issues a 24-hour certificate for this agent, and
 generates `~/.vox/mesh-psk` (mode 0600). That gives you a working mesh of one.
 

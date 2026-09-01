@@ -155,18 +155,18 @@ class HeaderBar(Static):
         super().__init__(id="header")
         self._state: dict[str, str] = {
             "link": "OFFLINE",
-            "logon": "********",
+            "mesh": branding.OFF_MESH,
             "provider": "",
             "model": "",
             "role": "",
             "style": "frame",
         }
 
-    def update_state(self, link: str, logon: str, provider: str = "",
+    def update_state(self, link: str, mesh: str, provider: str = "",
                      model: str = "", role: str = "", style: str = "frame") -> None:
         self._state.update(
             link=link,
-            logon=logon,
+            mesh=mesh,
             provider=provider,
             model=model,
             role=role,
@@ -248,8 +248,8 @@ class KeyBar(Static):
         ("^Y", "copy code"),
         ("^T", "inspect"),
         ("^E", "export"),
-        ("^⇧O", "online"),
-        ("^⇧U", "universe"),
+        ("^O", "online"),
+        ("F4", "universe"),
         ("alt+enter", "new line"),
         ("^N", "new"),
         ("^S", "settings"),

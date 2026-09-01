@@ -36,18 +36,27 @@ def _frame(lines: list[str], width: int | None = None) -> str:
     return "\n".join([top, *body, bottom])
 
 
-def header_lines(link: str, logon: str, provider: str, model: str,
+ON_MESH = "ON LINE"
+OFF_MESH = "LOCAL"
+
+
+def header_lines(link: str, mesh: str, provider: str, model: str,
                  role: str) -> list[str]:
-    """The two information rows shown at the top of the screen."""
+    """The two information rows shown at the top of the screen.
+
+    ``mesh`` says whether this machine is announcing itself to other agents —
+    ON LINE — or talking to nobody but its own provider: LOCAL. The API key is
+    never shown anywhere.
+    """
     return [
         f"VOX {__version__}{_SEPARATOR}LINK {link}",
         _SEPARATOR.join(
-            [f"PROVIDER {provider}", f"MODEL {model}", f"ROLE {role}", f"LOGON {logon}"]
+            [f"PROVIDER {provider}", f"MODEL {model}", f"ROLE {role}", mesh]
         ),
     ]
 
 
-def logo(link: str = "OFFLINE", logon: str = "********", provider: str = "",
+def logo(link: str = "OFFLINE", mesh: str = OFF_MESH, provider: str = "",
          model: str = "", role: str = "", style: str = "frame",
          width: int | None = None) -> str:
     """Render the header in the requested style, fitted to ``width`` columns.
@@ -56,7 +65,7 @@ def logo(link: str = "OFFLINE", logon: str = "********", provider: str = "",
     rule underneath, ``none`` compresses everything onto one line. A terminal
     too narrow for a box degrades to ``bar`` instead of wrapping.
     """
-    lines = header_lines(link, logon, provider, model, role)
+    lines = header_lines(link, mesh, provider, model, role)
     compact = f"VOX {__version__}{_SEPARATOR}{model}{_SEPARATOR}LINK {link}"
     if style == "none":
         return fit(compact, width) if width else compact
