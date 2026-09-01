@@ -288,6 +288,19 @@ non-passive agents that declared that verb, and the endpoint to reach each of
 them. The work protocol on top of that is yours to choose — the categories are
 there so a router never sends a job to an OBSERVER.
 
+### Names that cannot collide
+
+An agent's name ends in a fingerprint of the machine: the first 12 hex
+characters of the SHA-256 of its MAC address, so `vox-b6ffa342e0d3`, or
+`workstation-b6ffa342e0d3` when `mesh.agent_id` names a label. The address is
+hashed, never announced.
+
+The fingerprint is appended even when you set `agent_id` yourself, because the
+identity must not come from the configuration file: copy one `config.json`
+across a fleet and every machine still gets its own name, its own certificate
+and its own SAN. Two agents announcing the same id would break each other's
+mTLS handshake.
+
 ### What a second machine needs
 
 Two nodes see each other only if they share **both** the certificate authority

@@ -407,6 +407,14 @@ handshake over mTLS where the certificate SAN must equal the announced agent
 id, a category derived deterministically from the declared verbs, and a
 registry with PROBATION → ACTIVE → SUSPECT → DEAD.
 
+The agent id always ends in a fingerprint of the machine — the first 12 hex
+characters of the SHA-256 of its MAC address — appended to the label from
+`mesh.agent_id`, or to `vox` when that is empty. The identity may not be
+dictated by the configuration: one file copied across a fleet must still yield
+one name, one certificate and one SAN per machine. The MAC is hashed and never
+announced; with no hardware MAC the fingerprint falls back to a hash of user
+and host.
+
 `vox_chat/mesh.py` is the only part the interface talks to. It owns the
 identity (`~/.vox/pki`, a 24h certificate reissued past half life), the
 pre-shared key (`$DISCOVERY_PSK`, else `~/.vox/mesh-psk` at 0600), and the

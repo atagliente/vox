@@ -30,6 +30,15 @@ machine and version named, not estimated.
   group and the interval — and names the two files a second machine needs, the
   CA certificate and the pre-shared key. Announcing presence on a network is
   not something to do quietly.
+- **Names cannot collide, whatever the configuration says.** The agent id ends
+  in a fingerprint of the machine: the first 12 hex characters of the SHA-256
+  of its MAC address. It is appended even when `mesh.agent_id` is set, so one
+  `config.json` copied across a fleet still gives every machine its own name,
+  its own certificate and its own SAN — two agents announcing the same id
+  would each break the other's mTLS handshake. The address is hashed, never
+  announced. Where there is no hardware MAC, `uuid.getnode` invents a random
+  node and flags it with the multicast bit; that value changes every run, so
+  it is rejected and the fingerprint falls back to a hash of user and host.
 - **The identity provisions itself.** The first join creates `~/.vox/pki/ca.crt`
   and a 24-hour certificate whose SAN is the agent id, and generates
   `~/.vox/mesh-psk` at mode 0600 unless `$DISCOVERY_PSK` is set. The

@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import datetime as dt
 import getpass
+import hashlib
 import os
 import re
 import secrets
 import socket
 import threading
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -47,15 +49,57 @@ def psk_path() -> Path:
     return vox_home() / "mesh-psk"
 
 
+ID_HASH_CHARS = 12
+
+
+def network_mac() -> int | None:
+    """The MAC of a network interface, or None when there is no real one.
+
+    ``uuid.getnode`` invents a random 48-bit number when it cannot find a
+    hardware address, and marks it by setting the multicast bit — which no
+    genuine interface has. That invented value changes on every process, so it
+    is useless as an identity and is rejected here.
+    """
+    node = uuid.getnode()
+    if node >> 40 & 1:
+        return None
+    return node
+
+
+def machine_hash() -> str:
+    """A short, stable fingerprint of this machine, from its MAC address.
+
+    The address is hashed and never announced: what goes on the wire is 12 hex
+    characters, stable across restarts and reinstalls, different on every
+    machine, and giving away neither the hardware address nor the user and
+    host names.
+
+    With no real MAC we fall back to hashing user and host. That is weaker —
+    two identically named accounts on identically named hosts collide — but it
+    still never comes from the configuration file, which is the point: a
+    configuration copied onto a second machine must not hand it the same
+    identity as the first.
+    """
+    node = network_mac()
+    if node is not None:
+        seed = node.to_bytes(6, "big")
+    else:
+        log.warning(
+            "no hardware MAC address found; fingerprinting this machine from "
+            "user and host instead"
+        )
+        try:
+            user = getpass.getuser()
+        except Exception:  # pragma: no cover - depends on the environment
+            user = "vox"
+        host = socket.gethostname().split(".")[0] or "host"
+        seed = f"{user}@{host}".encode("utf-8")
+    return hashlib.sha256(seed).hexdigest()[:ID_HASH_CHARS]
+
+
 def default_agent_id() -> str:
-    """A DNS label from user and host, which is what the SAN has to be."""
-    try:
-        user = getpass.getuser()
-    except Exception:  # pragma: no cover - depends on the environment
-        user = "vox"
-    host = socket.gethostname().split(".")[0] or "host"
-    label = _LABEL_RE.sub("-", f"vox-{user}-{host}".lower()).strip("-")
-    return (label[:60] or "vox-agent").rstrip("-")
+    """The agent id when the configuration names no label of its own."""
+    return f"vox-{machine_hash()}"
 
 
 @dataclass
@@ -94,7 +138,19 @@ class MeshSettings:
         )
 
     def resolved_agent_id(self) -> str:
-        return self.agent_id or default_agent_id()
+        """The label from the configuration, always ending in this machine.
+
+        The machine fingerprint is appended rather than replaced, so the same
+        configuration file on two machines still yields two identities — and
+        two certificates. Anything else would put the same name, and the same
+        SAN, on the wire twice.
+        """
+        machine = machine_hash()
+        label = _LABEL_RE.sub("-", self.agent_id.lower()).strip("-")
+        label = label[: 62 - ID_HASH_CHARS].rstrip("-")
+        if label.endswith(machine):  # already resolved once
+            return label
+        return f"{label}-{machine}" if label else f"vox-{machine}"
 
     def capabilities(self) -> dict[str, Any]:
         return {

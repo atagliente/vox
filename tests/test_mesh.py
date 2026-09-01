@@ -66,6 +66,72 @@ def test_settings_come_from_the_config_and_fall_back() -> None:
     assert validate_agent_id(settings.resolved_agent_id())
 
 
+def test_one_config_on_two_machines_gives_two_identities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The whole point: the identity cannot be dictated by the config file."""
+    from vox_chat.discovery.identity import validate_agent_id
+
+    config = {"mesh": {"agent_id": "workstation"}}
+
+    monkeypatch.setattr(mesh.uuid, "getnode", lambda: 0x1C1BB5A82EEB)
+    first = MeshSettings.from_config(config).resolved_agent_id()
+    monkeypatch.setattr(mesh.uuid, "getnode", lambda: 0xAABBCCDDEEF0)
+    second = MeshSettings.from_config(config).resolved_agent_id()
+
+    assert first != second
+    assert first.startswith("workstation-") and second.startswith("workstation-")
+    for name in (first, second):
+        assert validate_agent_id(name)
+
+    # Resolving an already resolved id must not keep growing it.
+    assert MeshSettings.from_config(
+        {"mesh": {"agent_id": second}}
+    ).resolved_agent_id() == second
+
+
+def test_an_awkward_label_is_still_a_valid_name() -> None:
+    from vox_chat.discovery.identity import validate_agent_id
+
+    settings = MeshSettings.from_config({"mesh": {"agent_id": "My Laptop! (spare)"}})
+    name = settings.resolved_agent_id()
+    assert validate_agent_id(name)
+    assert name.startswith("my-laptop-spare-")
+    assert len(name) <= 63, "a DNS label has a limit"
+
+
+def test_the_agent_id_is_the_hash_of_the_mac(monkeypatch: pytest.MonkeyPatch) -> None:
+    from vox_chat.discovery.identity import validate_agent_id
+
+    monkeypatch.setattr(mesh.uuid, "getnode", lambda: 0x1C1BB5A82EEB)
+    first = mesh.default_agent_id()
+    assert validate_agent_id(first), "it goes into a certificate SAN"
+    assert first == mesh.default_agent_id(), "stable across restarts"
+    assert first.startswith("vox-") and len(first) == 4 + mesh.ID_HASH_CHARS
+
+    # The address itself is never in the name, in any of the usual spellings.
+    for spelling in ("1c1bb5a82eeb", "1c:1b:b5:a8:2e:eb", "1c-1b-b5-a8-2e-eb"):
+        assert spelling not in first
+
+    monkeypatch.setattr(mesh.uuid, "getnode", lambda: 0x1C1BB5A82EEC)
+    assert mesh.default_agent_id() != first, "another machine, another name"
+
+
+def test_a_machine_without_a_mac_still_gets_a_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """uuid.getnode invents a random node and flags it with the multicast bit;
+    it changes every run, so it must not become an identity."""
+    from vox_chat.discovery.identity import validate_agent_id
+
+    monkeypatch.setattr(mesh.uuid, "getnode", lambda: 0x010000000000 | 0x123456789A)
+    assert mesh.network_mac() is None
+    fallback = mesh.default_agent_id()
+    assert validate_agent_id(fallback)
+    assert fallback.startswith("vox-")
+    assert fallback == mesh.default_agent_id(), "and it does not change per run"
+
+
 @pytest.mark.parametrize(
     "verbs, category",
     [

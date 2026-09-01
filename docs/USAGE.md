@@ -481,7 +481,7 @@ nothing until you ask: `F3`, or `/mesh on`.
 ```text
 > /mesh on
 SYS ▸ JOINING THE MESH…
-SYS ▸ MESH ONLINE - vox-<user>-<host> · PROCESSOR · announcing on
+SYS ▸ MESH ONLINE - vox-b6ffa342e0d3 · PROCESSOR · announcing on
       239.17.42.1:45177 every 60s
 SYS ▸ a second machine joins only with the same ~/.vox/pki/ca.crt and the same
       key from ~/.vox/mesh-psk
@@ -496,7 +496,7 @@ configuration, but going online is never automatic.
 `F4` (or `/universe`) opens the universe:
 
 ```text
-UNIVERSE · vox-mesh-01 · PROCESSOR · 3 agents · 2 active
+UNIVERSE · vox-b6ffa342e0d3 · PROCESSOR · 3 agents · 2 active
 
 AGENT               CATEGORY      STATE      ADDRESS                   SEEN   VERBS
 legacy              —             PROBATION  10.0.0.2:41000            0.9s   —
@@ -545,9 +545,23 @@ carries a diagram of it. The short version:
 }
 ```
 
-`agent_id` defaults to `vox-<user>-<host>`; it has to be a valid DNS label,
-because it goes into the certificate as a SAN. Changing `verbs` changes the
-category VOX announces — `infer` makes it a PROCESSOR.
+`agent_id` is a *label*, not the whole name: whatever you write is cleaned up
+into a DNS label and a fingerprint of this machine is appended, so
+`"agent_id": "workstation"` becomes `workstation-b6ffa342e0d3`. Leave it empty
+and the name is just `vox-<fingerprint>`.
+
+The fingerprint is the first 12 hex characters of the SHA-256 of the network
+card's MAC address. It is hashed, never announced, so the address itself never
+goes on the wire. This is deliberate: **the identity must not be dictated by
+the configuration file**. Copy your `config.json` to a second machine and it
+still gets its own name, its own certificate and its own SAN — two machines
+announcing the same agent id would each invalidate the other's handshake. On a
+machine with no hardware MAC (some containers) the fingerprint falls back to a
+hash of user and host; it is stable per run, and still not read from the
+configuration.
+
+Changing `verbs` changes the category VOX announces — `infer` makes it a
+PROCESSOR.
 
 #### Keys and certificates
 
