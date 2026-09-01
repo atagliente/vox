@@ -440,7 +440,10 @@ the timestamp and a reminder of what the entropy figure is measured over.
 The HTML is a single self-contained file that carries no JavaScript at all, so
 it reads correctly with scripting disabled. The JSON is one documented schema
 (`vox.report/1`) meant to be re-analysed by other tools. The Markdown lists only
-the decision points, because a full token table is unreadable there.
+the decision points, because a full token table is unreadable there. The TOON
+(Token-Oriented Object Notation) export is a line-oriented, indentation-based
+rendering of the same schema — the most token-efficient format for an LLM to
+read the figures back from.
 
 A session with inspection off still exports: you get the exchange, the timings
 and a line saying there are no token figures.

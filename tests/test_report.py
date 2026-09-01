@@ -1,4 +1,4 @@
-"""The end-of-chat report: three formats, one set of figures."""
+"""The end-of-chat report: four formats, one set of figures."""
 
 from __future__ import annotations
 
@@ -50,10 +50,11 @@ def test_the_question_titles_the_report() -> None:
     assert "no question" in empty.question
 
 
-def test_all_three_formats_are_written(tmp_path: Path) -> None:
+def test_all_formats_are_written(tmp_path: Path) -> None:
     written = reporting.write(sample_report(sample_run()), directory=tmp_path,
                               stem="run")
-    assert [path.name for path in written] == ["run.html", "run.json", "run.md"]
+    assert [path.name for path in written] == [
+        "run.html", "run.json", "run.md", "run.toon"]
     assert all(path.exists() and path.stat().st_size > 0 for path in written)
 
 
@@ -122,6 +123,48 @@ def test_the_same_figures_appear_in_every_format(tmp_path: Path) -> None:
     for rendered in (html, markdown):
         assert "13.63" in rendered, "the speed is the same everywhere"
         assert str(decisions) in rendered
+
+
+def test_toon_is_a_valid_document_and_carries_the_same_figures(tmp_path: Path) -> None:
+    """TOON keeps the same figures, rendered in the most token-efficient way."""
+    run = sample_run()
+    report = sample_report(run)
+    toon = reporting.render_toon(report)
+    assert toon.startswith("schema: vox.report/1")
+    assert "question: why is the sky blue?" in toon
+    assert "model: \"qwen2.5:3b\"" in toon, "a colon forces quoting"
+    assert "Because of scattering." in toon
+    assert "Rayleigh, probably." in toon, "thinking is kept"
+    assert "13.63" in toon, "the speed is the same here as everywhere"
+    assert "top-k only" in toon, "the entropy basis is always stated"
+    assert not toon.endswith("\n"), "TOON forbids a trailing newline"
+    # The notes and empty arrays use the compact forms the format provides.
+    assert "notes: []" in toon
+    # Every array carries its declared length.
+    assert "messages[2]:" in toon
+    assert "tokens[2]:" in toon
+
+
+def test_toon_escapes_and_quotes_what_the_model_wrote() -> None:
+    report = sample_report()
+    report.messages = [
+        Message(role="assistant", content="<script>alert(1)</script>"),
+        Message(role="user", content="- a dash-led string with: a colon"),
+    ]
+    toon = reporting.render_toon(report)
+    assert "<script>alert(1)</script>" in toon
+    # A dash-led, colon-bearing string must be quoted so it never reads as a
+    # list marker or a key-value line.
+    assert '"- a dash-led string with: a colon"' in toon
+
+
+def test_toon_written_by_the_write_path_matches_render(tmp_path: Path) -> None:
+    report = sample_report()
+    path = reporting.write(report, directory=tmp_path, stem="r",
+                           formats=("toon",))[0]
+    assert path.suffix == ".toon"
+    assert path.exists() and path.stat().st_size > 0
+    assert reporting.render_toon(report) == path.read_text(encoding="utf-8")
 
 
 def test_a_session_without_inspection_still_exports(tmp_path: Path) -> None:
