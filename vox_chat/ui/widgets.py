@@ -245,6 +245,7 @@ class KeyBar(Static):
         ("^C/^V", "copy/paste"),
         ("^Q", "quit"),
         ("^G", "stop"),
+        ("^⇧M", "mode"),
         ("^Y", "copy code"),
         ("^T", "inspect"),
         ("^E", "export"),

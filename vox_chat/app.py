@@ -86,6 +86,7 @@ class VoxApp(App[None]):
         Binding("ctrl+p", "open_prompts", "Prompts", priority=True),
         Binding("ctrl+r", "open_roles", "Roles", priority=True),
         Binding("ctrl+comma", "open_settings", "Settings", show=False, priority=True),
+        Binding("ctrl+shift+m", "toggle_agent", "Mode", priority=True),
         Binding("ctrl+g", "stop", "Stop", priority=True),
         Binding("ctrl+b", "toggle_panel", "Panel", priority=True),
         Binding("ctrl+y", "copy_code", "Copy code", priority=True),
@@ -1318,6 +1319,18 @@ class VoxApp(App[None]):
         self.write_system(
             f"AGENT MODE {value.upper()} - WORKSPACE {self.workspace_path}"
             if value == "on"
+            else "AGENT MODE OFF"
+        )
+        self.refresh_status()
+
+    def action_toggle_agent(self) -> None:
+        """Flip agent mode in place; bound to ``Ctrl+Shift+M``."""
+        value = not bool(self.config.get("agent", {}).get("enabled", False))
+        self.config.setdefault("agent", {})["enabled"] = value
+        self.persist_config()
+        self.write_system(
+            f"AGENT MODE ON - WORKSPACE {self.workspace_path}"
+            if value
             else "AGENT MODE OFF"
         )
         self.refresh_status()
