@@ -92,6 +92,22 @@ def describe_model(row: dict[str, Any]) -> str:
     return "  ".join(parts)
 
 
+def describe_residency(resident: ollama.Residency) -> str:
+    """One line saying where a loaded model lives, and whether it overflowed."""
+    parts = [f"{resident.size_vram / 1e9:.2f} GB on the GPU"]
+    if resident.on_cpu:
+        parts.append(f"{resident.on_cpu / 1e9:.2f} GB on the CPU")
+    if resident.gpu_total_mb:
+        parts.append(f"card {resident.gpu_used_mb}/{resident.gpu_total_mb} MB")
+    if resident.context:
+        parts.append(f"{resident.context} tokens")
+    line = "  -  ".join(parts)
+    if resident.spilling():
+        line += ("\n  the card is full, so the rest is in shared memory - "
+                 "slower than leaving those layers on the CPU")
+    return line
+
+
 class VoxApp(App[None]):
     """Terminal chat client for OpenAI-compatible providers."""
 
@@ -1368,6 +1384,9 @@ class VoxApp(App[None]):
         if parts and parts[0].lower() == "ctx":
             self.cmd_model_ctx(" ".join(parts[1:]))
             return None
+        if parts and parts[0].lower() == "gpu":
+            self.cmd_model_gpu(" ".join(parts[1:]))
+            return None
         if argument:
             self.config["active_model"] = argument
             self.persist_config()
@@ -1487,6 +1506,11 @@ class VoxApp(App[None]):
             line += "\n  /model ctx <N> writes a build with a larger window"
         self.call_from_thread(self.write_system, line)
 
+    def build_config(self) -> dict[str, Any]:
+        """What every model VOX writes for itself carries."""
+        block = self.config.get("model_build")
+        return dict(block) if isinstance(block, dict) else {}
+
     @work(thread=True, group="model-ctx")
     def build_model_ctx(self, base_url: str, model: str, num_ctx: int) -> None:
         """Write the derived model, then switch to it."""
@@ -1499,13 +1523,135 @@ class VoxApp(App[None]):
                     f"asking for {num_ctx} would only waste memory",
                 )
                 return
-            name = ollama.create_with_context(base_url, model, num_ctx)
+            parameters = self._build_parameters(base_url, model, num_ctx)
+            name = ollama.create_with_context(base_url, model, num_ctx, parameters)
         except ollama.OllamaError as exc:
             self.call_from_thread(self.write_error, f"MODEL CTX - {exc}")
             return
+        layers = parameters.get("num_gpu")
+        detail = f", {layers} layers on the GPU" if layers is not None else ""
         self.call_from_thread(
             self.set_model, name,
-            f"MODEL CTX - {num_ctx} tokens, same weights",
+            f"MODEL CTX - {num_ctx} tokens{detail}, same weights",
+        )
+
+    def _build_parameters(self, base_url: str, model: str,
+                          num_ctx: int) -> dict[str, Any]:
+        """The Modelfile parameters for a build. Runs on the worker thread.
+
+        num_gpu "max" is measured, not assumed: the largest number of layers
+        that stays on the card. Spilling into shared memory is slower than
+        leaving the same layers on the CPU, so that is what gets avoided.
+        """
+        build = self.build_config()
+        parameters: dict[str, Any] = {}
+        extra = build.get("extra")
+        if isinstance(extra, dict):
+            parameters.update(extra)
+        if build.get("num_batch"):
+            parameters["num_batch"] = int(build["num_batch"])
+        wanted = build.get("num_gpu", "max")
+        if wanted is None:
+            return parameters
+        if isinstance(wanted, int) and not isinstance(wanted, bool):
+            parameters["num_gpu"] = wanted
+            return parameters
+        reserve = int(build.get("vram_reserve_mb", 384) or 0)
+        self.call_from_thread(
+            self.write_system, "MODEL BUILD - measuring what fits on the GPU..."
+        )
+        layers, resident = ollama.fit_layers(base_url, model, num_ctx, reserve)
+        if layers > 0:
+            parameters["num_gpu"] = layers
+        if resident is not None:
+            self.call_from_thread(self.write_system, describe_residency(resident))
+        return parameters
+
+    def cmd_model_gpu(self, argument: str) -> None:
+        """Show or set how much of the active model lives on the GPU."""
+        provider = self.provider_block() or {}
+        base_url = str(provider.get("base_url", ""))
+        model = str(self.config.get("active_model", ""))
+        if not ollama.looks_like_ollama(base_url):
+            self.write_error(
+                "MODEL GPU - only Ollama: every other provider runs on its own hardware"
+            )
+            return
+        if not model:
+            self.write_error("MODEL GPU - no active model")
+            return
+        wanted = argument.strip().lower()
+        if wanted in ("off", "auto", "none"):
+            self.config.setdefault("model_build", {})["num_gpu"] = None
+            self.persist_config()
+            self.write_system("MODEL GPU OFF - later builds leave the split to Ollama")
+            return
+        if not wanted:
+            self.report_model_gpu(base_url, model)
+            return
+        if wanted == "max":
+            self.build_model_gpu(base_url, model, None)
+            return
+        if not wanted.isdigit():
+            self.write_error("MODEL GPU - usage: /model gpu [max|N|off]")
+            return
+        self.build_model_gpu(base_url, model, int(wanted))
+
+    @work(thread=True, group="model-ctx")
+    def report_model_gpu(self, base_url: str, model: str) -> None:
+        """Where the model is right now: card, layers, and any spill."""
+        try:
+            resident = ollama.residency(base_url, model)
+            layers = ollama.layer_count(base_url, model)
+        except ollama.OllamaError as exc:
+            self.call_from_thread(self.write_error, f"MODEL GPU - {exc}")
+            return
+        if resident is None:
+            card = ollama.vram_mb()
+            where = (f"card has {card[1]} MB, {card[0]} MB in use"
+                     if card else "no NVIDIA card reported")
+            tail = f"  -  {layers} layers" if layers else ""
+            self.call_from_thread(
+                self.write_system,
+                f"MODEL GPU - {model} is not loaded  -  {where}{tail}",
+            )
+            return
+        self.call_from_thread(
+            self.write_system, f"MODEL GPU - {model}\n  {describe_residency(resident)}"
+        )
+
+    @work(thread=True, group="model-ctx")
+    def build_model_gpu(self, base_url: str, model: str, layers: int | None) -> None:
+        """Write a build with this many layers on the GPU, and switch to it."""
+        try:
+            window = (
+                ollama.configured_context(base_url, model)
+                or int(self.config.get("generation", {}).get("context_window", 8192))
+            )
+            if layers is None:
+                reserve = int(self.build_config().get("vram_reserve_mb", 384) or 0)
+                self.call_from_thread(
+                    self.write_system,
+                    "MODEL GPU - measuring what fits, one load per try...",
+                )
+                layers, resident = ollama.fit_layers(base_url, model, window, reserve)
+                if resident is not None:
+                    self.call_from_thread(self.write_system, describe_residency(resident))
+                if layers <= 0:
+                    self.call_from_thread(
+                        self.write_error,
+                        "MODEL GPU - nothing fits on this card at this window",
+                    )
+                    return
+            name = ollama.create_with_context(
+                base_url, model, window, {"num_gpu": layers}
+            )
+        except ollama.OllamaError as exc:
+            self.call_from_thread(self.write_error, f"MODEL GPU - {exc}")
+            return
+        self.call_from_thread(
+            self.set_model, name,
+            f"MODEL GPU - {layers} layers on the card at {window} tokens",
         )
 
     def set_model(self, name: str, reason: str = "MODEL SET") -> None:

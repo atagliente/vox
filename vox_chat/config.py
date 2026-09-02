@@ -45,6 +45,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "preload": True,
         "preload_timeout_seconds": 180,
     },
+    # What goes into every model VOX builds for itself. num_gpu "max" offloads
+    # every layer, stepping back when the measurement says it would spill into
+    # shared memory - which is slower than leaving those layers on the CPU.
+    "model_build": {
+        "num_gpu": "max",
+        "num_batch": None,
+        "vram_reserve_mb": 384,
+        "extra": {},
+    },
     "agent": {
         "enabled": False,
         "confirm_writes": True,
@@ -208,6 +217,24 @@ def validate_config(data: Any) -> list[str]:
         errors.append("active_model must be a string")
     if not isinstance(data.get("active_role", ""), str):
         errors.append("active_role must be a string")
+
+    build = data.get("model_build", {})
+    if not isinstance(build, dict):
+        errors.append("model_build must be an object")
+    else:
+        num_gpu = build.get("num_gpu", "max")
+        if num_gpu is not None and num_gpu != "max":
+            if not isinstance(num_gpu, int) or isinstance(num_gpu, bool) or num_gpu < 0:
+                errors.append('model_build.num_gpu must be "max", null, or a layer count')
+        num_batch = build.get("num_batch")
+        if num_batch is not None:
+            if not isinstance(num_batch, int) or isinstance(num_batch, bool) or num_batch <= 0:
+                errors.append("model_build.num_batch must be null or a positive integer")
+        reserve = build.get("vram_reserve_mb", 384)
+        if not isinstance(reserve, int) or isinstance(reserve, bool) or reserve < 0:
+            errors.append("model_build.vram_reserve_mb must be a non-negative integer")
+        if not isinstance(build.get("extra", {}), dict):
+            errors.append("model_build.extra must be an object")
 
     generation = data.get("generation", {})
     if not isinstance(generation, dict):

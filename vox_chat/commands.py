@@ -29,6 +29,8 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("model", "/model [name]", "Show or switch model"),
     CommandSpec("model-ctx", "/model ctx [N|off]",
                 "Context window of the active model (Ollama)"),
+    CommandSpec("model-gpu", "/model gpu [max|N|off]",
+                "How many layers of it live on the GPU (Ollama)"),
     CommandSpec("role", "/role [name]", "Show or switch the active role"),
     CommandSpec("roles", "/roles", "Open the role picker"),
     CommandSpec("prompts", "/prompts", "Open the saved prompt picker"),

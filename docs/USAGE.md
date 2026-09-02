@@ -150,6 +150,7 @@ never have to type: down, down, enter is a complete interaction.
 | --- | --- |
 | `/provider [name]`, `/model [name]` | switch provider or model, no restart |
 | `/model ctx [N\|off]` | the context window of the active model (Ollama) |
+| `/model gpu [max\|N\|off]` | how many of its layers live on the GPU (Ollama) |
 | `/role [name]`, `/roles` | choose the persona driving the system prompt |
 | `/prompts`, `/prompt <name>` | load a saved prompt into the input, unsent |
 | `/prompt-save <name>` | store the current input as a reusable prompt |
@@ -284,6 +285,51 @@ that only spends memory.
 
 Everything above is Ollama-only, and `/model ctx` says so on any other
 provider: a hosted API fixes the window at its end.
+
+### The GPU
+
+Every model VOX builds carries `num_gpu` as well as the window, and the shipped
+default is to fill the card:
+
+```json
+"model_build": {
+  "num_gpu": "max",
+  "num_batch": null,
+  "vram_reserve_mb": 384,
+  "extra": {}
+}
+```
+
+`"max"` is measured, not assumed. Before writing a build, VOX loads the model
+with every layer offloaded, reads what is actually resident from Ollama and
+what the card reports through `nvidia-smi`, and steps the layer count down
+until nothing overflows. `"extra"` is written into the Modelfile as it stands,
+for any other parameter you want on every build.
+
+    /model gpu          where the model is now: card, layers, and any overflow
+    /model gpu max      measure and write the build that fills the card
+    /model gpu 33       write that many layers, without measuring
+    /model gpu off      leave the split to Ollama on later builds
+
+**Shared GPU memory is not the goal, and cannot be.** When a CUDA allocation
+does not fit, Windows moves the excess into system RAM and the card keeps
+reporting it as resident — Ollama believes it too, which is why the check is
+against `nvidia-smi` rather than against Ollama's own figure. Measured here on
+a 4 GB MX150 with a 3B model:
+
+| layout | tok/s | card |
+| --- | --- | --- |
+| 16k window, Ollama's own split | 11.7 | 2377 MB |
+| 16k window, all 40 layers | 12.2 | 2755 MB |
+| 64k window, all 40 layers — spilled | 9.7 | 4003 MB, i.e. full |
+
+So filling the card is worth a few percent; letting it overflow costs 20%, and
+gets worse the further past the edge you go. Leaving those layers on the CPU is
+faster than putting them in shared memory. That is what `vram_reserve_mb`
+protects: the headroom the display needs, kept free.
+
+A card that reports nothing — no NVIDIA driver, an integrated GPU — is not an
+error. VOX writes the build without `num_gpu` and Ollama decides, as before.
 
 ### Slow first token
 

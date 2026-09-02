@@ -15,7 +15,7 @@ import pytest
 from textual.widgets import ListView
 
 from vox_chat import fitting, ollama
-from vox_chat.app import VoxApp, describe_model
+from vox_chat.app import VoxApp, describe_model, describe_residency
 from vox_chat.config import default_config, load_config
 from vox_chat.llm_client import LLMError
 from vox_chat.models import Message
@@ -481,3 +481,209 @@ async def test_the_active_model_is_the_row_the_picker_opens_on(
     assert items[0].value == "qwen2.5:3b"
     assert items[0].title.startswith(">"), "and it is marked"
     assert "3.7B" in items[1].subtitle
+
+
+# ------------------------------------------------------------------- the GPU
+
+
+def resident(**kwargs) -> ollama.Residency:
+    defaults = dict(size=3_085_539_736, size_vram=2_845_499_719, context=16384,
+                    gpu_used_mb=2755, gpu_total_mb=4096)
+    defaults.update(kwargs)
+    return ollama.Residency(**defaults)
+
+
+def test_a_model_that_fits_is_not_reported_as_spilling() -> None:
+    assert resident().spilling(384) is False
+    assert resident().on_cpu == 3_085_539_736 - 2_845_499_719
+
+
+def test_a_full_card_means_the_rest_is_in_shared_memory() -> None:
+    """Ollama says the whole model is in VRAM; the card says it is full. The
+    card is the one telling the truth."""
+    full = resident(size=5_470_000_000, size_vram=5_120_000_000, gpu_used_mb=4003)
+    assert full.spilling(384) is True
+    assert "shared memory" in describe_residency(full)
+
+
+def test_nothing_is_claimed_when_there_is_no_card_to_ask() -> None:
+    blind = resident(gpu_used_mb=None, gpu_total_mb=None)
+    assert blind.spilling(384) is False
+    assert "card" not in describe_residency(blind)
+
+
+def test_the_fit_search_stops_at_the_first_layout_that_stays_on_the_card(
+    monkeypatch,
+) -> None:
+    tried: list[int] = []
+
+    def fake_probe(base_url, model, options, timeout=900.0):
+        layers = options["num_gpu"]
+        tried.append(layers)
+        # Everything above 30 layers overflows this imaginary card.
+        return resident(gpu_used_mb=4003 if layers > 30 else 2600)
+
+    monkeypatch.setattr(ollama, "layer_count", lambda *a, **k: 40)
+    monkeypatch.setattr(ollama, "probe", fake_probe)
+    best, where = ollama.fit_layers("http://localhost:11434/v1", "m", 16384, 384)
+    assert best == 30, tried
+    assert tried == [40, 35, 30], "it steps down, it does not binary search blindly"
+    assert where is not None and not where.spilling(384)
+
+
+def test_a_card_that_can_hold_nothing_gives_up_rather_than_looping(monkeypatch) -> None:
+    monkeypatch.setattr(ollama, "layer_count", lambda *a, **k: 40)
+    monkeypatch.setattr(ollama, "probe",
+                        lambda *a, **k: resident(gpu_used_mb=4090))
+    best, where = ollama.fit_layers("http://localhost:11434/v1", "m", 16384, 384)
+    assert best == 0 and where is None
+
+
+def test_the_build_parameters_are_written_beside_the_window(monkeypatch) -> None:
+    http = FakeHTTP({"/api/create": {"status": "success"}})
+    monkeypatch.setattr(ollama.urllib.request, "urlopen", http)
+    ollama.create_with_context("http://localhost:11434/v1", "granite4.2:3b", 8192,
+                               {"num_gpu": 40, "num_batch": 256})
+    _path, payload = http.calls[-1]
+    assert payload["parameters"] == {"num_ctx": 8192, "num_gpu": 40, "num_batch": 256}
+
+
+def test_the_layer_count_is_the_ceiling_for_num_gpu(monkeypatch) -> None:
+    http = FakeHTTP({"/api/show": {"model_info": {"granite.block_count": 40}}})
+    monkeypatch.setattr(ollama.urllib.request, "urlopen", http)
+    assert ollama.layer_count("http://localhost:11434/v1", "granite4.2:3b") == 40
+
+
+def test_the_card_is_read_from_nvidia_smi(monkeypatch) -> None:
+    class Completed:
+        stdout = "2755, 4096\n"
+
+    monkeypatch.setattr(ollama.shutil, "which", lambda name: "nvidia-smi")
+    monkeypatch.setattr(ollama.subprocess, "run", lambda *a, **k: Completed())
+    assert ollama.vram_mb() == (2755, 4096)
+
+
+def test_no_card_is_not_an_error(monkeypatch) -> None:
+    monkeypatch.setattr(ollama.shutil, "which", lambda name: None)
+    assert ollama.vram_mb() is None
+
+
+# ------------------------------------------------------------- /model gpu
+
+
+async def test_the_default_build_fills_the_gpu(app: VoxApp, monkeypatch) -> None:
+    """num_gpu "max" is the shipped default, and it is measured before use."""
+    assert default_config()["model_build"]["num_gpu"] == "max"
+    app.config["providers"]["local-ollama"]["base_url"] = "http://localhost:11434/v1"
+    app.config["active_model"] = "granite4.2:3b"
+    monkeypatch.setattr(ollama, "trained_context", lambda *a, **k: 131072)
+    monkeypatch.setattr(ollama, "fit_layers", lambda *a, **k: (40, resident()))
+    written: list = []
+
+    def fake_create(base_url, model, num_ctx, parameters=None, timeout=120.0):
+        written.append((num_ctx, parameters))
+        return "vox-granite4.2-3b:ctx16384"
+
+    monkeypatch.setattr(ollama, "create_with_context", fake_create)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.cmd_model_ctx("16384")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        written_text = transcript(app)
+    assert written == [(16384, {"num_gpu": 40})]
+    assert "40 layers on the GPU" in written_text
+
+
+async def test_a_build_can_leave_the_split_to_ollama(app: VoxApp, monkeypatch) -> None:
+    app.config["providers"]["local-ollama"]["base_url"] = "http://localhost:11434/v1"
+    app.config["active_model"] = "granite4.2:3b"
+    app.config["model_build"]["num_gpu"] = None
+    monkeypatch.setattr(ollama, "trained_context", lambda *a, **k: 131072)
+    monkeypatch.setattr(ollama, "fit_layers", lambda *a, **k: (_ for _ in ()).throw(
+        AssertionError("nothing should be measured when the split is not ours")))
+    written: list = []
+    monkeypatch.setattr(ollama, "create_with_context",
+                        lambda b, m, n, parameters=None, timeout=120.0:
+                        written.append(parameters) or "vox-x:ctx16384")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.cmd_model_ctx("16384")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+    assert written == [{}]
+
+
+async def test_model_gpu_max_measures_then_writes(app: VoxApp, monkeypatch) -> None:
+    app.config["providers"]["local-ollama"]["base_url"] = "http://localhost:11434/v1"
+    app.config["active_model"] = "granite4.2:3b"
+    monkeypatch.setattr(ollama, "configured_context", lambda *a, **k: 16384)
+    monkeypatch.setattr(ollama, "fit_layers", lambda *a, **k: (33, resident()))
+    written: list = []
+    monkeypatch.setattr(ollama, "create_with_context",
+                        lambda b, m, n, parameters=None, timeout=120.0:
+                        written.append((n, parameters)) or "vox-granite4.2-3b:ctx16384")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.cmd_model_gpu("max")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        said = transcript(app)
+    assert written == [(16384, {"num_gpu": 33})]
+    assert "33 layers on the card" in said
+    assert app.config["active_model"] == "vox-granite4.2-3b:ctx16384"
+
+
+async def test_model_gpu_off_hands_the_split_back(app: VoxApp) -> None:
+    app.config["providers"]["local-ollama"]["base_url"] = "http://localhost:11434/v1"
+    app.config["active_model"] = "granite4.2:3b"
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.cmd_model_gpu("off")
+        await pilot.pause()
+        assert "MODEL GPU OFF" in transcript(app)
+    assert app.config["model_build"]["num_gpu"] is None
+
+
+async def test_model_gpu_reports_where_the_model_lives(app: VoxApp, monkeypatch) -> None:
+    app.config["providers"]["local-ollama"]["base_url"] = "http://localhost:11434/v1"
+    app.config["active_model"] = "granite4.2:3b"
+    monkeypatch.setattr(ollama, "residency", lambda *a, **k: resident())
+    monkeypatch.setattr(ollama, "layer_count", lambda *a, **k: 40)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.cmd_model_gpu("")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        said = transcript(app)
+    assert "2.85 GB on the GPU" in said
+    assert "card 2755/4096 MB" in said
+
+
+async def test_model_gpu_is_ollama_only(app: VoxApp) -> None:
+    app.config["providers"]["local-ollama"]["base_url"] = "https://api.openai.com/v1"
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.cmd_model_gpu("max")
+        await pilot.pause()
+        assert "only Ollama" in transcript(app)
+
+
+def test_a_derived_model_is_found_under_its_parents_name(monkeypatch) -> None:
+    """Regression: a derived model shares its blobs, and /api/ps lists it under
+    the model it was built from, so an exact match never finds it."""
+    http = FakeHTTP({
+        "/api/ps": {"models": [
+            {"name": "granite4.2:3b", "size": 3_085_539_736,
+             "size_vram": 2_845_499_719, "context_length": 16384},
+        ]},
+        "/api/show": {"details": {"parent_model": "granite4.2:3b"}},
+    })
+    monkeypatch.setattr(ollama.urllib.request, "urlopen", http)
+    monkeypatch.setattr(ollama, "vram_mb", lambda: (2755, 4096))
+    base = "http://localhost:11434/v1"
+    where = ollama.residency(base, "vox-granite4.2-3b:ctx16384")
+    assert where is not None and where.context == 16384
+    assert ollama.loaded_context(base, "vox-granite4.2-3b:ctx16384") == 16384
+    # A model that is genuinely not loaded is still reported as not loaded.
+    assert ollama.residency(base, "qwen2.5:3b") is None

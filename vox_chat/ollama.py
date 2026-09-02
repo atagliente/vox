@@ -16,8 +16,11 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from typing import Any
 
 TIMEOUT = 120.0
@@ -97,13 +100,38 @@ def list_models(base_url: str, timeout: float = 10.0) -> list[dict[str, Any]]:
     return rows
 
 
+def _resident_entry(base_url: str, model: str, timeout: float) -> dict[str, Any] | None:
+    """The /api/ps row for ``model``, under whichever name it is listed.
+
+    A derived model shares its blobs with the one it was built from, and
+    Ollama sometimes lists it under that parent name, so an exact match is not
+    enough to find it.
+    """
+    entries = [
+        entry for entry in _get(base_url, "/api/ps", timeout).get("models") or []
+        if isinstance(entry, dict)
+    ]
+    names = {model}
+    if is_derived(model):
+        try:
+            parent = parent_model(base_url, model, timeout)
+        except OllamaError:
+            parent = None
+        if parent:
+            names.add(parent)
+    for entry in entries:
+        if entry.get("name") in names or entry.get("model") in names:
+            return entry
+    return None
+
+
 def loaded_context(base_url: str, model: str, timeout: float = 10.0) -> int | None:
     """The window a resident model is actually loaded with, if it is loaded."""
-    for entry in _get(base_url, "/api/ps", timeout).get("models") or []:
-        if isinstance(entry, dict) and entry.get("name") == model:
-            value = entry.get("context_length")
-            return int(value) if value else None
-    return None
+    entry = _resident_entry(base_url, model, timeout)
+    if entry is None:
+        return None
+    value = entry.get("context_length")
+    return int(value) if value else None
 
 
 def trained_context(base_url: str, model: str, timeout: float = 10.0) -> int | None:
@@ -171,20 +199,25 @@ def _resolve_source(base_url: str, model: str) -> str:
 
 
 def create_with_context(base_url: str, model: str, num_ctx: int,
+                        parameters: dict[str, Any] | None = None,
                         timeout: float = TIMEOUT) -> str:
     """Write a derived model with ``num_ctx`` set, and return its name.
 
     The weights are not copied: this is a manifest pointing at the same blobs,
-    so what it costs on disk is a few kilobytes.
+    so what it costs on disk is a few kilobytes. Anything in ``parameters`` -
+    ``num_gpu`` above all - is written beside the window, so one build carries
+    the whole configuration.
     """
     if num_ctx < 512:
         raise OllamaError("a context window under 512 tokens is not usable")
     source = _resolve_source(base_url, model)
     name = derived_name(source, num_ctx)
+    body = {"num_ctx": int(num_ctx)}
+    body.update(parameters or {})
     data = _post(base_url, "/api/create", {
         "model": name,
         "from": source,
-        "parameters": {"num_ctx": int(num_ctx)},
+        "parameters": body,
         "stream": False,
     }, timeout)
     status = str(data.get("status", ""))
@@ -206,3 +239,129 @@ def delete_model(base_url: str, model: str, timeout: float = 30.0) -> None:
         raise OllamaError(f"delete refused: HTTP {exc.code}") from exc
     except OSError as exc:
         raise OllamaError(f"cannot reach {url}: {exc}") from exc
+
+
+# --------------------------------------------------------------- the GPU
+
+def layer_count(base_url: str, model: str, timeout: float = 10.0) -> int | None:
+    """How many blocks the model has, which is the ceiling for ``num_gpu``."""
+    data = _post(base_url, "/api/show", {"model": model}, timeout)
+    info = data.get("model_info")
+    if not isinstance(info, dict):
+        return None
+    for key, value in info.items():
+        if key.endswith(".block_count") and value:
+            return int(value)
+    return None
+
+
+def vram_mb() -> tuple[int, int] | None:
+    """``(used, total)`` in MB from nvidia-smi, or None when it is not there.
+
+    Ollama reports what it *believes* is in VRAM, which on Windows keeps
+    counting past the end of the card: the driver silently moves the excess
+    into shared memory. Only the card itself can say what really fits.
+    """
+    binary = shutil.which("nvidia-smi")
+    if binary is None:
+        return None
+    try:
+        completed = subprocess.run(
+            [binary, "--query-gpu=memory.used,memory.total",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=15, check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    first = completed.stdout.strip().splitlines()
+    if not first:
+        return None
+    try:
+        used, total = (int(part.strip()) for part in first[0].split(",")[:2])
+    except ValueError:
+        return None
+    return used, total
+
+
+@dataclass
+class Residency:
+    """Where a loaded model actually lives."""
+
+    size: int
+    size_vram: int
+    context: int | None = None
+    gpu_used_mb: int | None = None
+    gpu_total_mb: int | None = None
+
+    @property
+    def on_cpu(self) -> int:
+        return max(0, self.size - self.size_vram)
+
+    def spilling(self, reserve_mb: int = 0) -> bool:
+        """True when the card is full and the rest is in shared memory.
+
+        Ollama's own number cannot show this - it reports the whole model as
+        resident - so it is the card's used figure against its total.
+        """
+        if self.gpu_used_mb is None or self.gpu_total_mb is None:
+            return False
+        # 192 MB is the floor because a card that has spilled sits right up
+        # against its ceiling: 4003 of 4096 MB in the run this was written
+        # from, against 2755 for the same model when it fitted.
+        return self.gpu_used_mb >= self.gpu_total_mb - max(reserve_mb, 192)
+
+
+def residency(base_url: str, model: str, timeout: float = 10.0) -> Residency | None:
+    """What is resident for ``model`` right now, or None when it is not loaded."""
+    entry = _resident_entry(base_url, model, timeout)
+    if entry is None:
+        return None
+    card = vram_mb()
+    return Residency(
+        size=int(entry.get("size") or 0),
+        size_vram=int(entry.get("size_vram") or 0),
+        context=int(entry["context_length"]) if entry.get("context_length") else None,
+        gpu_used_mb=card[0] if card else None,
+        gpu_total_mb=card[1] if card else None,
+    )
+
+
+def probe(base_url: str, model: str, options: dict[str, Any],
+          timeout: float = 900.0) -> Residency | None:
+    """Load ``model`` with these options and report where it ended up.
+
+    One token is generated, which is the cheapest way to make Ollama commit to
+    a layout. Nothing is written: the options are per request.
+    """
+    _post(base_url, "/api/generate", {
+        "model": model,
+        "prompt": "hi",
+        "stream": False,
+        "keep_alive": "60s",
+        "options": dict(options, num_predict=1),
+    }, timeout)
+    return residency(base_url, model)
+
+
+def fit_layers(base_url: str, model: str, num_ctx: int, reserve_mb: int = 384,
+               on_step: Any = None) -> tuple[int, Residency | None]:
+    """The largest ``num_gpu`` that does not spill into shared memory.
+
+    Measured rather than calculated: each candidate is loaded and the card is
+    read. Spilling is the thing being avoided - it is slower than leaving the
+    same layers on the CPU, 9.7 tok/s against 12.2 on the machine this was
+    written on.
+    """
+    layers = layer_count(base_url, model) or 0
+    if layers <= 0:
+        raise OllamaError(f"{model} does not say how many layers it has")
+    step = max(1, layers // 8)
+    candidate = layers
+    while candidate > 0:
+        result = probe(base_url, model, {"num_ctx": num_ctx, "num_gpu": candidate})
+        if on_step is not None:
+            on_step(candidate, result)
+        if result is None or not result.spilling(reserve_mb):
+            return candidate, result
+        candidate -= step
+    return 0, None

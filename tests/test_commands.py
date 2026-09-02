@@ -56,7 +56,7 @@ def test_completion_of_a_prefix() -> None:
     assert set(commands.complete("prompt")) == {
         "prompts", "prompt", "prompt-save", "prompt-delete"
     }
-    assert commands.complete("/mod") == ["model", "model-ctx"]
+    assert commands.complete("/mod") == ["model", "model-ctx", "model-gpu"]
     assert len(commands.complete("")) == len(commands.COMMANDS)
 
 

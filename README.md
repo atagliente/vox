@@ -106,6 +106,7 @@ decoration.
 | Command | Effect |
 | --- | --- |
 | `/model [name]`, `/provider [name]` | switch, without restarting |
+| `/model ctx [N]`, `/model gpu [max]` | the window, and how much of it is on the GPU |
 | `/role [name]`, `/prompts`, `/sessions` | pick a persona, a saved prompt, a session |
 | `/session-save [name]`, `/session-load <name>` | sessions live next to your work |
 | `/code [n]` | show the answer's code blocks, copy one by number |

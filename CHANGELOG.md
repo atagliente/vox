@@ -12,6 +12,33 @@ machine and version named, not estimated.
 
 ## Unreleased
 
+### The GPU
+
+**2026-09-02**
+
+- **Every model VOX builds now fills the card by default.** `model_build` in
+  the configuration carries `num_gpu: "max"`, and "max" is measured: the model
+  is loaded with every layer offloaded, then stepped down until it stops
+  overflowing. The check is `nvidia-smi`, not Ollama: when a CUDA allocation
+  does not fit, Windows moves the excess into shared memory and both Ollama and
+  the card keep calling it resident.
+- **`/model gpu [max|N|off]`** reports where the model lives, writes a build
+  with a chosen or measured layer count, or hands the split back to Ollama.
+- Measured on a 4 GB MX150 with `granite4.2:3b`, 40 layers:
+
+  | layout | tok/s | card |
+  | --- | --- | --- |
+  | 16k window, Ollama's own split | 11.7 | 2377 MB |
+  | 16k window, all 40 layers | 12.2 | 2755 MB |
+  | 64k window, all 40 layers - spilled | 9.7 | 4003 MB, full |
+
+  Filling the card is worth a few percent on this hardware; overflowing into
+  shared memory costs 20%. The default is therefore as much as fits and not
+  one layer more - shared memory is the thing being avoided, not used.
+- Fixed while measuring: a derived model shares its blobs with the model it was
+  built from, and `/api/ps` lists it under that parent name, so VOX could not
+  find its own build to report on it.
+
 ### The context window
 
 **2026-09-02**
