@@ -5,14 +5,21 @@ No Ollama server, and no network, is involved anywhere in this file.
 
 from __future__ import annotations
 
+import json
 import threading
 from pathlib import Path
 from typing import Any, Iterator
 
+import openai
 import pytest
 
 from vox_chat.agent import needs_confirmation, parse_arguments, run_turn
-from vox_chat.llm_client import LLMError, consume_stream, to_api_messages
+from vox_chat.llm_client import (
+    LLMError,
+    _status_error,
+    consume_stream,
+    to_api_messages,
+)
 from vox_chat.models import Message
 from vox_chat.tools import ToolError, Workspace
 
@@ -554,3 +561,40 @@ def test_logprobs_are_not_asked_for_alongside_tools() -> None:
     ))
     assert sent[-1]["logprobs"] is True
     assert sent[-1]["top_logprobs"] == 5
+
+
+def test_context_overflow_is_named_rather_than_reported_as_http_400():
+    """Ollama's refusal for lack of room has a remedy; "HTTP 400" has none."""
+    inner = json.dumps({"error": {
+        "code": 400,
+        "message": ("request (4227 tokens) exceeds the available context size "
+                    "(4096 tokens), try increasing it"),
+        "type": "exceed_context_size_error",
+    }})
+    body = {"error": {"message": inner, "type": "invalid_request_error"}}
+
+    class FakeStatusError(openai.APIStatusError):
+        def __init__(self) -> None:
+            self.status_code = 400
+            self.body = body
+            Exception.__init__(self, "Error code: 400")
+
+    error = _status_error(FakeStatusError())
+    assert error.kind == "context"
+    assert "4227" in error.message and "4096" in error.message
+    assert "shorten the turn" in error.message
+    # The nested document is unwrapped, not shown as escaped JSON.
+    assert error.detail.startswith("request (4227 tokens)")
+
+
+def test_an_ordinary_400_still_reads_as_one():
+    class FakeStatusError(openai.APIStatusError):
+        def __init__(self) -> None:
+            self.status_code = 400
+            self.body = {"error": {"message": "unknown field 'foo'"}}
+            Exception.__init__(self, "Error code: 400")
+
+    error = _status_error(FakeStatusError())
+    assert error.kind == "http"
+    assert error.message == "provider returned HTTP 400"
+    assert error.detail == "unknown field 'foo'"

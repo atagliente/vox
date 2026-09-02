@@ -7,6 +7,7 @@ calls are merged by index, because providers send them fragment by fragment.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -19,7 +20,9 @@ from .models import Message, ToolCall
 from .reasoning import ThinkSplitter
 from .usage import TokenUsage
 
-ErrorKind = Literal["connection", "timeout", "http", "cancelled", "protocol"]
+ErrorKind = Literal[
+    "connection", "timeout", "http", "cancelled", "protocol", "context"
+]
 
 
 class LLMError(Exception):
@@ -310,9 +313,7 @@ class LLMClient:
                 "connection", f"cannot reach provider: {self.base_url}", str(exc)
             ) from exc
         except openai.APIStatusError as exc:
-            raise LLMError(
-                "http", f"provider returned HTTP {exc.status_code}", _status_detail(exc)
-            ) from exc
+            raise _status_error(exc) from exc
         except openai.OpenAIError as exc:
             raise LLMError("protocol", f"preload failed: {exc}", str(exc)) from exc
         return time.monotonic() - started
@@ -440,11 +441,7 @@ class LLMClient:
                 if cancel is not None and cancel.is_set():
                     yield StreamEvent("cancelled")
                     return
-                raise LLMError(
-                    "http",
-                    f"provider returned HTTP {exc.status_code}",
-                    _status_detail(exc),
-                ) from exc
+                raise _status_error(exc) from exc
             except openai.OpenAIError as exc:
                 if cancel is not None and cancel.is_set():
                     yield StreamEvent("cancelled")
@@ -480,11 +477,7 @@ class LLMClient:
                 if cancel is not None and cancel.is_set():
                     yield StreamEvent("cancelled")
                     return
-                raise LLMError(
-                    "http",
-                    f"provider returned HTTP {exc.status_code}",
-                    _status_detail(exc),
-                ) from exc
+                raise _status_error(exc) from exc
             except openai.OpenAIError as exc:
                 if cancel is not None and cancel.is_set():
                     yield StreamEvent("cancelled")
@@ -509,15 +502,70 @@ class LLMClient:
                         pass
 
 
+def _unwrap_message(text: str) -> str:
+    """Ollama nests a whole JSON error document inside ``error.message``."""
+    for _ in range(3):
+        stripped = text.strip()
+        if not stripped.startswith("{"):
+            return text
+        try:
+            data = json.loads(stripped)
+        except json.JSONDecodeError:
+            return text
+        inner = data.get("error") if isinstance(data, dict) else None
+        if isinstance(inner, dict) and inner.get("message"):
+            text = str(inner["message"])
+        elif isinstance(inner, str):
+            text = inner
+        else:
+            return text
+    return text
+
+
 def _status_detail(exc: openai.APIStatusError) -> str:
     """Best-effort human text out of an HTTP error body."""
     body = getattr(exc, "body", None)
     if isinstance(body, dict):
         error = body.get("error")
         if isinstance(error, dict) and error.get("message"):
-            return str(error["message"])
+            return _unwrap_message(str(error["message"]))
         return json.dumps(body)[:500]
     return str(exc)
+
+
+_OVERFLOW = re.compile(
+    r"request \((\d+) tokens?\) exceeds the available context size "
+    r"\((\d+) tokens?\)",
+    re.IGNORECASE,
+)
+
+
+def context_overflow(text: str) -> tuple[int, int] | None:
+    """``(prompt tokens, window)`` when the refusal was lack of room.
+
+    The prompt no longer fits, which is a different problem from a malformed
+    request and has a different remedy, so it must not be reported as a bare
+    HTTP 400.
+    """
+    match = _OVERFLOW.search(text)
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    return None
+
+
+def _status_error(exc: openai.APIStatusError) -> LLMError:
+    """The failure, named as precisely as the body allows."""
+    detail = _status_detail(exc)
+    room = context_overflow(detail) or context_overflow(str(exc))
+    if room is not None:
+        used, window = room
+        return LLMError(
+            "context",
+            f"prompt is {used} tokens, the model has room for {window} - "
+            f"shorten the turn, or load the model with a larger window",
+            detail,
+        )
+    return LLMError("http", f"provider returned HTTP {exc.status_code}", detail)
 
 
 def _rejects_logprobs(exc: openai.APIStatusError) -> bool:
