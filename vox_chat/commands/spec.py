@@ -131,6 +131,8 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("session-delete", "/session-delete <name>", "Delete a saved session"),
     CommandSpec("agent", "/agent on|off", "Toggle coding-agent mode"),
     CommandSpec("workspace", "/workspace <path>", "Set the agent workspace"),
+    CommandSpec("undo", "/undo", "Take back the last write the agent made"),
+    CommandSpec("plan", "/plan", "The plan the model says it is working to"),
     CommandSpec(
         "index",
         "/index [build|on|off|<query>]",

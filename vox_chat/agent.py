@@ -11,13 +11,18 @@ import json
 import threading
 import time
 from collections.abc import Callable, Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any, Literal
 
+from .authorisation import Limits, Policy
 from .llm_client import LLMClient, LLMError, StreamEvent, supports_tools_error
 from .models import Message, ToolCall, utc_now
 from .tools import (
     COMMAND_TOOLS,
+    PARALLEL_SAFE,
+    TODO_SCHEMA,
     TOOL_SCHEMAS,
     WEB_SCHEMAS,
     WEB_TOOLS,
@@ -27,6 +32,9 @@ from .tools import (
     Workspace,
     describe_call,
     execute,
+    paths_touched,
+    snapshot,
+    split_command,
     truncate,
 )
 from .usage import TurnUsage, estimate_tokens
@@ -75,6 +83,22 @@ def parse_arguments(raw: str) -> dict[str, Any]:
     return data
 
 
+def command_level(command: str, agent_config: dict[str, Any]) -> str:
+    """allow, ask or deny for this particular command.
+
+    The command line is split the same way it will be to run it, so the
+    policy sees the program the operating system would: a quoted path with
+    spaces in it is one argument, not two.
+    """
+    try:
+        argv = split_command(command)
+    except ValueError:
+        # It will not run either, and something unparseable is not something
+        # to quietly allow.
+        return "ask"
+    return Policy.from_config(agent_config).level_for(command, argv)
+
+
 def needs_confirmation(name: str, agent_config: dict[str, Any]) -> bool:
     """Whether this tool must be authorised by the user before running."""
     if name in WRITE_TOOLS:
@@ -106,6 +130,8 @@ def run_turn(
     sampling: dict[str, Any] | None = None,
     native: dict[str, Any] | None = None,
     response_format: dict[str, Any] | None = None,
+    undo=None,
+    todos=None,
 ) -> Iterator[AgentEvent]:
     """Drive one user turn, including any tool cycles it triggers.
 
@@ -124,6 +150,8 @@ def run_turn(
         # Somebody else's tools, named by their server so two of them may
         # both offer "search" without the model having to guess.
         schemas += mcp_registry.schemas()
+    if todos is not None:
+        schemas.append(TODO_SCHEMA)
     max_cycles = int(agent_config.get("max_tool_cycles", 8))
     max_output = int(agent_config.get("max_output_bytes", 8192))
     command_timeout = int(agent_config.get("command_timeout_seconds", 60))
@@ -239,28 +267,35 @@ def run_turn(
             yield AgentEvent("assistant_done", messages=produced)
             return
 
-        for call in tool_calls:
+        run_one = partial(
+            _run_tool,
+            workspace=workspace,
+            agent_config=agent_config,
+            confirm=confirm,
+            command_timeout=command_timeout,
+            max_output=max_output,
+            web_settings=web_settings,
+            mcp_registry=mcp_registry,
+            undo=undo,
+            todos=todos,
+        )
+        for group in _batches(tool_calls, int(agent_config.get("parallel_reads", 4))):
             if cancel is not None and cancel.is_set():
                 yield usage_event()
                 yield AgentEvent("cancelled", messages=produced)
                 return
-            result_message = _run_tool(
-                call,
-                workspace,
-                agent_config,
-                confirm,
-                command_timeout,
-                max_output,
-                web_settings,
-                mcp_registry,
-            )
-            history.append(result_message)
-            produced.append(result_message)
-            yield AgentEvent(
-                "tool_result" if call.approved is not False else "tool_denied",
-                text=result_message.content,
-                tool_call=call,
-            )
+            results = _run_batch(group, run_one)
+            # Results are appended in the order the model asked for them,
+            # whatever order they finished in: a conversation that reorders
+            # itself run to run is one nobody can reason about.
+            for call, result_message in zip(group, results, strict=True):
+                history.append(result_message)
+                produced.append(result_message)
+                yield AgentEvent(
+                    "tool_result" if call.approved is not False else "tool_denied",
+                    text=result_message.content,
+                    tool_call=call,
+                )
 
     yield usage_event()
     yield AgentEvent("assistant_done", messages=produced)
@@ -285,6 +320,42 @@ def _relay(
         tool_calls.extend(event.tool_calls)
         for call in event.tool_calls:
             yield AgentEvent("tool_start", tool_call=call)
+
+
+def _batches(calls: list[ToolCall], width: int) -> Iterator[list[ToolCall]]:
+    """Group calls into what may run together.
+
+    Reads may go at once — three files fetched in parallel is three times
+    less waiting, and none of them can see the others' effects. Anything that
+    writes, runs a command, or reaches somebody else's server goes alone: two
+    writes to the same file racing is a corrupted file, and two confirmations
+    on screen at once is a question nobody can answer.
+    """
+    if width < 2:
+        yield from ([call] for call in calls)
+        return
+    batch: list[ToolCall] = []
+    for call in calls:
+        if call.name in PARALLEL_SAFE:
+            batch.append(call)
+            if len(batch) >= width:
+                yield batch
+                batch = []
+            continue
+        if batch:
+            yield batch
+            batch = []
+        yield [call]
+    if batch:
+        yield batch
+
+
+def _run_batch(calls: list[ToolCall], run_one: Callable[..., Message]) -> list[Message]:
+    """Run these calls, together when there is more than one."""
+    if len(calls) == 1:
+        return [run_one(calls[0])]
+    with ThreadPoolExecutor(max_workers=len(calls)) as pool:
+        return list(pool.map(run_one, calls))
 
 
 def _run_mcp_tool(
@@ -331,6 +402,7 @@ def _run_mcp_tool(
 
 def _run_tool(
     call: ToolCall,
+    *,
     workspace: Workspace | None,
     agent_config: dict[str, Any],
     confirm: ConfirmCallback,
@@ -338,8 +410,21 @@ def _run_tool(
     max_output: int,
     web_settings=None,
     mcp_registry=None,
+    undo=None,
+    todos=None,
 ) -> Message:
     """Execute one tool call, asking for confirmation when required."""
+    if call.name == "plan" and todos is not None:
+        # Changes nothing on disk, so nothing to confirm: it is the model
+        # thinking out loud where the operator can read it.
+        try:
+            call.approved = True
+            call.result = todos.replace(
+                parse_arguments(call.arguments).get("steps", [])
+            )
+        except ToolError as exc:
+            call.result = str(exc)
+        return _tool_message(call)
     if mcp_registry is not None and mcp_registry.owns(call.name):
         return _run_mcp_tool(call, mcp_registry, confirm, max_output)
     if workspace is None and call.name not in WEB_TOOLS:
@@ -351,6 +436,22 @@ def _run_tool(
     except ToolError as exc:
         call.result = str(exc)
         return _tool_message(call)
+
+    if call.name in COMMAND_TOOLS:
+        level = command_level(str(arguments.get("command", "")), agent_config)
+        if level == "deny":
+            # Refused without a dialog on purpose: the value of a denied
+            # command is that nobody is asked about it at three in the
+            # morning, which is how the answer becomes yes.
+            call.approved = False
+            call.result = (
+                f"{arguments.get('command', '')!r} is on the deny list and was "
+                "not run. Change agent.commands in the configuration if that "
+                "is wrong."
+            )
+            return _tool_message(call)
+        if level == "allow":
+            agent_config = {**agent_config, "confirm_commands": False}
 
     if needs_confirmation(call.name, agent_config):
         try:
@@ -367,6 +468,15 @@ def _run_tool(
             return _tool_message(call)
     call.approved = True
 
+    # The undo, taken here because this is the last moment the old bytes
+    # exist. Offering one later would mean re-reading a file that has already
+    # been overwritten, which is no undo at all.
+    if undo is not None and call.name in WRITE_TOOLS:
+        undo.remember(
+            call.name,
+            snapshot(workspace, paths_touched(call.name, arguments, workspace)),
+        )
+
     try:
         result: ToolResult = execute(
             call.name,
@@ -375,6 +485,7 @@ def _run_tool(
             command_timeout,
             max_output,
             web_settings,
+            Limits.from_config(agent_config),
         )
         call.result = result.as_text()
     except ToolError as exc:

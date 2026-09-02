@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import sampling
+from . import authorisation, sampling
 from .storage import (
     ReadResult,
     global_config_path,
@@ -73,6 +73,19 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "confirm_web": False,
         "command_timeout_seconds": 60,
         "max_tool_cycles": 8,
+        # How many read-only tools may run at once. Reads cannot see each
+        # other's effects, so three files fetched together is three times
+        # less waiting; 1 puts it back to one at a time.
+        "parallel_reads": 4,
+        # Per-command authorisation. confirm_commands above is still read and
+        # still means what it meant; this is the finer answer where one
+        # switch for ls and rm -rf was not one.
+        #   {"allow": ["git", "pytest"], "deny": ["curl"], "default": "ask"}
+        "commands": {},
+        # POSIX only. Time was already capped; a command that allocates
+        # without bound is gone long before a timeout fires.
+        "memory_limit_mb": 0,
+        "max_processes": 0,
         "max_output_bytes": 8192,
     },
     "inspect": {
@@ -361,7 +374,17 @@ def validate_config(data: Any) -> list[str]:
         for key in ("enabled", "confirm_writes", "confirm_commands", "confirm_web"):
             if not isinstance(agent.get(key, False), bool):
                 errors.append(f"agent.{key} must be a boolean")
-        for key in ("command_timeout_seconds", "max_tool_cycles", "max_output_bytes"):
+        errors.extend(authorisation.errors_in(agent))
+        for key in ("memory_limit_mb", "max_processes"):
+            value = agent.get(key, 0)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                errors.append(f"agent.{key} must be zero or a positive integer")
+        for key in (
+            "command_timeout_seconds",
+            "max_tool_cycles",
+            "max_output_bytes",
+            "parallel_reads",
+        ):
             value = agent.get(key, 1)
             if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
                 errors.append(f"agent.{key} must be a positive integer")

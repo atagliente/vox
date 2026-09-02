@@ -63,7 +63,7 @@ from .prompts import PromptStore, find_variables, render
 from .roles import RoleStore
 from .sessions import SessionStore
 from .storage import global_config_path, vox_home
-from .tools import Workspace
+from .tools import TodoList, Workspace
 from .ui import branding
 from .ui.inspect_screen import InspectScreen
 from .ui.modals import (
@@ -86,6 +86,7 @@ from .ui.widgets import (
     Transcript,
     spinner_frame,
 )
+from .undo import UndoStack
 from .usage import LiveMeter, UsageTracker
 
 log = get_logger("app")
@@ -239,6 +240,10 @@ class VoxApp(App[None]):
         # set rather than on every turn.
         self.project_notes = project.find(self.workspace_path)
         self._index: indexing.Index | None = None
+        # The last authorised write, kept so /undo can take it back.
+        self.undo = UndoStack()
+        # The plan the model says it is working to, shown as it changes.
+        self.todos = TodoList()
         self._inspect_screen: InspectScreen | None = None
         self._panel_mode = "code"
 

@@ -356,6 +356,8 @@ class GenerationController:
                     sampling=parameters.request_fields(),
                     native=parameters.native_fields(),
                     response_format=app.response_format,
+                    undo=app.undo,
+                    todos=app.todos,
                 ):
                     produced = True
                     app.call_from_thread(self.handle_event, event)

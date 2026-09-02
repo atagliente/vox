@@ -15,7 +15,7 @@ import shlex
 import subprocess
 import sys
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -193,6 +193,55 @@ def write_file(workspace: Workspace, path: str, content: str) -> ToolResult:
     return ToolResult(True, f"wrote {workspace.relative(target)} ({lines} lines)")
 
 
+def edit_file(
+    workspace: Workspace, path: str, old: str, new: str, expect: int = 1
+) -> ToolResult:
+    """Replace an exact span of text, once. Callers must confirm beforehand.
+
+    The primitive that produces the fewest pointless whole-file rewrites: a
+    model changing three lines of a thousand-line file should not have to
+    reproduce the other nine hundred and ninety-seven, where every one of
+    them is a chance to drop something.
+
+    Exactness is the safety here. The span has to appear exactly ``expect``
+    times: no match means the model was working from something other than
+    what is on disk, and more matches than expected means it is about to
+    change something it did not look at. Both are refused rather than
+    guessed, and both come back as a message a model can act on.
+    """
+    target = workspace.resolve(path, must_exist=True)
+    name = workspace.relative(target)
+    if target.is_dir():
+        raise ToolError(f"is a directory: {name}")
+    if not old:
+        raise ToolError(
+            "edit_file needs the text to replace; use write_file for new files"
+        )
+    try:
+        body = target.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ToolError(f"cannot read {name}: {exc}") from exc
+    found = body.count(old)
+    if found == 0:
+        raise ToolError(
+            f"that text is not in {name}. Read the file again: it is not what "
+            "the edit was written against."
+        )
+    if found != expect:
+        raise ToolError(
+            f"that text appears {found} times in {name}, not {expect}. Include "
+            "more surrounding lines so it matches exactly once, or set expect."
+        )
+    updated = body.replace(old, new)
+    try:
+        target.write_text(updated, encoding="utf-8", newline="\n")
+    except OSError as exc:
+        raise ToolError(f"cannot write {name}: {exc}") from exc
+    delta = updated.count("\n") - body.count("\n")
+    sign = "+" if delta >= 0 else ""
+    return ToolResult(True, f"edited {name} ({found} replacement, {sign}{delta} lines)")
+
+
 @dataclass
 class PatchedFile:
     """One file touched by a patch, with its new content."""
@@ -299,7 +348,71 @@ def apply_patch(workspace: Workspace, patch: str) -> ToolResult:
     return ToolResult(True, "patched: " + ", ".join(written))
 
 
-def _split_command(command: str) -> list[str]:
+@dataclass
+class Snapshot:
+    """What a file looked like before a tool wrote to it.
+
+    Taken when the diff is built, which is a moment that already reads the
+    file: the undo costs nothing extra, and refusing to offer one because
+    nobody thought to keep the bytes would be a poor reason.
+    """
+
+    path: Path
+    before: str | None
+    """The previous content, or None when the file did not exist."""
+
+    def restore(self) -> str:
+        """Put it back, and say what happened."""
+        if self.before is None:
+            try:
+                self.path.unlink(missing_ok=True)
+            except OSError as exc:
+                raise ToolError(f"cannot remove {self.path.name}: {exc}") from exc
+            return f"removed {self.path.name}, which did not exist before"
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(self.before, encoding="utf-8", newline="\n")
+        except OSError as exc:
+            raise ToolError(f"cannot restore {self.path.name}: {exc}") from exc
+        return f"restored {self.path.name}"
+
+
+def snapshot(workspace: Workspace, paths: list[str]) -> list[Snapshot]:
+    """Capture the current content of these paths, before they are written."""
+    taken: list[Snapshot] = []
+    for name in paths:
+        try:
+            target = workspace.resolve(name)
+        except ToolError:
+            continue
+        if not target.exists():
+            taken.append(Snapshot(target, None))
+            continue
+        try:
+            taken.append(Snapshot(target, target.read_text(encoding="utf-8")))
+        except (OSError, UnicodeDecodeError):
+            # A file that cannot be read cannot be restored either, and
+            # pretending otherwise would be worse than saying so at undo time.
+            continue
+    return taken
+
+
+def paths_touched(
+    name: str, arguments: dict[str, Any], workspace: Workspace
+) -> list[str]:
+    """Which files this call is about to write to."""
+    if name in ("write_file", "edit_file"):
+        return [str(arguments.get("path", ""))] if arguments.get("path") else []
+    if name == "apply_patch":
+        try:
+            files = parse_patch(workspace, str(arguments.get("patch", "")))
+        except ToolError:
+            return []
+        return [workspace.relative(item.path) for item in files]
+    return []
+
+
+def split_command(command: str) -> list[str]:
     """Split a command line into argv without ever invoking a shell.
 
     On Windows ``shlex`` runs in non-POSIX mode so backslash paths survive;
@@ -322,6 +435,7 @@ def run_command(
     cwd: str = ".",
     timeout_seconds: int = 60,
     max_output: int = DEFAULT_MAX_OUTPUT,
+    limits: Any = None,
 ) -> ToolResult:
     """Run a command inside the workspace. Callers must confirm beforehand.
 
@@ -331,7 +445,7 @@ def run_command(
     if not command.strip():
         raise ToolError("empty command")
     try:
-        argv = _split_command(command)
+        argv = split_command(command)
     except ValueError as exc:
         raise ToolError(f"cannot parse command: {exc}") from exc
     if not argv:
@@ -350,6 +464,10 @@ def run_command(
             timeout=timeout_seconds,
             shell=False,
             check=False,
+            # Memory and process caps, where the platform has them. A
+            # timeout does not help with a command that allocates without
+            # bound: by the time it fires the machine is already gone.
+            preexec_fn=limits.preexec() if limits is not None else None,
         )
     except subprocess.TimeoutExpired:
         return ToolResult(
@@ -372,7 +490,101 @@ def run_command(
     return ToolResult(completed.returncode == 0, text, cut)
 
 
-WRITE_TOOLS = frozenset({"write_file", "apply_patch"})
+@dataclass
+class TodoList:
+    """The plan the model is working to, kept where the operator can see it.
+
+    A long task loses the thread: the model finishes step two, forgets step
+    four existed, and announces it is done. Writing the plan down and showing
+    it is what makes that visible while it is happening rather than
+    afterwards.
+
+    It changes nothing on disk. That is why it needs no confirmation — it is
+    the model thinking out loud, in a place the operator can read.
+    """
+
+    items: list[dict[str, str]] = field(default_factory=list)
+
+    STATES = ("todo", "doing", "done")
+
+    def replace(self, items: list[Any]) -> str:
+        """Take a new plan, and render it."""
+        cleaned: list[dict[str, str]] = []
+        for item in items:
+            if isinstance(item, str):
+                cleaned.append({"text": item.strip(), "state": "todo"})
+                continue
+            if not isinstance(item, dict) or not str(item.get("text", "")).strip():
+                continue
+            state = str(item.get("state", "todo")).lower()
+            cleaned.append(
+                {
+                    "text": str(item["text"]).strip(),
+                    "state": state if state in self.STATES else "todo",
+                }
+            )
+        if not cleaned:
+            raise ToolError("a plan needs at least one step")
+        # At most one step in progress: a plan where everything is being done
+        # at once is a plan nobody is following.
+        doing = [item for item in cleaned if item["state"] == "doing"]
+        if len(doing) > 1:
+            raise ToolError(
+                f"{len(doing)} steps are marked doing; work on one at a time"
+            )
+        self.items = cleaned
+        return self.render()
+
+    def render(self) -> str:
+        if not self.items:
+            return "(no plan)"
+        marks = {"todo": "[ ]", "doing": "[>]", "done": "[x]"}
+        lines = [f"  {marks[item['state']]} {item['text']}" for item in self.items]
+        done = sum(1 for item in self.items if item["state"] == "done")
+        return "\n".join([*lines, "", f"{done}/{len(self.items)} done"])
+
+
+TODO_SCHEMA: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "plan",
+        "description": (
+            "Write down the steps for a long task, and keep them up to date "
+            "as you go. Send the whole list every time, with each step marked "
+            "todo, doing or done. Use it before starting anything with more "
+            "than two or three parts, so the operator can see where you are. "
+            "Changes nothing on disk."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "state": {
+                                "type": "string",
+                                "enum": ["todo", "doing", "done"],
+                            },
+                        },
+                        "required": ["text"],
+                    },
+                }
+            },
+            "required": ["steps"],
+        },
+    },
+}
+
+
+# Tools that only look. These may run at once, because none of them can see
+# another's effects and three files read in parallel is three times less
+# waiting. Everything else runs alone.
+PARALLEL_SAFE = frozenset({"list_files", "read_file", "search_text"})
+
+WRITE_TOOLS = frozenset({"write_file", "edit_file", "apply_patch"})
 COMMAND_TOOLS = frozenset({"run_command"})
 # Outbound, and confirmed like the others: a search sends your words to
 # somebody else, and a fetch brings back text you did not write.
@@ -497,6 +709,41 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "edit_file",
+            "description": (
+                "Replace an exact span of text in a file. Prefer this over "
+                "write_file for a change to part of a file: it does not "
+                "require reproducing the rest, and refuses rather than "
+                "guessing when the text is not there or appears more than "
+                "expected. Requires user confirmation."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "old": {
+                        "type": "string",
+                        "description": (
+                            "The exact text to replace, including enough "
+                            "surrounding lines to appear only once."
+                        ),
+                    },
+                    "new": {
+                        "type": "string",
+                        "description": "What to put in its place. May be empty to delete.",
+                    },
+                    "expect": {
+                        "type": "integer",
+                        "description": "How many times it should match. Default 1.",
+                    },
+                },
+                "required": ["path", "old", "new"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "apply_patch",
             "description": "Apply a unified diff to the workspace. Requires user confirmation.",
             "parameters": {
@@ -578,6 +825,33 @@ def preview_write(
     return render_diff(before, after, name, max_lines)
 
 
+def preview_edit(
+    workspace: Workspace,
+    path: str,
+    old: str,
+    new: str,
+    expect: int = 1,
+    max_lines: int = DEFAULT_DIFF_LINES,
+) -> str:
+    """What ``edit_file`` would change, computed in memory.
+
+    Building the preview also checks the match, so an edit that would not
+    apply is reported before the operator is asked to authorise it.
+    """
+    target = workspace.resolve(path)
+    name = workspace.relative(target)
+    before, problem = _read_for_diff(target)
+    if problem is not None:
+        return f"{name}: {problem}"
+    body = "\n".join(before)
+    found = body.count(old)
+    if found == 0:
+        return f"{name}: that text does not appear; the edit would be refused"
+    if found != expect:
+        return f"{name}: that text appears {found} times, not {expect}; refused"
+    return render_diff(before, body.replace(old, new).splitlines(), name, max_lines)
+
+
 def preview_patch(
     workspace: Workspace, patch: str, max_lines: int = DEFAULT_DIFF_LINES
 ) -> str:
@@ -613,6 +887,16 @@ def describe_call(name: str, arguments: dict[str, Any], workspace: Workspace) ->
         path = str(arguments.get("path", "?"))
         preview = preview_write(workspace, path, str(arguments.get("content", "")))
         return f"WRITE {path}\nworkspace: {workspace.root}\n\n{preview}"
+    if name == "edit_file":
+        path = str(arguments.get("path", "?"))
+        preview = preview_edit(
+            workspace,
+            path,
+            str(arguments.get("old", "")),
+            str(arguments.get("new", "")),
+            int(arguments.get("expect", 1) or 1),
+        )
+        return f"EDIT {path}\nworkspace: {workspace.root}\n\n{preview}"
     if name == "apply_patch":
         preview = preview_patch(workspace, str(arguments.get("patch", "")))
         return f"PATCH\nworkspace: {workspace.root}\n\n{preview}"
@@ -667,6 +951,7 @@ def execute(
     command_timeout: int = 60,
     max_output: int = DEFAULT_MAX_OUTPUT,
     web_settings=None,
+    limits: Any = None,
 ) -> ToolResult:
     """Dispatch a confirmed tool call. Raises :class:`ToolError` on refusal."""
     if name in ("web_search", "fetch_url"):
@@ -701,6 +986,14 @@ def execute(
         return write_file(
             workspace, str(arguments["path"]), str(arguments.get("content", ""))
         )
+    if name == "edit_file":
+        return edit_file(
+            workspace,
+            str(arguments["path"]),
+            str(arguments["old"]),
+            str(arguments.get("new", "")),
+            int(arguments.get("expect", 1) or 1),
+        )
     if name == "apply_patch":
         return apply_patch(workspace, str(arguments["patch"]))
     if name == "run_command":
@@ -710,6 +1003,7 @@ def execute(
             str(arguments.get("cwd", ".")),
             command_timeout,
             max_output,
+            limits,
         )
     raise ToolError(f"unknown tool: {name}")
 

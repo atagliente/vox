@@ -316,26 +316,53 @@ decision rather than work: whether to move to an async provider client
 
 ---
 
-## 5. Agent mode
+## 5. Agent mode — `[to complete]`
 
-* **5.1 The tool loop**
-  * `[to do]` Run independent tools in parallel within a turn (the loop is strictly
-    sequential today, capped at `max_tool_cycles: 8`)
-  * `[to do]` An `edit_file` tool doing exact string replacement, alongside
-    `write_file`/`apply_patch` — it is the primitive that produces the fewest pointless
-    whole-file rewrites
-  * `[to do]` A `todo`/visible-plan tool, so a long task does not lose the thread
-  * `[to do]` An undo for the last write, using the snapshot already available when the
-    diff is produced
+* **5.1 The tool loop** — `[done]`
+  * `[done]` Reads run together, up to `agent.parallel_reads` (4). Only reads: none of
+    them can see another's effects, and three files fetched at once is three times less
+    waiting. Anything that writes, runs a command or reaches somebody else's server goes
+    alone — two writes to the same file racing is a corrupted file, and two confirmation
+    dialogs at once is a question nobody can answer. Results are appended in the order
+    the model asked for them, whatever order they finished in.
+  * `[done]` `edit_file`, and the model is told in the schema to prefer it. Exactness is
+    the safety: no match means the model was working from something other than what is
+    on disk, more matches than expected means it is about to change something it did not
+    look at, and both are refused rather than guessed. Confirmed like every other write,
+    with the diff computed in memory first so an edit that would not apply is reported
+    before the operator is asked.
+  * `[done]` A `plan` tool, rendered as a checklist. At most one step marked doing — a
+    plan where everything is in progress is one nobody is following. It changes nothing
+    on disk, which is why it needs no confirmation.
+  * `[done]` `/undo` for the last authorised write, from a snapshot taken **at the
+    moment of confirmation** rather than afterwards, because afterwards the old bytes
+    are gone. One step, and it says so: anything deeper is what git is for, and
+    half-promising otherwise is the kind of thing that gets trusted once.
   * `[done]` Explicit confirmation before every write, patch or command, with a unified diff
   * `[done]` Workspace confinement: `..`, symlinks pointing outside and shell operators
     refused, commands run under a timeout
 
-* **5.2 Isolation**
-  * `[to do]` Authorisation levels (`ask` / `allowlist` / `deny`) per command, instead of
-    the binary `confirm_commands`
-  * `[to do]` Optional execution in a container or namespace where available
-  * `[to do]` Resource limits on commands (memory, process count), not only time
+* **5.2 Isolation** — `[to complete]` (only the container)
+  * `[done]` `allow` / `ask` / `deny` per command in `agent.commands`. One switch for
+    both `ls` and `rm -rf` meant both got turned off, which is the worst outcome
+    available. A denied command is refused **without a dialog**, on purpose: the value
+    of denying something is that nobody is asked about it at three in the morning, which
+    is how the answer becomes yes. Matching is on the program, split the way the command
+    will actually be run — `/usr/bin/git`, `GIT`, `git.exe` and a quoted path with
+    spaces are all `git`, because a rule that those get past only holds when nobody is
+    trying. `confirm_commands` still works and still means what it meant.
+  * `[done]` Memory and process-count limits via `RLIMIT_AS` and `RLIMIT_NPROC`. A
+    timeout does not help with a command that allocates without bound: the machine is
+    gone long before it fires. **POSIX only, and it says so** rather than being a
+    setting that quietly does nothing on Windows.
+  * `[to complete]` Running commands in a container or namespace. This is a real
+    decision rather than a missing function: it changes what "the workspace" means (a
+    bind mount, not a directory), what a command can reach (no host network, no host
+    tools), and it needs Docker or bubblewrap present, which is a dependency VOX has so
+    far refused to have. Two shapes worth choosing between — `bwrap` on Linux, which is
+    light and needs no daemon but is Linux-only; or Docker, which works everywhere and
+    is a large thing to require. Both are days of work and both change the promise the
+    agent makes, so the choice is yours.
 
 ---
 

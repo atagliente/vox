@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 from .. import consensus as cns
 from .. import images, mcp, ollama, sampling, searchd
 from .. import report as reporting
+from ..tools import ToolError
 from . import spec as commands
 
 if TYPE_CHECKING:
@@ -675,3 +676,28 @@ def cmd_index(app: VoxApp, argument: str) -> None:
         app.write_system(app.index_report())
         return
     app.search_index(argument.strip())
+
+
+def cmd_undo(app: VoxApp, argument: str) -> None:
+    """Take back the last write the agent was authorised to make.
+
+    One step. Every write was confirmed before it happened, and this is for
+    the case where the confirmation was a judgement made from a diff that
+    looked right and was not.
+    """
+    if not app.undo.available:
+        app.write_system(app.undo.describe())
+        return
+    try:
+        app.write_system(app.undo.undo())
+    except ToolError as exc:
+        app.write_error(f"UNDO - {exc}")
+
+
+def cmd_plan(app: VoxApp, argument: str) -> None:
+    """Show the plan the model wrote for itself.
+
+    It is also written into the transcript as the model updates it; this is
+    for looking at it again without scrolling back.
+    """
+    app.write_system("PLAN\n\n" + app.todos.render())

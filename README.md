@@ -211,6 +211,33 @@ tool calling. Everything is confined to the workspace (`/workspace <path>`):
 `..`, symlinks pointing outside and shell operators are refused, and commands
 run under a timeout.
 
+### What the agent may do
+
+Every write, patch and command is confirmed with the change in front of you.
+Beyond that, commands can be sorted into three levels in `config.json`:
+
+```json
+"agent": {
+  "commands": {
+    "allow": ["git", "pytest", "ls"],
+    "deny": ["curl", "ssh"],
+    "default": "ask"
+  },
+  "memory_limit_mb": 2048,
+  "max_processes": 64
+}
+```
+
+`allow` runs without asking, `ask` confirms, and `deny` refuses without a
+dialog - the point of denying something is that nobody is asked about it at
+three in the morning. The rule matches the program however it is written:
+`/usr/bin/git`, `GIT` and `git.exe` are all `git`.
+
+The memory and process limits are POSIX only, and `vox doctor` says so rather
+than pretending otherwise on Windows.
+
+`/undo` takes back the last write. One step: it is not version control.
+
 ## Searching the internet
 
 Off until you switch it on, and the only part of VOX that talks to something
