@@ -640,6 +640,9 @@ class VoxApp(App[None]):
         assert self.client is not None
         agent_config = dict(self.config.get("agent", {}))
         agent_enabled = bool(agent_config.get("enabled", False))
+        if self.web_mode_active():
+            # In web mode the operator has already asked for the internet.
+            agent_config["confirm_web"] = False
         try:
             for event in run_turn(
                 client=self.client,

@@ -793,9 +793,11 @@ trimmed one, and the search line always shows what was searched for.
   goes to Brave. The key travels in a header, never in the URL.
 
 **In agent mode** the model gets `web_search` and `fetch_url` as tools, offered
-only while `web.enabled` is true. They are confirmed like writes and commands,
-under `agent.confirm_web`; the confirmation for a search shows the query,
-because that query is what leaves the machine.
+only while `web.enabled` is true. They do **not** stop to ask: switching the web
+on is the permission, and a search reads without changing anything here. Writes,
+patches and commands still ask, as before. Set `agent.confirm_web` to `true` if
+you would rather approve each search; the prompt then shows the query, which is
+what leaves the machine.
 
 **What comes back is data.** Every fetched page and every set of results is
 prefixed with a line telling the model it is information and not instructions.

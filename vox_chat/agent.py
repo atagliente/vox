@@ -71,7 +71,9 @@ def needs_confirmation(name: str, agent_config: dict[str, Any]) -> bool:
     if name in COMMAND_TOOLS:
         return bool(agent_config.get("confirm_commands", True))
     if name in WEB_TOOLS:
-        return bool(agent_config.get("confirm_web", True))
+        # Reading is not writing: a search leaves the machine but changes
+        # nothing on it, and /web on already said yes to that.
+        return bool(agent_config.get("confirm_web", False))
     return False
 
 

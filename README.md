@@ -215,9 +215,8 @@ Or do it by hand:
 
 Results land in the conversation, so the model can use them. `/fetch` reads one
 page and turns it into text. In agent mode the model gets two tools of its own,
-`web_search` and `fetch_url`, under the same approval as writes and commands —
-the confirmation for a search shows the query, because that query leaves your
-machine.
+`web_search` and `fetch_url`, and they do not stop to ask: turning the web on is
+the permission. Writes and commands still ask.
 
 **VOX runs the search server itself.** Pressing `F6` starts a small HTTP
 server on `127.0.0.1:8888`, inside VOX, in a thread. Nothing to install, no

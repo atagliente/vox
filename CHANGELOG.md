@@ -116,6 +116,11 @@ machine and version named, not estimated.
   thing the installer runs crashed. Nothing in the suite exercised the checks,
   which is how a deleted import got through; there is a test now that runs
   every check with mesh and web enabled and asserts the report renders.
+- **A search no longer asks permission.** Turning the web on is the
+  permission, and a confirmation per search only teaches the operator to press
+  yes without reading. `agent.confirm_web` is off by default and forced off in
+  web mode, where the internet has been asked for explicitly; writes, patches
+  and commands still ask, because those change something.
 - **"Nothing found" is no longer reported as the last upstream's error.**
 - **Fixed: `provider returned HTTP 400` after a search.** Search results and
   fetched pages were stored with the `tool` role and no `tool_call_id` — a

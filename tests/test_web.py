@@ -258,7 +258,7 @@ def test_the_default_config_carries_a_web_block() -> None:
     config = default_config()
     assert config["web"]["enabled"] is False, "the internet is opt-in"
     assert config["web"]["provider"] == "local", "no key and nothing to install"
-    assert config["agent"]["confirm_web"] is True
+    assert config["agent"]["confirm_web"] is False
     assert validate_config(config) == []
 
 
@@ -283,10 +283,14 @@ def test_the_model_is_only_offered_the_web_when_it_is_on() -> None:
     from vox_chat.tools import WEB_SCHEMAS, WEB_TOOLS
 
     assert {s["function"]["name"] for s in WEB_SCHEMAS} == WEB_TOOLS
-    # Outbound, so confirmed like a write or a command.
-    assert needs_confirmation("web_search", {}) is True
-    assert needs_confirmation("fetch_url", {}) is True
-    assert needs_confirmation("fetch_url", {"confirm_web": False}) is False
+    # Switching the web on is the permission; a search reads and changes
+    # nothing, so it does not stop to ask again.
+    assert needs_confirmation("web_search", {}) is False
+    assert needs_confirmation("fetch_url", {}) is False
+    assert needs_confirmation("fetch_url", {"confirm_web": True}) is True
+    # What writes or runs still asks, whatever the web setting.
+    assert needs_confirmation("write_file", {}) is True
+    assert needs_confirmation("run_command", {}) is True
 
 
 def test_the_tool_refuses_when_the_web_is_not_configured(tmp_path: Path) -> None:

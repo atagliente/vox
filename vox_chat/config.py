@@ -49,7 +49,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": False,
         "confirm_writes": True,
         "confirm_commands": True,
-        "confirm_web": True,
+        # Switching the web on is the permission; asking again per search only
+        # trains the operator to press yes. Writes and commands still ask.
+        "confirm_web": False,
         "command_timeout_seconds": 60,
         "max_tool_cycles": 8,
         "max_output_bytes": 8192,
