@@ -61,6 +61,29 @@ machine and version named, not estimated.
   rather than a thin day on the internet. Verified with the index actually
   blocked: `answered: wikipedia, stackoverflow` and the best result for
   "circular buffer python" was the Stack Overflow question with 159 votes.
+- **Ask the right encyclopaedia, and ask it the question rather than the
+  sentence.** "mi dici quale è il cap di latiano?" went to the English
+  Wikipedia as a whole Italian sentence, matched nothing, and the model
+  answered that it had never heard of Latiano — a town of nine thousand people
+  with an article of its own. The language is now guessed from the question and
+  the asking is stripped from it, so that becomes `cap latiano` on
+  it.wikipedia; a title lookup runs before the full-text search, because a
+  question about a place wants that place rather than articles mentioning it;
+  and a subject documented only in English is still found. Measured on the
+  question that failed: Latiano is now the first source, and the page carries
+  `Cod. postale 72022` 1,554 characters in, inside the budget the model gets.
+- **"Nothing found" is no longer reported as the last upstream's error.**
+- **Fixed: `provider returned HTTP 400` after a search.** Search results and
+  fetched pages were stored with the `tool` role and no `tool_call_id` — a
+  tool message answering no tool call, which a provider is right to reject,
+  and it rejected the whole request. They now use a display-only `web` role,
+  folded into a system message on the way to the provider, and a `tool`
+  message without an id is never sent at all: one malformed message must not
+  cost the conversation.
+- **An endpoint that already answers is used rather than fought over.** A
+  second VOX, or a SearXNG of your own on the same port, meant the search
+  server could not bind and the turn went ahead without sources; the port is
+  probed first now.
 - **Where those results come from, said plainly.** DuckDuckGo's HTML endpoint,
   parsed, plus Wikipedia's documented API. That is scraping: it can break when
   their markup changes and it is rate-limited, so a captcha page is reported as

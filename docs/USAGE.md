@@ -763,6 +763,15 @@ SYS ▸ WEB - 4 sources for 'what is a circular buffer', 1 read in full
 That matters: a blocked index used to end the search, and the model would then
 answer that it had never heard of the thing you asked about.
 
+**The question is not sent as you typed it.** Wikipedia, Stack Overflow and
+Hacker News match titles, so "mi dici quale è il cap di latiano?" is trimmed to
+`cap latiano`, and the language of the question decides which Wikipedia is
+asked — that one goes to `it.wikipedia`, and falls back to English when the
+subject is only documented there. A title lookup runs before the full-text
+search, because a question about a place wants that place. The general web
+index still gets the query as written; only the title-matching APIs get the
+trimmed one, and the search line always shows what was searched for.
+
 - **`local`** (default) — the server above. Nothing to set up.
 - **`searxng`** — your own instance, sturdier than scraping, and the query only
   reaches machines you run. Its `settings.yml` must list `json` under

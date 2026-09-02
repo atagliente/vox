@@ -574,9 +574,15 @@ class VoxApp(App[None]):
         # "peer" and "error" are ours, not roles any provider accepts. The peer
         # answers are folded into one system message just before the question
         # they belong to, by start_consensus.
-        messages.extend(
-            m for m in self.session.messages if m.role not in ("error", "peer")
-        )
+        for message in self.session.messages:
+            if message.role in ("error", "peer"):
+                continue
+            if message.role == "web":
+                # What a search found is context, and "web" is not a role any
+                # provider knows.
+                messages.append(Message(role="system", content=message.content))
+                continue
+            messages.append(message)
         if self._web_prompt:
             messages.append(Message(role="system", content=self._web_prompt))
         if self._consensus_prompt:
@@ -1584,6 +1590,9 @@ class VoxApp(App[None]):
         """
         if self.search_server.running:
             return True
+        if searchd.answering(settings.endpoint):
+            # Another VOX, or a SearXNG of your own, is already there.
+            return True
         self.search_server.port = searchd.port_of(settings.endpoint)
         try:
             detail = self.search_server.start()
@@ -1632,7 +1641,7 @@ class VoxApp(App[None]):
         )
         # The citations stay in the conversation; the page text is only for
         # this turn, or every later message would carry the whole internet.
-        citation = Message(role="tool", name="web", content=sources.citations())
+        citation = Message(role="web", name="web", content=sources.citations())
         self.session.messages.append(citation)
         self.write_message(citation)
         self.dirty = True
@@ -1742,7 +1751,7 @@ class VoxApp(App[None]):
 
     def fetch_finished(self, page: web_module.Page) -> None:
         message = Message(
-            role="tool", name="fetch_url",
+            role="web", name="fetch_url",
             content=web_module.render_page(page),
         )
         self.session.messages.append(message)

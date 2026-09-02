@@ -54,9 +54,51 @@ BROWSER_UA = (
 )
 DDG_HTML = "https://html.duckduckgo.com/html/"
 DDG_LITE = "https://lite.duckduckgo.com/lite/"
-WIKIPEDIA = "https://en.wikipedia.org/w/api.php"
+WIKIPEDIA = "https://{language}.wikipedia.org/w/api.php"
+
+# Enough of a heuristic to pick an encyclopaedia, and no more. A question in
+# Italian belongs on it.wikipedia: sending it to the English one and getting
+# nothing is how "what is the postal code of Latiano" became "I have never
+# heard of Latiano".
+_LANGUAGE_MARKERS = {
+    "it": {"il", "lo", "la", "gli", "che", "di", "quale", "come", "dove",
+           "perche", "perché", "qual", "cosa", "mi", "sono", "una", "del"},
+    "es": {"el", "los", "las", "que", "cual", "como", "donde", "por", "una"},
+    "fr": {"le", "les", "des", "que", "quel", "comment", "pourquoi", "une"},
+    "de": {"der", "die", "das", "und", "wie", "warum", "wo", "ist", "eine"},
+}
+
+# Words that say how a question was asked rather than what it was about. The
+# APIs match titles, so leaving them in is what makes a real question miss.
+_NOISE = {
+    "a", "an", "and", "are", "can", "could", "do", "does", "for", "from", "how",
+    "in", "is", "it", "me", "of", "on", "or", "please", "tell", "than", "that",
+    "the", "to", "what", "when", "where", "which", "who", "why", "with", "you",
+    "che", "chi", "come", "cosa", "cos", "dammi", "del", "della", "dello", "di",
+    "dice", "dici", "dove", "e", "il", "in", "la", "le", "lo", "mi", "per",
+    "perche", "perché", "qual", "quale", "quali", "quando", "sai", "sono", "un",
+    "una", "uno", "vorrei", "è", "e'", "sai?",
+}
 STACKEXCHANGE = "https://api.stackexchange.com/2.3/search/advanced"
 HACKERNEWS = "https://hn.algolia.com/api/v1/search"
+
+
+def language_of(query: str, default: str = "en") -> str:
+    """Which Wikipedia to ask. A guess, and only ever a guess."""
+    words = {word.strip(".,;:!?").lower() for word in query.split()}
+    best, score = default, 0
+    for language, markers in _LANGUAGE_MARKERS.items():
+        hits = len(words & markers)
+        if hits > score:
+            best, score = language, hits
+    return best if score >= 2 else default
+
+
+def keywords(query: str, keep: int = 8) -> str:
+    """The question with the asking removed, for APIs that match titles."""
+    words = [word.strip("¿?¡!.,;:\"'()[]") for word in query.split()]
+    kept = [word for word in words if word and word.lower() not in _NOISE]
+    return " ".join(kept[:keep]) or query
 
 
 def port_of(endpoint: str) -> int:
@@ -183,28 +225,71 @@ def _json(url: str) -> dict:
         raise SearchdError("the answer was not JSON") from exc
 
 
-def wikipedia(query: str, limit: int = 3) -> list[Hit]:
-    """A documented API with no key, good at exactly what it is good at."""
-    url = WIKIPEDIA + "?" + urllib.parse.urlencode({
-        "action": "query", "list": "search", "srsearch": query,
-        "format": "json", "srlimit": limit,
+def _wiki_url(language: str, title: str) -> str:
+    return (f"https://{language}.wikipedia.org/wiki/"
+            + urllib.parse.quote(title.replace(" ", "_")))
+
+
+def _wiki_titles(language: str, term: str, limit: int = 3) -> list[str]:
+    """Titles that start with ``term``: how you find a place or a person."""
+    url = WIKIPEDIA.format(language=language) + "?" + urllib.parse.urlencode({
+        "action": "opensearch", "search": term, "limit": limit, "format": "json",
     })
     payload = _json(url)
-    return [
-        Hit(
-            title=str(item.get("title", "")),
-            url="https://en.wikipedia.org/wiki/"
-                + urllib.parse.quote(str(item.get("title", "")).replace(" ", "_")),
-            content=_clean(str(item.get("snippet", ""))),
-        )
-        for item in payload.get("query", {}).get("search", [])
-    ]
+    return [str(title) for title in (payload[1] if len(payload) > 1 else [])]
+
+
+def wikipedia(query: str, limit: int = 3, language: str = "") -> list[Hit]:
+    """A documented API with no key, in the language the question was asked in.
+
+    Two lookups, because they fail differently: a title match finds the thing
+    being asked about ("latiano" -> Latiano), and a full-text search finds
+    articles that discuss it. The title match goes first, since a question
+    about a place usually wants that place.
+    """
+    language = language or language_of(query)
+    terms = keywords(query)
+    hits: list[Hit] = []
+    seen: set[str] = set()
+
+    # The longest words first: those are the names, not the scaffolding.
+    for word in sorted(terms.split(), key=len, reverse=True)[:2]:
+        if len(word) < 4:
+            continue
+        try:
+            titles = _wiki_titles(language, word)
+        except SearchdError:
+            titles = []
+        for title in titles[:2]:
+            url = _wiki_url(language, title)
+            if url not in seen:
+                seen.add(url)
+                hits.append(Hit(title=title, url=url, content="Wikipedia article"))
+        if hits:
+            break
+
+    url = WIKIPEDIA.format(language=language) + "?" + urllib.parse.urlencode({
+        "action": "query", "list": "search", "srsearch": terms,
+        "format": "json", "srlimit": limit,
+    })
+    for item in _json(url).get("query", {}).get("search", []):
+        title = str(item.get("title", ""))
+        address = _wiki_url(language, title)
+        if address not in seen:
+            seen.add(address)
+            hits.append(Hit(title=title, url=address,
+                            content=_clean(str(item.get("snippet", "")))))
+
+    if not hits and language != "en":
+        # The subject may simply be documented in English instead.
+        return wikipedia(terms, limit, "en")
+    return hits[:limit]
 
 
 def stackexchange(query: str, limit: int = 3) -> list[Hit]:
     """Stack Overflow, which is where the answer often actually is."""
     url = STACKEXCHANGE + "?" + urllib.parse.urlencode({
-        "order": "desc", "sort": "relevance", "q": query,
+        "order": "desc", "sort": "relevance", "q": keywords(query),
         "site": "stackoverflow", "pagesize": limit,
     })
     payload = _json(url)
@@ -227,7 +312,7 @@ def stackexchange(query: str, limit: int = 3) -> list[Hit]:
 def hackernews(query: str, limit: int = 3) -> list[Hit]:
     """What was linked and argued about, which dates a thing usefully."""
     url = HACKERNEWS + "?" + urllib.parse.urlencode({
-        "query": query, "hitsPerPage": limit, "tags": "story",
+        "query": keywords(query), "hitsPerPage": limit, "tags": "story",
     })
     payload = _json(url)
     hits = []
@@ -285,7 +370,10 @@ def search(query: str, limit: int = 10) -> tuple[list[Hit], list[str], list[str]
             hits.append(hit)
 
     if not hits:
-        raise SearchdError("; ".join(failures) or "no upstream returned anything")
+        detail = "; ".join(failures)
+        raise SearchdError(
+            f"nothing found ({detail})" if detail else "nothing found"
+        )
     return hits[:limit], answered, failures
 
 
@@ -341,6 +429,24 @@ class _Handler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args) -> None:  # noqa: A002
         log.debug("searchd %s", format % args)
+
+
+def answering(endpoint: str, timeout: float = 3.0) -> bool:
+    """Is something already serving searches there?
+
+    Another VOX, or a SearXNG of your own: either way there is no reason to
+    bind the port a second time and every reason not to.
+    """
+    url = endpoint.rstrip("/") + "/search?" + urllib.parse.urlencode(
+        {"q": "vox", "format": "json"}
+    )
+    request = urllib.request.Request(url, headers={"User-Agent": "vox/0.1"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            json.loads(response.read(200_000))
+        return True
+    except (urllib.error.URLError, ValueError, OSError, TimeoutError):
+        return False
 
 
 class LocalSearch:

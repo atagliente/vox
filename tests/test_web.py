@@ -46,6 +46,10 @@ class FakeResponse(io.BytesIO):
 @pytest.fixture
 def engine(monkeypatch: pytest.MonkeyPatch):
     """The local search server, stubbed: no socket, no upstream."""
+    from vox_chat import searchd
+
+    # Nothing is listening yet, and asking would spend a stubbed response.
+    monkeypatch.setattr(searchd, "answering", lambda endpoint, timeout=3.0: False)
     started: list[int] = []
 
     class FakeServer:

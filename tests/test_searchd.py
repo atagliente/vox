@@ -304,3 +304,75 @@ def test_stopping_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
     running.stop()
     running.stop()
     assert running.running is False
+
+
+# --------------------------------------------------- asking the right question
+
+
+def test_the_language_is_guessed_from_the_question() -> None:
+    """A question in Italian belongs on it.wikipedia. Sending it to the English
+    one and getting nothing is how a real town became "never heard of it"."""
+    assert searchd.language_of("mi dici quale è il cap di latiano?") == "it"
+    assert searchd.language_of("what is the postal code of Latiano?") == "en"
+    assert searchd.language_of("cual es el codigo postal de una ciudad") == "es"
+    # Too little to go on stays with the default rather than guessing wildly.
+    assert searchd.language_of("latiano") == "en"
+
+
+def test_the_asking_is_stripped_from_the_question() -> None:
+    """These APIs match titles, so "mi dici quale è il" is noise that misses."""
+    assert searchd.keywords("mi dici quale è il cap di latiano?") == "cap latiano"
+    assert searchd.keywords("what is a circular buffer?") == "circular buffer"
+    assert searchd.keywords("tell me about ring buffers") == "about ring buffers"
+    # A question made only of noise still searches for something.
+    assert searchd.keywords("what is it?") == "what is it?"
+
+
+def test_wikipedia_looks_up_the_title_before_the_full_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A question about a place wants that place, not articles mentioning it."""
+    asked: list[str] = []
+
+    def fake_json(url):
+        asked.append(url)
+        if "opensearch" in url:
+            if "latiano" in url.lower():
+                return ["latiano", ["Latiano", "Latina"], [], []]
+            return ["x", [], [], []]
+        return {"query": {"search": [{"title": "Bartolo Longo", "snippet": "a man"}]}}
+
+    monkeypatch.setattr(searchd, "_json", fake_json)
+    hits = searchd.wikipedia("mi dici quale è il cap di latiano?", limit=3)
+
+    assert hits[0].title == "Latiano", "the town comes first"
+    assert hits[0].url == "https://it.wikipedia.org/wiki/Latiano"
+    assert any(hit.title == "Bartolo Longo" for hit in hits), "and the rest follows"
+    assert all("it.wikipedia.org" in url for url in asked)
+
+
+def test_a_subject_only_documented_in_english_is_still_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    languages: list[str] = []
+
+    def fake_json(url):
+        languages.append("it" if "//it." in url else "en")
+        if "//it." in url:
+            return ["x", [], [], []] if "opensearch" in url else {"query": {"search": []}}
+        if "opensearch" in url:
+            return ["x", ["Ring buffer"], [], []]
+        return {"query": {"search": []}}
+
+    monkeypatch.setattr(searchd, "_json", fake_json)
+    hits = searchd.wikipedia("mi dici cosa è il ring buffer che uso", limit=3)
+    assert "en" in languages, "it fell back to the English encyclopaedia"
+    assert hits and hits[0].url.startswith("https://en.wikipedia.org/")
+
+
+def test_nothing_found_is_not_reported_as_a_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _upstreams(monkeypatch, wikipedia=lambda query, limit=3: [])
+    with pytest.raises(searchd.SearchdError, match="nothing found"):
+        searchd.search("a question nobody has written about")

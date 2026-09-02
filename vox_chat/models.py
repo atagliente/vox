@@ -8,10 +8,10 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 MessageRole = Literal[
-    # "peer" is another agent's answer, kept in the transcript and the report.
-    # It is never sent to a provider as-is: build_request_messages folds the
-    # peer answers into one system message.
-    "system", "user", "assistant", "tool", "error", "reasoning", "peer"
+    # "peer" is another agent's answer and "web" is what a search returned.
+    # Neither is a role any provider accepts: build_request_messages folds them
+    # into system messages, and to_api refuses to send them raw.
+    "system", "user", "assistant", "tool", "error", "reasoning", "peer", "web"
 ]
 
 
@@ -105,13 +105,18 @@ class Message:
         Reasoning is deliberately left out: it is kept for the operator, not
         replayed to the model.
         """
-        if self.role in ("error", "reasoning"):
+        if self.role in ("error", "reasoning", "peer", "web"):
             return None
         if self.role == "tool":
+            # A tool message answers a tool call. Without an id it answers
+            # nothing, and a provider is right to reject the whole request —
+            # which is what it did.
+            if not self.tool_call_id:
+                return None
             return {
                 "role": "tool",
                 "content": self.content,
-                "tool_call_id": self.tool_call_id or "",
+                "tool_call_id": self.tool_call_id,
             }
         payload: dict[str, Any] = {"role": self.role, "content": self.content}
         if self.tool_calls:

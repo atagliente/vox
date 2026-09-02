@@ -22,6 +22,7 @@ _ROLE_LABEL = {
     "error": "ERR",
     "reasoning": "THINK",
     "peer": "PEER",
+    "web": "WEB",
 }
 
 
