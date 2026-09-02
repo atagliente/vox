@@ -413,8 +413,11 @@ the PKI directory on first use so that two fresh installations interoperate
 without provisioning. Its private key is public by construction, so its use is
 declared everywhere it matters: `Universe: ON-LINE (SAMPLE CERT)` in the header,
 `DEMO CERT` in the status bar, a line in the transcript on going online, and a
-`WARN` from `vox doctor`. `/mesh new-ca` replaces it with an authority private
-to the machine, moving the sample aside and reissuing this agent.
+`WARN` from `vox doctor`. `mesh.demo_ca` is true by default and says which authority to be on, so a
+machine holding another one is moved to the sample when it goes online.
+`/mesh new-ca` replaces it with an authority private to the machine — moving
+the sample aside, reissuing this agent, and setting the flag false so the next
+start does not undo it — and `/mesh sample-ca` goes back.
 
 There is no shared secret anywhere in the protocol. A receiver validates the
 certificate in the packet against its own CA, requires the announced agent id

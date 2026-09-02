@@ -113,6 +113,7 @@ class MeshSettings:
     port: int = 45177
     pki_dir: str = ""
     auto_provision: bool = True
+    demo_ca: bool = True
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> "MeshSettings":
@@ -133,6 +134,7 @@ class MeshSettings:
             port=int(section.get("port", defaults.port)),
             pki_dir=str(section.get("pki_dir", "") or ""),
             auto_provision=bool(section.get("auto_provision", defaults.auto_provision)),
+            demo_ca=bool(section.get("demo_ca", defaults.demo_ca)),
         )
 
     def resolved_agent_id(self) -> str:
@@ -221,13 +223,12 @@ def seed_demo_ca(directory: Path) -> None:
     )
 
 
-def new_ca(directory: Path, agent_id: str):
-    """Replace the authority in ``directory`` with one private to this machine.
+def _swap_ca(directory: Path, agent_id: str, seed: bool):
+    """Put a different authority in ``directory`` and reissue this agent.
 
     The old authority is moved aside rather than deleted — certificates issued
-    by it stay verifiable if you need to look at them — and this agent is
-    reissued immediately, so the mesh keeps working with a trust anchor nobody
-    else holds.
+    by it stay readable if you need to look at them — but every certificate it
+    signed goes, because none of them mean anything under the new anchor.
     """
     from .discovery.identity import create_ca
 
@@ -236,22 +237,52 @@ def new_ca(directory: Path, agent_id: str):
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     for name in ("ca.crt", "ca.key"):
         existing = directory / name
-        if existing.exists():
-            existing.rename(directory / f"{name}.replaced-{stamp}")
-    create_ca(directory)
-    log.info("created a private certificate authority in %s", directory)
-    # Every certificate under the old authority is now worthless here.
+        if not existing.exists():
+            continue
+        # Two swaps in the same second must not overwrite the first backup,
+        # and on Windows a rename onto an existing name fails outright.
+        target = directory / f"{name}.replaced-{stamp}"
+        attempt = 1
+        while target.exists():
+            attempt += 1
+            target = directory / f"{name}.replaced-{stamp}-{attempt}"
+        existing.rename(target)
     for stale in directory.glob("*.crt"):
-        if stale.name != "ca.crt":
+        if not stale.name.startswith("ca.crt"):
             stale.unlink()
+    if seed:
+        seed_demo_ca(directory)
+    else:
+        create_ca(directory)
+        log.info("created a private certificate authority in %s", directory)
     return ensure_identity(agent_id, directory)
 
 
-def ensure_identity(agent_id: str, directory: Path, provision: bool = True):
-    """Load this agent's identity, creating the CA and certificate if needed."""
+def new_ca(directory: Path, agent_id: str):
+    """Replace the authority with one private to this machine."""
+    return _swap_ca(directory, agent_id, seed=False)
+
+
+def use_demo_ca(directory: Path, agent_id: str):
+    """Go back to the authority shipped with VOX.
+
+    Useful for meeting a fresh installation, and for seeing what a new user
+    sees. It means trusting an authority whose private key is public.
+    """
+    return _swap_ca(directory, agent_id, seed=True)
+
+
+def ensure_identity(agent_id: str, directory: Path, provision: bool = True,
+                    demo: bool = True):
+    """Load this agent's identity, creating the CA and certificate if needed.
+
+    ``demo`` says which authority a machine with none should land on: the
+    sample one shipped with VOX, or a fresh private one.
+    """
     from .discovery.identity import (
         Identity,
         IdentityError,
+        create_ca,
         issue_agent_cert,
         validate_agent_id,
     )
@@ -268,9 +299,13 @@ def ensure_identity(agent_id: str, directory: Path, provision: bool = True):
             )
         directory.mkdir(parents=True, exist_ok=True)
         if not (ca_crt.exists() and ca_key.exists()):
-            # A fresh installation starts on the demo authority, so it can see
-            # other fresh installations without anyone provisioning anything.
-            seed_demo_ca(directory)
+            # A fresh installation starts on the sample authority, so it can
+            # see other fresh installations with nothing provisioned.
+            if demo:
+                seed_demo_ca(directory)
+            else:
+                create_ca(directory)
+                log.info("created a private certificate authority in %s", directory)
         issue_agent_cert(directory, agent_id, ca_crt, ca_key, lifetime=CERT_LIFETIME)
         log.info("issued a certificate for %s", agent_id)
 
@@ -359,8 +394,19 @@ class MeshController:
 
             settings = self.settings
             agent_id = self.agent_id
+            directory = pki_dir(settings)
+            # mesh.demo_ca is a statement about which authority to be on, not
+            # only about what to do when there is none: a machine that asks for
+            # the sample one is moved onto it.
+            if (settings.demo_ca and settings.auto_provision
+                    and (directory / "ca.crt").exists()
+                    and not using_demo_ca(directory)):
+                log.info("mesh.demo_ca is on: moving %s to the sample authority",
+                         directory)
+                use_demo_ca(directory, agent_id)
             identity = ensure_identity(
-                agent_id, pki_dir(settings), provision=settings.auto_provision
+                agent_id, directory, provision=settings.auto_provision,
+                demo=settings.demo_ca,
             )
             agent = DiscoveryAgent(
                 identity=identity,
@@ -433,14 +479,22 @@ class MeshController:
         line = f"MESH ONLINE  ·  {len(peers)} agents, {active} active"
         return f"{line}  ·  DEMO CERT" if self.demo_ca else line
 
-    def replace_ca(self) -> str:
-        """Swap the demo authority for a private one, and reissue ourselves."""
+    def replace_ca(self, demo: bool = False) -> str:
+        """Swap the authority under this agent, and reissue it."""
         was_online = self.online
         self.stop()
         directory = pki_dir(self.settings)
-        new_ca(directory, self.agent_id)
+        use_demo_ca(directory, self.agent_id) if demo else new_ca(
+            directory, self.agent_id
+        )
         if was_online:
             self.start()
+        if demo:
+            return (
+                f"{directory} now holds the sample authority shipped with VOX: "
+                f"any other VOX on this segment can join, and its private key "
+                f"is public"
+            )
         return (
             f"new certificate authority in {directory} — every other machine "
             f"needs a certificate issued by this one now"

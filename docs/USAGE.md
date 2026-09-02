@@ -542,7 +542,8 @@ carries a diagram of it. The short version:
   "group": "239.17.42.1",
   "port": 45177,
   "pki_dir": "",
-  "auto_provision": true
+  "auto_provision": true,
+  "demo_ca": true
 }
 ```
 
@@ -582,15 +583,22 @@ mesh is open to whoever is on your network segment. VOX never hides this:
 - going online writes the warning into the transcript;
 - `vox doctor` reports `[WARN] MESH … SAMPLE CA, private key public`.
 
+`mesh.demo_ca` is `true` by default, and it is a statement about which
+authority to be on, not only about what to do when there is none: a machine
+that already holds a private authority is moved onto the sample one when it
+goes online. That is what makes a fresh install and an old one meet.
+
 When you want a mesh of your own:
 
 ```text
 /mesh new-ca
 ```
 
-This generates an authority that exists only on this machine, moves the sample
-`ca.crt`/`ca.key` aside as `.replaced-<timestamp>`, deletes the certificates
-issued under it, and reissues this agent. The mesh restarts on the new anchor if
+This sets `mesh.demo_ca` to `false` and keeps it there, generates an authority
+that exists only on this machine, moves the sample `ca.crt`/`ca.key` aside as
+`.replaced-<timestamp>`, deletes the certificates issued under it, and reissues
+this agent. `/mesh sample-ca` goes back the other way, which is how you meet a
+fresh installation again. The mesh restarts on the new anchor if
 it was online. From then on every other machine needs a certificate from *your*
 authority — the label disappears from the header once nobody is on the sample
 one.

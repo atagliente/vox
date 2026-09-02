@@ -62,11 +62,17 @@ machine and version named, not estimated.
   joins a mesh with no setup. Its private key is public by construction, so it
   is never quiet about it: the header reads `Universe: ON-LINE (SAMPLE CERT)`,
   the status bar appends `DEMO CERT`, the transcript says so on going online,
-  and `vox doctor` returns a WARN naming the remedy. `/mesh new-ca` generates
-  an authority private to the machine, moves the sample aside as
-  `.replaced-<timestamp>`, drops the certificates issued under it and reissues
-  this agent; a machine still on the sample authority is a stranger from then
-  on, which is a test.
+  and `vox doctor` returns a WARN naming the remedy. `mesh.demo_ca` is true by default,
+  and says which authority to be on rather than only what to do when there is
+  none: a machine that already held a private authority — every installation
+  from before this change — is moved onto the sample one when it next goes
+  online, its old authority kept as `.replaced-<timestamp>`. `/mesh new-ca`
+  generates an authority private to the machine, drops the certificates issued
+  under the old one, reissues this agent and sets the flag false so a later
+  start does not undo it; `/mesh sample-ca` goes back. A machine on a private
+  authority sees a machine on the sample one as a stranger, which is a test.
+  Swapping twice inside one second used to collide on the backup name and fail
+  outright on Windows; the backups are now numbered.
 - **The identity provisions itself.** The first join creates `~/.vox/pki/ca.crt`
   and a 24-hour certificate whose SAN is the agent id. It is reissued once past
   half its life; short lives are the only practical revocation here.

@@ -358,6 +358,32 @@ def test_two_fresh_installs_trust_each_other(tmp_path: Path) -> None:
     assert seen.agent_id == "vox-bbbbbbbbbbbb"
 
 
+def test_the_sample_authority_is_the_default(tmp_path: Path) -> None:
+    settings = MeshSettings.from_config(default_config())
+    assert settings.demo_ca is True, "a fresh install must join a mesh"
+    assert MeshSettings.from_config({"mesh": {"demo_ca": False}}).demo_ca is False
+
+
+def test_asking_for_a_private_authority_gets_one(tmp_path: Path) -> None:
+    pytest.importorskip("cryptography")
+    directory = tmp_path / "pki"
+    mesh.ensure_identity("vox-aaaaaaaaaaaa", directory, demo=False)
+    assert mesh.using_demo_ca(directory) is False
+    assert (directory / "vox-aaaaaaaaaaaa.crt").exists()
+
+
+def test_swapping_twice_in_one_second_keeps_both_backups(tmp_path: Path) -> None:
+    """Regression: the timestamped name collided, and Windows refuses that."""
+    pytest.importorskip("cryptography")
+    directory = tmp_path / "pki"
+    mesh.ensure_identity("vox-aaaaaaaaaaaa", directory)
+    mesh.new_ca(directory, "vox-aaaaaaaaaaaa")
+    mesh.use_demo_ca(directory, "vox-aaaaaaaaaaaa")
+    mesh.new_ca(directory, "vox-aaaaaaaaaaaa")
+    assert len(list(directory.glob("ca.crt.replaced-*"))) == 3
+    assert mesh.using_demo_ca(directory) is False
+
+
 def test_a_private_authority_replaces_the_sample_one(tmp_path: Path) -> None:
     pytest.importorskip("cryptography")
     from cryptography.hazmat.primitives import serialization
@@ -767,23 +793,36 @@ async def test_a_private_authority_drops_the_label(app: VoxApp) -> None:
         assert "SAMPLE CERT" not in str(app.query_one("#header").render())
 
 
-async def test_new_ca_is_reachable_from_the_command_line(app: VoxApp) -> None:
-    replaced = []
+async def test_the_authority_can_be_swapped_both_ways(app: VoxApp) -> None:
+    asked: list[bool] = []
 
-    def replace_ca():
-        replaced.append(True)
-        app.mesh.demo_ca = False
-        return "new certificate authority in /tmp/pki"
+    def replace_ca(demo: bool = False):
+        asked.append(demo)
+        app.mesh.demo_ca = demo
+        return "sample authority" if demo else "new certificate authority"
 
     app.mesh = FakeController(PEERS, demo_ca=True)
     app.mesh.replace_ca = replace_ca
     async with app.run_test() as pilot:
         await pilot.pause()
+
         app.run_command("/mesh new-ca")
         await app.workers.wait_for_complete()
         await pilot.pause()
-        assert replaced == [True]
-        assert "NEW CERTIFICATE AUTHORITY" in " ".join(transcript(app))
+        assert asked == [False]
+        assert "CERTIFICATE AUTHORITY" in " ".join(transcript(app))
+        # Persisted, or the next start would move the authority straight back.
+        assert json.loads(global_config_path().read_text())["mesh"]["demo_ca"] is False
+
+        app.run_command("/mesh sample-ca")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert asked == [False, True]
+        assert json.loads(global_config_path().read_text())["mesh"]["demo_ca"] is True
+
+        app.run_command("/mesh sideways-ca")
+        await pilot.pause()
+        assert "USAGE" in transcript(app)[-1]
 
 
 async def test_the_mesh_is_stopped_when_vox_shuts_down(app: VoxApp) -> None:

@@ -1508,10 +1508,13 @@ class VoxApp(App[None]):
             )
             return
         if value in ("new-ca", "newca"):
-            self.replace_mesh_ca()
+            self.replace_mesh_ca(demo=False)
+            return
+        if value in ("sample-ca", "demo-ca"):
+            self.replace_mesh_ca(demo=True)
             return
         if value not in ("on", "off"):
-            self.write_error("USAGE: /mesh [on|off|new-ca]")
+            self.write_error("USAGE: /mesh [on|off|new-ca|sample-ca]")
             return
         if (value == "on") == self.mesh.online:
             self.write_system(f"MESH IS ALREADY {value.upper()}")
@@ -1519,17 +1522,21 @@ class VoxApp(App[None]):
         self.action_toggle_mesh()
 
     @work(thread=True, group="mesh")
-    def replace_mesh_ca(self) -> None:
+    def replace_mesh_ca(self, demo: bool = False) -> None:
         """Generating a key and restarting the agent both block."""
         try:
-            detail = self.mesh.replace_ca()
+            detail = self.mesh.replace_ca(demo=demo)
         except (MeshError, OSError) as exc:
             self.call_from_thread(self.write_error, f"NEW CA FAILED - {exc}")
             return
-        self.call_from_thread(self.mesh_ca_replaced, detail)
+        self.call_from_thread(self.mesh_ca_replaced, detail, demo)
 
-    def mesh_ca_replaced(self, detail: str) -> None:
-        self.write_system(f"NEW CERTIFICATE AUTHORITY - {detail}")
+    def mesh_ca_replaced(self, detail: str, demo: bool) -> None:
+        # Persisted, or the next start would move the authority straight back.
+        self.config.setdefault("mesh", {})["demo_ca"] = demo
+        self.mesh.settings.demo_ca = demo
+        self.persist_config()
+        self.write_system(f"CERTIFICATE AUTHORITY - {detail}")
         self.refresh_header()
         self.refresh_status()
 

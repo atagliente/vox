@@ -323,8 +323,10 @@ To make the mesh yours, replace it:
 /mesh new-ca
 ```
 
-That generates an authority that exists only on your machine, moves the sample
-files aside, and reissues this agent against the new one. Every other machine
+That sets `mesh.demo_ca` to `false`, generates an authority that exists only on
+your machine, moves the sample files aside, and reissues this agent against the
+new one. `/mesh sample-ca` returns to the shipped authority when you want to
+meet a fresh installation. Every other machine
 then needs a certificate from *that* authority: either copy the whole
 `~/.vox/pki` directory (`ca.crt` **and** `ca.key`) to machines you trust and let
 each issue itself one, or keep `ca.key` on one machine and hand out only a leaf

@@ -71,6 +71,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "port": 45177,
         "pki_dir": "",
         "auto_provision": True,
+        # On by default, so a fresh install joins a mesh with no setup. The
+        # sample authority's private key is public; /mesh new-ca turns this off
+        # and generates one only this machine holds.
+        "demo_ca": True,
     },
     "ui": {
         "theme": "nasa",
@@ -230,7 +234,7 @@ def validate_config(data: Any) -> list[str]:
     if not isinstance(mesh, dict):
         errors.append("mesh must be an object")
     else:
-        for key in ("enabled", "auto_provision"):
+        for key in ("enabled", "auto_provision", "demo_ca"):
             if not isinstance(mesh.get(key, False), bool):
                 errors.append(f"mesh.{key} must be a boolean")
         for key in ("agent_id", "name", "group", "pki_dir"):
