@@ -4,6 +4,8 @@
 
 # VOX
 
+[![CI](https://github.com/atagliente/vox/actions/workflows/ci.yml/badge.svg)](https://github.com/atagliente/vox/actions/workflows/ci.yml)
+
 A terminal chat client for coding, for any OpenAI-compatible endpoint: Ollama,
 llama.cpp server, vLLM, LM Studio, a remote gateway. Linux, macOS, Windows,
 Termux.
@@ -381,11 +383,30 @@ Set `consensus.allow_sample_ca` to `false` to refuse instead of warning.
 
 ```bash
 pip install -e ".[dev]"
+pre-commit install
 pytest
 ```
 
 No test needs a running inference server. `docs/make_mesh_diagram.py` regenerates
 the diagram above.
+
+The same four checks run here and in CI, so a red build is a surprise rather
+than the norm:
+
+```bash
+ruff check . && ruff format --check .
+mypy
+pytest -q
+```
+
+`ruff` is both the linter and the formatter, at 88 columns. `mypy` runs in
+strict mode over the modules that are already clean - `code_blocks`,
+`inspection`, `models`, `reasoning`, `usage` - and that list in `pyproject.toml`
+is what widens, one module at a time, as the rest of the tree is cleared.
+`pre-commit` runs the first two on every commit.
+
+CI covers Linux, macOS and Windows across Python 3.11, 3.12 and 3.13, and
+exercises `install.sh` and `install.ps1` on clean runners.
 
 ## More
 

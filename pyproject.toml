@@ -74,6 +74,10 @@ exclude_also = [
 ]
 show_missing = true
 skip_covered = true
+# The level measured on 2026-09-02 over 514 tests: 76%, branch coverage on.
+# It is a ratchet, not a target — it moves up when a change earns it, never
+# down to accommodate one.
+fail_under = 76
 
 [tool.mypy]
 python_version = "3.11"

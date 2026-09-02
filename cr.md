@@ -6,10 +6,10 @@ clean.
 Measured, not estimated:
 
 - 21,261 lines across sources and tests; `vox_chat/app.py` is the largest file (2,636 lines)
-- suite: **511 passed, 8 skipped, 8m 24s** (`pytest -q`)
+- suite: **514 passed, 8 skipped, 9m 15s** (`pytest -q`), **76%** coverage
 - installed runtime dependencies: `openai 2.41.1`, `textual 8.2.8`, `rich 15.0.0`,
   `cryptography 50.0.1`
-- no `.github/` directory, no lint, type-check or formatting configuration
+- CI on three systems and three interpreters; ruff, mypy and pre-commit configured
 
 Status legend: `[to do]` still to be done · `[doing]` in progress (dirty working tree
 or partially covered) · `[done]` already in the repo and verifiable ·
@@ -19,9 +19,13 @@ exactly what is missing and where to pick it up.
 
 ---
 
-## 1. Toolchain, static quality and CI
+## 1. Toolchain, static quality and CI — `[to complete]`
 
-* **1.1 Static analysis**
+Everything in this section is in the repository and verifiable. The one
+thing left is branch protection, which is a GitHub setting and not a file;
+see 1.2.
+
+* **1.1 Static analysis** — `[done]`
   * `[done]` Add **Ruff** (lint + format), configured in `pyproject.toml`; rule set
     `E,F,I,UP,B,SIM,RUF`, `line-length = 88`. `ruff check` and `ruff format --check`
     are clean over 79 files. Three rules are ignored, each with its reason written
@@ -44,7 +48,7 @@ exactly what is missing and where to pick it up.
   * `[done]` Pervasive type annotations and `from __future__ import annotations` everywhere
   * `[done]` Module docstrings that explain the *why*, not only the *what*
 
-* **1.2 Continuous integration**
+* **1.2 Continuous integration** — `[to complete]` (only branch protection)
   * `[done]` `.github/workflows/ci.yml`: matrix
     `ubuntu-latest × macos-latest × windows-latest` over `3.11`, `3.12`, `3.13`
   * `[done]` Separate parallel jobs: `lint`, `types`, `test`, `build`, `installers`
@@ -59,11 +63,15 @@ exactly what is missing and where to pick it up.
   * `[done]` A job that runs `install.sh --yes` and `install.ps1 -Yes` on clean
     runners, twice each to hold them to the idempotence they claim, then uninstalls
 
-* **1.3 Coverage**
-  * `[to do]` `pytest-cov` with the threshold set to the currently measured level, then
-    ratcheted upwards only
-  * `[to do]` Coverage report posted as a pull-request comment
-  * `[to do]` Exclude the purely defensive branches that are already marked as such
+* **1.3 Coverage** — `[done]`
+  * `[done]` `pytest-cov` with the threshold set to the measured level: **76%** over
+    7,376 statements and 2,222 branches, on 2026-09-02 with 514 tests. `fail_under`
+    lives in `pyproject.toml` and only ever moves up. The floors worth attacking
+    first, from the same run: `discovery/run_agent.py` 0%, `discovery/agent.py` 16%,
+    `discovery/whois.py` 22%, `discovery/transport.py` 27%, `discovery/registry.py`
+    35% — all of them mesh code the suite skips unless `VOX_TEST_MESH=1`.
+  * `[done]` Coverage report posted as a pull-request comment
+  * `[done]` Exclude the purely defensive branches that are already marked as such
 
 ---
 
