@@ -16,6 +16,7 @@ from textual.widgets import ListView
 
 from vox_chat import fitting, ollama
 from vox_chat.app import VoxApp, describe_model, describe_residency
+from vox_chat.commands import handlers
 from vox_chat.config import default_config, load_config
 from vox_chat.llm_client import LLMError
 from vox_chat.models import Message
@@ -360,7 +361,7 @@ async def test_model_ctx_refuses_on_a_provider_that_fixes_the_window(
     app.config["providers"]["local-ollama"]["base_url"] = "https://api.openai.com/v1"
     async with app.run_test() as pilot:
         await pilot.pause()
-        app.cmd_model_ctx("16384")
+        handlers.cmd_model_ctx(app, "16384")
         await pilot.pause()
         assert "only Ollama" in transcript(app)
 
@@ -369,7 +370,7 @@ async def test_model_ctx_wants_a_number(app: VoxApp) -> None:
     app.config["providers"]["local-ollama"]["base_url"] = "http://localhost:11434/v1"
     async with app.run_test() as pilot:
         await pilot.pause()
-        app.cmd_model_ctx("big")
+        handlers.cmd_model_ctx(app, "big")
         await pilot.pause()
         assert "/model ctx [N|off]" in transcript(app)
 
@@ -384,7 +385,7 @@ async def test_model_ctx_off_goes_back_to_the_original(
     monkeypatch.setattr(ollama, "parent_model", lambda *a, **k: "granite4.2:3b")
     async with app.run_test() as pilot:
         await pilot.pause()
-        app.cmd_model_ctx("off")
+        handlers.cmd_model_ctx(app, "off")
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert "MODEL CTX OFF" in transcript(app)
@@ -396,7 +397,7 @@ async def test_model_ctx_off_on_a_model_nobody_derived(app: VoxApp) -> None:
     app.config["active_model"] = "granite4.2:3b"
     async with app.run_test() as pilot:
         await pilot.pause()
-        app.cmd_model_ctx("off")
+        handlers.cmd_model_ctx(app, "off")
         await pilot.pause()
         assert "already the original" in transcript(app)
 
@@ -413,7 +414,7 @@ async def test_a_window_larger_than_the_weights_is_refused(
     )
     async with app.run_test() as pilot:
         await pilot.pause()
-        app.cmd_model_ctx("131072")
+        handlers.cmd_model_ctx(app, "131072")
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert "trained for 4096" in transcript(app)
@@ -432,7 +433,7 @@ async def test_a_built_window_becomes_the_active_model(
     )
     async with app.run_test() as pilot:
         await pilot.pause()
-        app.cmd_model_ctx("16384")
+        handlers.cmd_model_ctx(app, "16384")
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert "MODEL CTX - 16384 tokens" in transcript(app)
@@ -648,7 +649,7 @@ async def test_the_default_build_fills_the_gpu(app: VoxApp, monkeypatch) -> None
     monkeypatch.setattr(ollama, "create_with_context", fake_create)
     async with app.run_test() as pilot:
         await pilot.pause()
-        app.cmd_model_ctx("16384")
+        handlers.cmd_model_ctx(app, "16384")
         await app.workers.wait_for_complete()
         await pilot.pause()
         written_text = transcript(app)
@@ -678,7 +679,7 @@ async def test_a_build_can_leave_the_split_to_ollama(app: VoxApp, monkeypatch) -
     )
     async with app.run_test() as pilot:
         await pilot.pause()
-        app.cmd_model_ctx("16384")
+        handlers.cmd_model_ctx(app, "16384")
         await app.workers.wait_for_complete()
         await pilot.pause()
     assert written == [{}]
@@ -699,7 +700,7 @@ async def test_model_gpu_max_measures_then_writes(app: VoxApp, monkeypatch) -> N
     )
     async with app.run_test() as pilot:
         await pilot.pause()
-        app.cmd_model_gpu("max")
+        handlers.cmd_model_gpu(app, "max")
         await app.workers.wait_for_complete()
         await pilot.pause()
         said = transcript(app)
@@ -713,7 +714,7 @@ async def test_model_gpu_off_hands_the_split_back(app: VoxApp) -> None:
     app.config["active_model"] = "granite4.2:3b"
     async with app.run_test() as pilot:
         await pilot.pause()
-        app.cmd_model_gpu("off")
+        handlers.cmd_model_gpu(app, "off")
         await pilot.pause()
         assert "MODEL GPU OFF" in transcript(app)
     assert app.config["model_build"]["num_gpu"] is None
@@ -728,7 +729,7 @@ async def test_model_gpu_reports_where_the_model_lives(
     monkeypatch.setattr(ollama, "layer_count", lambda *a, **k: 40)
     async with app.run_test() as pilot:
         await pilot.pause()
-        app.cmd_model_gpu("")
+        handlers.cmd_model_gpu(app, "")
         await app.workers.wait_for_complete()
         await pilot.pause()
         said = transcript(app)
@@ -740,7 +741,7 @@ async def test_model_gpu_is_ollama_only(app: VoxApp) -> None:
     app.config["providers"]["local-ollama"]["base_url"] = "https://api.openai.com/v1"
     async with app.run_test() as pilot:
         await pilot.pause()
-        app.cmd_model_gpu("max")
+        handlers.cmd_model_gpu(app, "max")
         await pilot.pause()
         assert "only Ollama" in transcript(app)
 

@@ -25,6 +25,7 @@ from . import consensus as cns
 from . import report as reporting
 from . import web as web_module
 from .agent import AgentEvent, run_turn
+from .commands import dispatch
 from .config import (
     ConfigError,
     LoadedConfig,
@@ -455,9 +456,6 @@ class VoxApp(App[None]):
         )
         self.refresh_status()
         return True
-
-    def cmd_warm(self, argument: str) -> None:
-        self.preload_model()
 
     # ----------------------------------------------------------------- input
 
@@ -903,26 +901,6 @@ class VoxApp(App[None]):
     def _forget_inspect_screen(self) -> None:
         self._inspect_screen = None
 
-    def cmd_inspect(self, argument: str) -> None:
-        value = argument.strip().lower()
-        if not value:
-            self.action_open_inspect()
-            return
-        if value not in ("on", "off"):
-            self.write_error("USAGE: /inspect [on|off]")
-            return
-        self.config.setdefault("inspect", {})["enabled"] = value == "on"
-        self.persist_config()
-        if value == "on":
-            top_k = self.inspect_config().get("top_k", 5)
-            self.write_system(
-                f"INSPECTION ON - the next answer is measured with top-k {top_k}. "
-                "Ctrl+T shows the table."
-            )
-        else:
-            self.write_system("INSPECTION OFF - requests carry no logprobs again")
-        self.refresh_status()
-
     def refresh_code_blocks(self, answer: str | None = None) -> None:
         """Update the code panel from ``answer``, or from the latest one.
 
@@ -1356,46 +1334,9 @@ class VoxApp(App[None]):
             )
             self.write_error(parsed.error.upper() + hint)
             return
-        handler = getattr(self, f"cmd_{parsed.name.replace('-', '_')}", None)
-        if handler is None:
-            self.write_error(f"command not wired: /{parsed.name}")
-            return
-        result = handler(parsed.argument)
+        result = dispatch.run(self, parsed)
         if inspect.iscoroutine(result):
             self.run_worker(result, exclusive=False)
-
-    def cmd_help(self, argument: str) -> None:
-        self.write_system(commands.help_text())
-
-    def cmd_keys(self, argument: str) -> None:
-        self.action_open_keys()
-
-    def cmd_new(self, argument: str) -> None:
-        self.action_new_session()
-
-    def cmd_clear(self, argument: str) -> None:
-        self.transcript.clear_messages()
-        self.session.messages.clear()
-        self.dirty = False
-        self.write_system("TRANSCRIPT CLEARED")
-
-    def cmd_settings(self, argument: str) -> None:
-        self.action_open_settings()
-
-    def cmd_config(self, argument: str) -> None:
-        self.edit_config_file()
-
-    def cmd_provider(self, argument: str) -> Any:
-        providers = list(self.config.get("providers", {}))
-        if not argument:
-            return self._pick_provider(providers)
-        if argument not in providers:
-            self.write_error(
-                f"UNKNOWN PROVIDER: {argument} - HAVE: {', '.join(providers)}"
-            )
-            return None
-        self._set_provider(argument)
-        return None
 
     async def _pick_provider(self, providers: list[str]) -> None:
         items = [
@@ -1420,26 +1361,6 @@ class VoxApp(App[None]):
         self.refresh_status()
         self.write_system(f"PROVIDER SET - {name}")
         self.check_connection()
-
-    def cmd_model(self, argument: str) -> Any:
-        parts = argument.split()
-        if parts and parts[0].lower() == "ctx":
-            self.cmd_model_ctx(" ".join(parts[1:]))
-            return None
-        if parts and parts[0].lower() == "gpu":
-            self.cmd_model_gpu(" ".join(parts[1:]))
-            return None
-        if argument:
-            self.config["active_model"] = argument
-            self.persist_config()
-            self.write_system(f"MODEL SET - {argument}")
-            self.refresh_status()
-            if self.connected and self.config.get("generation", {}).get(
-                "preload", True
-            ):
-                self.preload_model()
-            return None
-        return self._pick_model()
 
     def model_items(self) -> list[PickerItem]:
         """The models on offer, the active one first, with what they are.
@@ -1481,35 +1402,6 @@ class VoxApp(App[None]):
         )
         if choice:
             self.set_model(choice)
-
-    def cmd_model_ctx(self, argument: str) -> None:
-        """Show, raise or drop the context window of the active model."""
-        provider = self.provider_block() or {}
-        base_url = str(provider.get("base_url", ""))
-        model = str(self.config.get("active_model", ""))
-        if not ollama.looks_like_ollama(base_url):
-            self.write_error(
-                "MODEL CTX - only Ollama: every other provider fixes the window"
-            )
-            return
-        if not model:
-            self.write_error("MODEL CTX - no active model")
-            return
-        wanted = argument.strip().lower()
-        if wanted in ("off", "reset", "none"):
-            if not ollama.is_derived(model):
-                self.write_system(f"MODEL CTX - {model} is already the original")
-                return
-            self.revert_model_ctx(base_url, model)
-            return
-        if not wanted:
-            self.report_model_ctx(base_url, model)
-            return
-        if not wanted.isdigit():
-            self.write_error("MODEL CTX - usage: /model ctx [N|off]")
-            return
-        self.write_system(f"MODEL CTX - building a {wanted}-token build of {model}...")
-        self.build_model_ctx(base_url, model, int(wanted))
 
     @work(thread=True, group="model-ctx")
     def revert_model_ctx(self, base_url: str, model: str) -> None:
@@ -1614,36 +1506,6 @@ class VoxApp(App[None]):
             self.call_from_thread(self.write_system, describe_residency(resident))
         return parameters
 
-    def cmd_model_gpu(self, argument: str) -> None:
-        """Show or set how much of the active model lives on the GPU."""
-        provider = self.provider_block() or {}
-        base_url = str(provider.get("base_url", ""))
-        model = str(self.config.get("active_model", ""))
-        if not ollama.looks_like_ollama(base_url):
-            self.write_error(
-                "MODEL GPU - only Ollama: every other provider runs on its own hardware"
-            )
-            return
-        if not model:
-            self.write_error("MODEL GPU - no active model")
-            return
-        wanted = argument.strip().lower()
-        if wanted in ("off", "auto", "none"):
-            self.config.setdefault("model_build", {})["num_gpu"] = None
-            self.persist_config()
-            self.write_system("MODEL GPU OFF - later builds leave the split to Ollama")
-            return
-        if not wanted:
-            self.report_model_gpu(base_url, model)
-            return
-        if wanted == "max":
-            self.build_model_gpu(base_url, model, None)
-            return
-        if not wanted.isdigit():
-            self.write_error("MODEL GPU - usage: /model gpu [max|N|off]")
-            return
-        self.build_model_gpu(base_url, model, int(wanted))
-
     @work(thread=True, group="model-ctx")
     def report_model_gpu(self, base_url: str, model: str) -> None:
         """Where the model is right now: card, layers, and any spill."""
@@ -1716,47 +1578,11 @@ class VoxApp(App[None]):
         if self.connected and self.config.get("generation", {}).get("preload", True):
             self.preload_model()
 
-    def cmd_role(self, argument: str) -> Any:
-        if argument:
-            self.set_role(argument)
-            return None
-        self.action_open_roles()
-        return None
-
-    def cmd_roles(self, argument: str) -> None:
-        self.action_open_roles()
-
-    def cmd_prompts(self, argument: str) -> None:
-        self.action_open_prompts()
-
-    def cmd_prompt(self, argument: str) -> None:
-        if not argument:
-            self.write_error("USAGE: /prompt <name>")
-            return
-        self.load_prompt(argument)
-
-    def cmd_prompt_save(self, argument: str) -> Any:
-        content = self.input_area.text.strip()
-        if not content:
-            self.write_error("NOTHING TO SAVE - THE INPUT IS EMPTY")
-            return None
-        if argument:
-            self.prompt_store.save_prompt(argument, content)
-            self.write_system(f"PROMPT SAVED - {argument}")
-            return None
-        return self._ask_prompt_name(content)
-
     async def _ask_prompt_name(self, content: str) -> None:
         name = await self.push_screen_wait(TextPromptModal("SAVE PROMPT AS", "name"))
         if name:
             self.prompt_store.save_prompt(name, content)
             self.write_system(f"PROMPT SAVED - {name}")
-
-    def cmd_prompt_delete(self, argument: str) -> Any:
-        if not argument:
-            self.write_error("USAGE: /prompt-delete <name>")
-            return None
-        return self._delete_prompt(argument)
 
     async def _delete_prompt(self, name: str) -> None:
         if self.prompt_store.get(name) is None:
@@ -1773,29 +1599,6 @@ class VoxApp(App[None]):
             return
         self.prompt_store.delete(name)
         self.write_system(f"PROMPT DELETED - {name}")
-
-    def cmd_sessions(self, argument: str) -> None:
-        self.action_open_sessions()
-
-    def cmd_session_save(self, argument: str) -> Any:
-        if argument:
-            self.save_session(argument)
-            return None
-        self.action_save_session()
-        return None
-
-    def cmd_session_load(self, argument: str) -> Any:
-        if not argument:
-            self.action_open_sessions()
-            return None
-        self.load_session(argument)
-        return None
-
-    def cmd_session_delete(self, argument: str) -> Any:
-        if not argument:
-            self.write_error("USAGE: /session-delete <name>")
-            return None
-        return self._delete_session(argument)
 
     async def _delete_session(self, name: str) -> None:
         if not self.session_store.exists(name):
@@ -1819,21 +1622,6 @@ class VoxApp(App[None]):
             self.session_name = None
         self.write_system(f"SESSION DELETED - {name}")
 
-    def cmd_agent(self, argument: str) -> None:
-        value = argument.strip().lower()
-        if value not in ("on", "off"):
-            state = "ON" if self.config.get("agent", {}).get("enabled") else "OFF"
-            self.write_system(f"AGENT MODE IS {state} - USAGE: /agent on|off")
-            return
-        self.config.setdefault("agent", {})["enabled"] = value == "on"
-        self.persist_config()
-        self.write_system(
-            f"AGENT MODE {value.upper()} - WORKSPACE {self.workspace_path}"
-            if value == "on"
-            else "AGENT MODE OFF"
-        )
-        self.refresh_status()
-
     def action_toggle_agent(self) -> None:
         """Flip agent mode in place; bound to ``Ctrl+Shift+M``."""
         value = not bool(self.config.get("agent", {}).get("enabled", False))
@@ -1845,12 +1633,6 @@ class VoxApp(App[None]):
             else "AGENT MODE OFF"
         )
         self.refresh_status()
-
-    def cmd_workspace(self, argument: str) -> None:
-        if not argument:
-            self.write_system(f"WORKSPACE: {self.workspace_path}")
-            return
-        self.set_workspace(argument)
 
     # ---------------------------------------------------------------- export
 
@@ -1926,20 +1708,6 @@ class VoxApp(App[None]):
             return
         names = ", ".join(path.name for path in written)
         self.write_system(f"SAVED {names} in {written[0].parent}")
-
-    def cmd_export(self, argument: str) -> None:
-        wanted = argument.strip().lower().split()
-        if not wanted:
-            self.export_report()
-            return
-        unknown = [fmt for fmt in wanted if fmt not in reporting.FORMATS]
-        if unknown:
-            self.write_error(
-                f"UNKNOWN FORMAT: {', '.join(unknown)} - "
-                f"use {', '.join(reporting.FORMATS)}"
-            )
-            return
-        self.export_report(tuple(wanted))
 
     # --------------------------------------------------------------- the web
 
@@ -2067,61 +1835,6 @@ class VoxApp(App[None]):
         )
         self.start_generation()
 
-    def cmd_web(self, argument: str) -> None:
-        value = argument.strip().lower()
-        settings = self.web_settings()
-        if value == "start":
-            self.ensure_search_server(settings)
-            return
-        if value in ("stop", "kill"):
-            self.search_server.stop()
-            self.write_system("SEARCH SERVER - stopped")
-            return
-        if value == "status":
-            where = f"{searchd.HOST}:{self.search_server.port}"
-            state = "listening" if self.search_server.running else "not running"
-            self.write_system(f"SEARCH SERVER - {state} ({where})")
-            return
-        if value in ("on", "off"):
-            self.config.setdefault("web", {})["enabled"] = value == "on"
-            self.persist_config()
-            settings = self.web_settings()
-            reason = settings.unusable() if value == "on" else None
-            self.write_system(f"WEB SEARCH {value.upper()} - {settings.describe()}")
-            if reason:
-                self.write_error(f"NOT USABLE YET - {reason}")
-            return
-        if value:
-            self.write_error("USAGE: /web [on|off|start|stop|status]")
-            return
-        state = "ON" if settings.enabled else "OFF"
-        lines = [f"WEB SEARCH IS {state} - {settings.describe()}"]
-        reason = settings.unusable()
-        if reason:
-            lines.append(reason)
-        lines.append(
-            f"pages are {'read on request' if settings.allow_fetch else 'never read'}"
-            f" · {settings.max_results} results at a time"
-        )
-        self.write_system("\n".join(lines))
-
-    def cmd_search(self, argument: str) -> None:
-        query = argument.strip()
-        if not query:
-            self.write_error("USAGE: /search <what you are looking for>")
-            return
-        settings = self.web_settings()
-        reason = settings.unusable()
-        if reason:
-            self.write_error(f"CANNOT SEARCH - {reason}")
-            return
-        if self.wants_local_server(settings) and not self.ensure_search_server(
-            settings
-        ):
-            return
-        self.write_system(f"SEARCHING {settings.describe()} FOR: {query}")
-        self.run_search(query, settings)
-
     @work(thread=True, group="web", exclusive=True)
     def run_search(self, query: str, settings: web_module.WebSettings) -> None:
         notes: list[str] = []
@@ -2148,18 +1861,6 @@ class VoxApp(App[None]):
         self.session.messages.append(message)
         self.write_message(message)
         self.dirty = True
-
-    def cmd_fetch(self, argument: str) -> None:
-        url = argument.strip()
-        if not url:
-            self.write_error("USAGE: /fetch <url>")
-            return
-        settings = self.web_settings()
-        if not settings.enabled:
-            self.write_error("CANNOT FETCH - web access is off - /web on")
-            return
-        self.write_system(f"READING {url}")
-        self.run_fetch(url, settings)
 
     @work(thread=True, group="web", exclusive=True)
     def run_fetch(self, url: str, settings: web_module.WebSettings) -> None:
@@ -2426,36 +2127,6 @@ class VoxApp(App[None]):
                 Message(role="peer", content=answer.strip(), name=f"to {caller}")
             )
 
-    def cmd_consensus(self, argument: str) -> None:
-        value = argument.strip().lower()
-        settings = self.consensus_settings()
-        if value in ("on", "off"):
-            self.config.setdefault("consensus", {})["enabled"] = value == "on"
-            self.persist_config()
-            self.install_answer_hook()
-            self.write_system(f"CONSENSUS {value.upper()}")
-            return
-        if value:
-            self.write_error("USAGE: /consensus [on|off]")
-            return
-
-        state = "ON" if settings.get("enabled", True) else "OFF"
-        refusal = self.consensus_refusal()
-        peers = self.mesh.processors(
-            str(settings.get("verb", "infer")), int(settings.get("max_peers", 5))
-        )
-        lines = [
-            f"CONSENSUS IS {state} - mark text with {cns.OPEN} … {cns.CLOSE}",
-            f"answers other agents: "
-            f"{'yes' if settings.get('answer_requests', True) else 'no'}",
-        ]
-        if refusal:
-            lines.append(refusal)
-        else:
-            named = ", ".join(peer.name or peer.agent_id for peer in peers) or "nobody"
-            lines.append(f"would ask: {named}")
-        self.write_system("\n".join(lines))
-
     # ------------------------------------------------------------------ mesh
 
     def action_toggle_mesh(self) -> None:
@@ -2524,29 +2195,6 @@ class VoxApp(App[None]):
     def _forget_universe_screen(self) -> None:
         self._universe_screen = None
 
-    def cmd_mesh(self, argument: str) -> None:
-        value = argument.strip().lower()
-        if not value:
-            state = "ONLINE" if self.mesh.online else "OFFLINE"
-            self.write_system(
-                f"MESH IS {state} - {self.mesh.agent_id} · {self.mesh.category} "
-                f"- /mesh on|off"
-            )
-            return
-        if value in ("new-ca", "newca"):
-            self.replace_mesh_ca(demo=False)
-            return
-        if value in ("sample-ca", "demo-ca"):
-            self.replace_mesh_ca(demo=True)
-            return
-        if value not in ("on", "off"):
-            self.write_error("USAGE: /mesh [on|off|new-ca|sample-ca]")
-            return
-        if (value == "on") == self.mesh.online:
-            self.write_system(f"MESH IS ALREADY {value.upper()}")
-            return
-        self.action_toggle_mesh()
-
     @work(thread=True, group="mesh")
     def replace_mesh_ca(self, demo: bool = False) -> None:
         """Generating a key and restarting the agent both block."""
@@ -2566,9 +2214,6 @@ class VoxApp(App[None]):
         self.refresh_header()
         self.refresh_status()
 
-    def cmd_universe(self, argument: str) -> None:
-        self.action_open_universe()
-
     def action_open_round(self) -> None:
         """F5: what every agent is writing, as it writes it."""
         if isinstance(self.screen, RoundScreen):
@@ -2580,55 +2225,6 @@ class VoxApp(App[None]):
 
     def _forget_round_screen(self) -> None:
         self._round_screen = None
-
-    def cmd_round(self, argument: str) -> None:
-        self.action_open_round()
-
-    def cmd_stats(self, argument: str) -> None:
-        self.write_system(self.usage.report(self.context_window()))
-
-    def cmd_code(self, argument: str) -> None:
-        """Show the code panel, or copy one block by number."""
-        self._panel_mode = "code"
-        self.query_one("#side-panel").set_class(True, "visible")
-        self.refresh_panel()
-        if not argument:
-            if self.code_blocks:
-                summary = ", ".join(
-                    block.label(index)
-                    for index, block in enumerate(self.code_blocks, start=1)
-                )
-                self.write_system(f"CODE BLOCKS: {summary}  ·  /code <n> to copy")
-            else:
-                self.write_system("NO CODE BLOCK IN THE LAST ANSWER")
-            return
-        try:
-            number = int(argument.split()[0])
-        except ValueError:
-            self.write_error("USAGE: /code [number]")
-            return
-        self.copy_code_block(number)
-
-    def cmd_panel(self, argument: str) -> None:
-        mode = argument.strip().lower() or (
-            "index" if self._panel_mode == "code" else "code"
-        )
-        if mode not in ("code", "index", "consensus"):
-            self.write_error("USAGE: /panel code|index|consensus")
-            return
-        self._panel_mode = mode
-        self.query_one("#side-panel").set_class(True, "visible")
-        self.refresh_panel()
-
-    def cmd_connect(self, argument: str) -> None:
-        self.write_system("PROBING /v1/models…")
-        self.check_connection()
-
-    def cmd_stop(self, argument: str) -> None:
-        self.action_stop()
-
-    def cmd_exit(self, argument: str) -> None:
-        self.action_request_quit()
 
     # ------------------------------------------------------------------ quit
 
