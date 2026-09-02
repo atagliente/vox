@@ -50,11 +50,23 @@ machine and version named, not estimated.
   now: anything on loopback is VOX's to serve, whatever it is labelled. A
   connection refused to a local endpoint also says `/web start` instead of
   repeating the operating system's wording.
+- **Fixed: one blocked index killed the whole search.** DuckDuckGo reset the
+  connection, and the error read "cannot reach the search endpoint … answering
+  without sources" — the model then said it had never heard of the place being
+  asked about. A search now asks four upstreams and survives the ones that
+  fail: the web index first, then Wikipedia, Stack Overflow and Hacker News,
+  all documented APIs needing no key. Only a search where nothing at all
+  answered is an error, and the reply says which upstreams answered and what
+  the others said, so a rate-limited index looks like a rate-limited index
+  rather than a thin day on the internet. Verified with the index actually
+  blocked: `answered: wikipedia, stackoverflow` and the best result for
+  "circular buffer python" was the Stack Overflow question with 159 votes.
 - **Where those results come from, said plainly.** DuckDuckGo's HTML endpoint,
   parsed, plus Wikipedia's documented API. That is scraping: it can break when
   their markup changes and it is rate-limited, so a captcha page is reported as
-  a captcha rather than as "no results", and the docs say to run a real SearXNG
-  or use a key for anything load-bearing. Measured working end to end: a search
+  a captcha rather than as "no results". Wikipedia, Stack Exchange and Hacker
+  News are documented APIs and carry the search when it is blocked; for
+  anything load-bearing, a real SearXNG or a key is still the answer. Measured working end to end: a search
   through the server, then a page fetched and read to 11k characters.
 - **Two bugs found while testing it.** A tag between a word and its comma left
   a space in front of the comma, so snippets read "ring buffers , at length".

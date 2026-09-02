@@ -742,11 +742,26 @@ points at this machine works without editing. It binds to loopback only: it is t
 network's. `/web start`, `/web stop` and `/web status` control it, and it stops
 when VOX does.
 
-Its results come from DuckDuckGo's HTML endpoint, parsed, plus Wikipedia's
-documented API. That is scraping, and it is the price of needing neither a key
-nor an install: it can break when their markup changes, and it is rate-limited —
-ask it for too much too quickly and it returns a captcha page, which VOX reports
-as exactly that rather than as "no results".
+It asks four upstreams and survives the ones that fail:
+
+| upstream | what it is | when it fails |
+| --- | --- | --- |
+| DuckDuckGo HTML | the general web index, scraped | rate-limits, returns a captcha |
+| Wikipedia | documented API, no key | rarely |
+| Stack Overflow | documented API, no key | rarely |
+| Hacker News | documented API, no key | rarely |
+
+Only a search where *nothing* answered is an error. The rest of the time the
+transcript says which upstreams replied and what the others said:
+
+```text
+SYS ▸ WEB - 4 sources for 'what is a circular buffer', 1 read in full
+      ·  via wikipedia, stackoverflow, hackernews
+      ·  web: asked for a captcha; it rate-limits heavy use
+```
+
+That matters: a blocked index used to end the search, and the model would then
+answer that it had never heard of the thing you asked about.
 
 - **`local`** (default) — the server above. Nothing to set up.
 - **`searxng`** — your own instance, sturdier than scraping, and the query only

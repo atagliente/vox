@@ -228,8 +228,13 @@ def _open(url: str, settings: WebSettings, headers: dict[str, str] | None = None
 # --------------------------------------------------------------------- search
 
 
-def search(query: str, settings: WebSettings) -> list[Result]:
-    """Run one search. Raises :class:`WebError` rather than returning nothing."""
+def search(query: str, settings: WebSettings, notes: list[str] | None = None
+           ) -> list[Result]:
+    """Run one search. Raises :class:`WebError` rather than returning nothing.
+
+    ``notes`` collects anything the operator should see about how the answer
+    was obtained — which upstreams replied, which were blocked.
+    """
     reason = settings.unusable()
     if reason:
         raise WebError(reason)
@@ -241,12 +246,13 @@ def search(query: str, settings: WebSettings) -> list[Result]:
         results = _brave(query, settings)
     else:
         # local and searxng speak the same JSON, on purpose.
-        results = _searxng(query, settings)
+        results = _searxng(query, settings, notes)
     log.info("searched %s for %r: %d results", settings.provider, query, len(results))
     return results[: settings.max_results]
 
 
-def _searxng(query: str, settings: WebSettings) -> list[Result]:
+def _searxng(query: str, settings: WebSettings,
+             notes: list[str] | None = None) -> list[Result]:
     params = {"q": query, "format": "json"}
     if settings.language:
         params["language"] = settings.language
@@ -264,6 +270,13 @@ def _searxng(query: str, settings: WebSettings) -> list[Result]:
             "that SearXNG instance did not answer with JSON; its settings.yml "
             "must list 'json' under search.formats"
         ) from exc
+    if notes is not None:
+        answered = payload.get("sources") or []
+        failed = payload.get("failures") or []
+        if answered:
+            notes.append("via " + ", ".join(str(name) for name in answered))
+        for failure in failed:
+            notes.append(str(failure))
     return [
         Result(
             title=str(item.get("title", "")).strip(),
@@ -451,6 +464,7 @@ class Sources:
     results: list[Result] = field(default_factory=list)
     pages: list[Page] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
     @property
     def found(self) -> bool:
@@ -459,6 +473,8 @@ class Sources:
     def citations(self) -> str:
         """The short, permanent record: what was consulted."""
         lines = [f"Searched for: {self.query}"]
+        if self.notes:
+            lines.append("   " + "  ·  ".join(self.notes))
         for index, result in enumerate(self.results, start=1):
             read = any(page.url == result.url for page in self.pages)
             lines.append(
@@ -489,7 +505,9 @@ def gather(question: str, settings: WebSettings) -> Sources:
     """
     query = query_for(question)
     sources = Sources(query=query)
-    sources.results = search(query, settings)[: max(1, settings.auto_results)]
+    sources.results = search(query, settings, sources.notes)[
+        : max(1, settings.auto_results)
+    ]
 
     if not settings.allow_fetch:
         return sources

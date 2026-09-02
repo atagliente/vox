@@ -8,12 +8,17 @@ It speaks the same JSON as SearXNG — ``/search?q=…&format=json`` — so the
 client code does not care which is answering, and pointing ``web.endpoint`` at a
 real SearXNG later changes nothing else.
 
-Where the results come from, honestly: DuckDuckGo's HTML endpoint, parsed, plus
-Wikipedia's documented API. That is scraping, and it is the price of no key and
-no container. It can break when their markup changes, it is rate-limited, and
-when it does break VOX says so rather than returning nothing and looking
-confident. For anything you depend on, run a real SearXNG or use a Brave key —
-both are still supported and neither changes how the rest of VOX behaves.
+Where the results come from, honestly. One general web index — DuckDuckGo's
+HTML endpoint, scraped, which is the price of no key and no install, and which
+rate-limits anyone who leans on it. Then three documented APIs that need no key
+and do not break: Wikipedia, Stack Exchange and Hacker News.
+
+They are asked in that order, and their failures are survivable. When the web
+index answers with a captcha page — and it does — the search still returns the
+encyclopaedia, the Q&A and the discussion instead of nothing, and says which of
+them answered. Only when every upstream fails is the search an error. For
+anything you depend on, run a real SearXNG or use a Brave key; both are still
+supported and neither changes how the rest of VOX behaves.
 
 The server binds to 127.0.0.1 and nothing else: it is this machine's, not the
 network's.
@@ -50,6 +55,8 @@ BROWSER_UA = (
 DDG_HTML = "https://html.duckduckgo.com/html/"
 DDG_LITE = "https://lite.duckduckgo.com/lite/"
 WIKIPEDIA = "https://en.wikipedia.org/w/api.php"
+STACKEXCHANGE = "https://api.stackexchange.com/2.3/search/advanced"
+HACKERNEWS = "https://hn.algolia.com/api/v1/search"
 
 
 def port_of(endpoint: str) -> int:
@@ -129,26 +136,51 @@ def _post(url: str, query: str) -> str:
 
 
 def duckduckgo(query: str, limit: int = 10) -> list[Hit]:
-    """Results from the HTML endpoint, with the lite page as a second try."""
-    page = _post(DDG_HTML, query)
-    snippets = [_clean(s) for s in _SNIPPET.findall(page)]
-    hits = [
-        Hit(title=_clean(title), url=_direct(href),
-            content=snippets[index] if index < len(snippets) else "")
-        for index, (href, title) in enumerate(_RESULT.findall(page))
-    ]
-    if not hits:
-        page = _post(DDG_LITE, query)
-        hits = [
+    """The general web index: the HTML endpoint, then the lite page."""
+    blocked = False
+    hits: list[Hit] = []
+    for url in (DDG_HTML, DDG_LITE):
+        try:
+            page = _post(url, query)
+        except SearchdError as exc:
+            # A reset connection is one endpoint's problem, not the search's.
+            log.debug("%s: %s", url, exc)
+            continue
+        snippets = [_clean(fragment) for fragment in _SNIPPET.findall(page)]
+        found = [
+            Hit(title=_clean(title), url=_direct(href),
+                content=snippets[index] if index < len(snippets) else "")
+            for index, (href, title) in enumerate(_RESULT.findall(page))
+        ]
+        found += [
             Hit(title=_clean(title), url=_direct(href))
             for href, title in _LITE.findall(page)
         ]
-    if not hits and ("anomaly" in page.lower() or "captcha" in page.lower()):
+        hits.extend(found)
+        if found:
+            break
+        blocked = blocked or "anomaly" in page.lower() or "captcha" in page.lower()
+
+    if not hits:
         raise SearchdError(
-            "the search endpoint asked for a captcha; it rate-limits heavy use. "
-            "Wait a little, or configure a Brave key or your own SearXNG"
+            "asked for a captcha; it rate-limits heavy use" if blocked
+            else "returned nothing readable"
         )
     return [hit for hit in hits if hit.url.startswith("http")][:limit]
+
+
+def _json(url: str) -> dict:
+    """A GET that must return JSON, or say why it did not."""
+    request = urllib.request.Request(url, headers={"User-Agent": "vox/0.1"})
+    try:
+        with urllib.request.urlopen(request, timeout=UPSTREAM_TIMEOUT) as response:
+            return json.loads(response.read(2_000_000))
+    except urllib.error.HTTPError as exc:
+        raise SearchdError(f"HTTP {exc.code}") from exc
+    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+        raise SearchdError(str(getattr(exc, "reason", exc))) from exc
+    except ValueError as exc:
+        raise SearchdError("the answer was not JSON") from exc
 
 
 def wikipedia(query: str, limit: int = 3) -> list[Hit]:
@@ -157,13 +189,7 @@ def wikipedia(query: str, limit: int = 3) -> list[Hit]:
         "action": "query", "list": "search", "srsearch": query,
         "format": "json", "srlimit": limit,
     })
-    request = urllib.request.Request(url, headers={"User-Agent": "vox/0.1"})
-    try:
-        with urllib.request.urlopen(request, timeout=UPSTREAM_TIMEOUT) as response:
-            payload = json.loads(response.read(1_000_000))
-    except (urllib.error.URLError, OSError, ValueError, TimeoutError) as exc:
-        log.debug("wikipedia: %s", exc)
-        return []
+    payload = _json(url)
     return [
         Hit(
             title=str(item.get("title", "")),
@@ -175,14 +201,92 @@ def wikipedia(query: str, limit: int = 3) -> list[Hit]:
     ]
 
 
-def search(query: str, limit: int = 10) -> list[Hit]:
-    """Everything the local server knows how to ask, in one list."""
-    hits = duckduckgo(query, limit)
-    seen = {hit.url for hit in hits}
-    for hit in wikipedia(query):
-        if hit.url not in seen and len(hits) < limit:
-            hits.append(hit)
+def stackexchange(query: str, limit: int = 3) -> list[Hit]:
+    """Stack Overflow, which is where the answer often actually is."""
+    url = STACKEXCHANGE + "?" + urllib.parse.urlencode({
+        "order": "desc", "sort": "relevance", "q": query,
+        "site": "stackoverflow", "pagesize": limit,
+    })
+    payload = _json(url)
+    hits = []
+    for item in payload.get("items", []):
+        if not item.get("link"):
+            continue
+        tags = ", ".join(item.get("tags", [])[:5])
+        hits.append(Hit(
+            title=_clean(str(item.get("title", ""))),
+            url=str(item["link"]),
+            content=(f"{item.get('score', 0)} votes, "
+                     f"{item.get('answer_count', 0)} answers"
+                     + (", accepted" if item.get("is_answered") else "")
+                     + (f" · {tags}" if tags else "")),
+        ))
     return hits
+
+
+def hackernews(query: str, limit: int = 3) -> list[Hit]:
+    """What was linked and argued about, which dates a thing usefully."""
+    url = HACKERNEWS + "?" + urllib.parse.urlencode({
+        "query": query, "hitsPerPage": limit, "tags": "story",
+    })
+    payload = _json(url)
+    hits = []
+    for item in payload.get("hits", []):
+        link = item.get("url") or (
+            f"https://news.ycombinator.com/item?id={item.get('objectID')}"
+        )
+        hits.append(Hit(
+            title=_clean(str(item.get("title") or item.get("story_title") or link)),
+            url=str(link),
+            content=(f"{item.get('points', 0)} points, "
+                     f"{item.get('num_comments', 0)} comments on Hacker News"),
+        ))
+    return hits
+
+
+# The general index first, then the ones that always answer.
+UPSTREAMS = (
+    ("web", duckduckgo),
+    ("wikipedia", wikipedia),
+    ("stackoverflow", stackexchange),
+    ("hackernews", hackernews),
+)
+
+
+def search(query: str, limit: int = 10) -> tuple[list[Hit], list[str], list[str]]:
+    """Ask every upstream and survive the ones that fail.
+
+    Returns the hits, which upstreams answered, and what the others said. Only
+    a search where nothing at all answered is an error: one blocked index must
+    not cost the operator the encyclopaedia.
+    """
+    hits: list[Hit] = []
+    seen: set[str] = set()
+    answered: list[str] = []
+    failures: list[str] = []
+
+    for name, upstream in UPSTREAMS:
+        if len(hits) >= limit:
+            break
+        try:
+            found = upstream(query, limit if name == "web" else 3)
+        except SearchdError as exc:
+            failures.append(f"{name}: {exc}")
+            continue
+        except Exception as exc:  # noqa: BLE001 - an upstream is not our code
+            failures.append(f"{name}: {exc.__class__.__name__}")
+            continue
+        new = [hit for hit in found if hit.url and hit.url not in seen]
+        if not new:
+            continue
+        answered.append(name)
+        for hit in new:
+            seen.add(hit.url)
+            hits.append(hit)
+
+    if not hits:
+        raise SearchdError("; ".join(failures) or "no upstream returned anything")
+    return hits[:limit], answered, failures
 
 
 # --------------------------------------------------------------------- server
@@ -211,12 +315,21 @@ class _Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": "no q"})
             return
         try:
-            hits = search(query, int((params.get("count") or ["10"])[0]))
+            hits, answered, failures = search(
+                query, int((params.get("count") or ["10"])[0])
+            )
         except SearchdError as exc:
-            # 502: the upstream failed, not this server. The client shows it.
+            # 502: the upstreams failed, not this server. The client shows it.
             self._json(502, {"error": str(exc)})
             return
-        self._json(200, {"query": query, "results": [hit.to_dict() for hit in hits]})
+        self._json(200, {
+            "query": query,
+            "results": [hit.to_dict() for hit in hits],
+            # Which answered, so a blocked web index is visible rather than
+            # looking like a thin day on the internet.
+            "sources": answered,
+            "failures": failures,
+        })
 
     def _json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload).encode()

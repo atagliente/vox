@@ -356,10 +356,11 @@ async def test_turning_it_on_is_remembered(app: VoxApp) -> None:
 
 
 async def test_a_search_lands_in_the_conversation_labelled(
-    app: VoxApp, wire
+    app: VoxApp, wire, engine
 ) -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
+        app.search_server = engine
         app.run_command("/web on")
         await pilot.pause()
 
@@ -378,9 +379,12 @@ async def test_a_search_lands_in_the_conversation_labelled(
         assert stored and web.UNTRUSTED_NOTE in stored[0].content
 
 
-async def test_a_failed_search_says_why_and_changes_nothing(app: VoxApp, wire) -> None:
+async def test_a_failed_search_says_why_and_changes_nothing(
+    app: VoxApp, wire, engine
+) -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
+        app.search_server = engine
         app.run_command("/web on")
         await pilot.pause()
 
@@ -476,6 +480,7 @@ async def test_f6_needs_a_backend_before_it_turns_on(app: VoxApp, engine) -> Non
     async with app.run_test() as pilot:
         await pilot.pause()
         app.search_server = engine
+        app.search_server = engine
         app.config["web"]["provider"] = "brave"   # and no key
         app.action_toggle_web_mode()
         await pilot.pause()
@@ -486,6 +491,7 @@ async def test_f6_needs_a_backend_before_it_turns_on(app: VoxApp, engine) -> Non
 async def test_f6_turns_the_mode_on_and_shows_it(app: VoxApp, engine) -> None:
     async with app.run_test(size=(130, 30)) as pilot:
         await pilot.pause()
+        app.search_server = engine
         await pilot.press("f6")
         await pilot.pause()
 
@@ -497,6 +503,7 @@ async def test_f6_turns_the_mode_on_and_shows_it(app: VoxApp, engine) -> None:
 
         await pilot.press("f6")
         await pilot.pause()
+        app.search_server = engine
         assert app.web_mode_active() is False
         assert "WEB MODE OFF" in transcript(app)
 
@@ -506,6 +513,7 @@ async def test_a_message_in_web_mode_is_answered_from_sources(
 ) -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
+        app.search_server = engine
         await pilot.press("f6")
         await pilot.pause()
 
@@ -539,6 +547,7 @@ async def test_a_failed_search_still_answers(app: VoxApp, wire, engine) -> None:
     """A search that breaks must not swallow the question."""
     async with app.run_test() as pilot:
         await pilot.pause()
+        app.search_server = engine
         await pilot.press("f6")
         await pilot.pause()
 
@@ -547,6 +556,7 @@ async def test_a_failed_search_still_answers(app: VoxApp, wire, engine) -> None:
         app.action_send()
         await app.workers.wait_for_complete()
         await pilot.pause()
+        app.search_server = engine
 
         assert "answering without sources" in transcript(app)
         assert app._web_prompt == ""
@@ -568,6 +578,7 @@ async def test_a_message_sent_mid_lookup_is_refused(
     monkeypatch.setattr(web, "gather", slow_gather)
     async with app.run_test() as pilot:
         await pilot.pause()
+        app.search_server = engine
         await pilot.press("f6")
         await pilot.pause()
 
@@ -632,6 +643,7 @@ async def test_an_old_config_still_gets_a_server(app: VoxApp, engine) -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
         app.search_server = engine
+        app.search_server = engine
         app.config["web"].update(
             {"enabled": True, "provider": "searxng",
              "endpoint": "http://localhost:8888"}
@@ -640,5 +652,6 @@ async def test_an_old_config_still_gets_a_server(app: VoxApp, engine) -> None:
 
         app.run_command("/search anything")
         await pilot.pause()
+        app.search_server = engine
         assert engine.started, "the server was started for it"
         assert "SEARCH SERVER" in transcript(app)

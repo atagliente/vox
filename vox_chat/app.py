@@ -1628,6 +1628,7 @@ class VoxApp(App[None]):
         self.write_system(
             f"WEB - {len(sources.results)} sources for {sources.query!r}"
             + (f", {read} read in full" if read else "")
+            + (f"  ·  {'  ·  '.join(sources.notes)}" if sources.notes else "")
         )
         # The citations stay in the conversation; the page text is only for
         # this turn, or every later message would carry the whole internet.
@@ -1695,14 +1696,18 @@ class VoxApp(App[None]):
 
     @work(thread=True, group="web", exclusive=True)
     def run_search(self, query: str, settings: web_module.WebSettings) -> None:
+        notes: list[str] = []
         try:
-            results = web_module.search(query, settings)
+            results = web_module.search(query, settings, notes)
         except web_module.WebError as exc:
             self.call_from_thread(self.write_error, f"SEARCH FAILED - {exc}")
             return
-        self.call_from_thread(self.search_finished, query, results)
+        self.call_from_thread(self.search_finished, query, results, notes)
 
-    def search_finished(self, query: str, results: list) -> None:
+    def search_finished(self, query: str, results: list,
+                        notes: list | None = None) -> None:
+        if notes:
+            self.write_system("WEB - " + "  ·  ".join(notes))
         text = web_module.render_results(query, results)
         # Into the conversation, so the model can use what was found, and
         # labelled so it treats the text as information rather than orders.

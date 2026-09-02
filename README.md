@@ -225,10 +225,12 @@ container, no key, and it goes away when VOX does. It answers the same JSON as
 SearXNG, so pointing `web.endpoint` at a real instance later changes nothing
 else.
 
-Where its results come from, honestly: DuckDuckGo's HTML endpoint, parsed, plus
-Wikipedia's API. That is scraping — it can break when their markup changes and
-it is rate-limited, and when that happens VOX says so instead of quietly
-returning nothing.
+Where its results come from, honestly: one general web index — DuckDuckGo's
+HTML endpoint, parsed — plus three documented APIs that need no key and do not
+break: Wikipedia, Stack Overflow and Hacker News. The index is scraped, so it
+rate-limits and will sometimes answer with a captcha; the search survives that
+on the other three and tells you which answered, rather than returning nothing
+and letting the model claim it never heard of the subject.
 
 Two backends, chosen in the configuration:
 

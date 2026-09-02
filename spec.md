@@ -448,9 +448,11 @@ library: a search is a GET, a page is text extracted with `html.parser`.
 With the default `local` provider VOX runs the search server itself:
 `vox_chat/searchd.py` is a threaded HTTP server bound to 127.0.0.1, started on
 `F6`, speaking the same JSON as SearXNG so the client is indifferent to which
-answers. Its upstreams are DuckDuckGo's HTML endpoint and Wikipedia's API —
-scraping, declared as such, reporting a captcha or an outage as itself rather
-than as an empty result.
+answers. Its upstreams are DuckDuckGo's HTML endpoint, scraped, and the keyless APIs of
+Wikipedia, Stack Exchange and Hacker News. They are asked in order and their
+failures are survivable: only a search where none answered is an error, and the
+reply names which answered and what the others said, so a rate-limited index is
+visible as one.
 
 Three backends, chosen by `web.provider`: `local` (the built-in server),
 `searxng` (an instance the operator runs) and `brave` (one API key, sent as a header and never in a URL).
