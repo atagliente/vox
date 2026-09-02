@@ -38,6 +38,9 @@ def _frame(lines: list[str], width: int | None = None) -> str:
 
 ON_MESH = "ON-LINE"
 OFF_MESH = "LOCAL"
+# Shown beside ON-LINE while the mesh trusts the authority shipped with
+# VOX, whose private key is public. It is not a warning to hide.
+DEMO_CERT = "SAMPLE CERT"
 
 
 def header_lines(link: str, mesh: str, provider: str, model: str,

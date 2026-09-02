@@ -231,6 +231,14 @@ class VoxApp(App[None]):
             self.client = None
             self.write_error(f"cannot create client: {exc}")
 
+    def mesh_label(self) -> str:
+        """LOCAL, ON-LINE, and whether that is on the sample certificate."""
+        if not self.mesh.online:
+            return branding.OFF_MESH
+        if self.mesh.demo_ca:
+            return f"{branding.ON_MESH} ({branding.DEMO_CERT})"
+        return branding.ON_MESH
+
     def refresh_header(self) -> None:
         try:
             header = self.query_one(HeaderBar)
@@ -238,7 +246,7 @@ class VoxApp(App[None]):
             return
         header.update_state(
             link=self.link_label(),
-            mesh=branding.ON_MESH if self.mesh.online else branding.OFF_MESH,
+            mesh=self.mesh_label(),
             provider=str(self.config.get("active_provider", "")),
             model=str(self.config.get("active_model", "")),
             role=str(self.config.get("active_role", "")),
@@ -1499,13 +1507,31 @@ class VoxApp(App[None]):
                 f"- /mesh on|off"
             )
             return
+        if value in ("new-ca", "newca"):
+            self.replace_mesh_ca()
+            return
         if value not in ("on", "off"):
-            self.write_error("USAGE: /mesh [on|off]")
+            self.write_error("USAGE: /mesh [on|off|new-ca]")
             return
         if (value == "on") == self.mesh.online:
             self.write_system(f"MESH IS ALREADY {value.upper()}")
             return
         self.action_toggle_mesh()
+
+    @work(thread=True, group="mesh")
+    def replace_mesh_ca(self) -> None:
+        """Generating a key and restarting the agent both block."""
+        try:
+            detail = self.mesh.replace_ca()
+        except (MeshError, OSError) as exc:
+            self.call_from_thread(self.write_error, f"NEW CA FAILED - {exc}")
+            return
+        self.call_from_thread(self.mesh_ca_replaced, detail)
+
+    def mesh_ca_replaced(self, detail: str) -> None:
+        self.write_system(f"NEW CERTIFICATE AUTHORITY - {detail}")
+        self.refresh_header()
+        self.refresh_status()
 
     def cmd_universe(self, argument: str) -> None:
         self.action_open_universe()

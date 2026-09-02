@@ -68,7 +68,8 @@ def _write_private(path: Path, data: bytes) -> None:
     path.chmod(0o600)  # nobody else may read the private key
 
 
-def create_ca(directory: Path, common_name: str = "agent-mesh-ca") -> tuple[Path, Path]:
+def create_ca(directory: Path, common_name: str = "agent-mesh-ca",
+              lifetime: dt.timedelta = CA_LIFETIME) -> tuple[Path, Path]:
     """Create the internal CA. Done once, on a protected machine.
 
     In production the CA key does not belong on the agents: whoever takes that
@@ -90,7 +91,7 @@ def create_ca(directory: Path, common_name: str = "agent-mesh-ca") -> tuple[Path
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(now - dt.timedelta(minutes=5))
-        .not_valid_after(now + CA_LIFETIME)
+        .not_valid_after(now + lifetime)
         .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
         .add_extension(
             x509.KeyUsage(

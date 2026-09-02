@@ -150,7 +150,7 @@ restarts. A key legend is always visible on the bottom row.
 | `/agent on\|off`, `/workspace <path>` | control coding-agent mode |
 | `/stats` | token usage, context fill and speed for the session |
 | `/warm` | preload the active model on the server |
-| `/mesh [on\|off]`, `/universe` | join the agent mesh, see who is on it |
+| `/mesh [on\|off\|new-ca]`, `/universe` | join the mesh, see who is on it, replace the sample certificate |
 | `/connect`, `/stop`, `/new`, `/clear`, `/exit` | connection and session control |
 
 Send a message that really starts with a slash by prefixing it with `//`.
@@ -566,8 +566,34 @@ PROCESSOR.
 
 #### Keys and certificates
 
-With `auto_provision` on, the first `F3` creates `~/.vox/pki/ca.{crt,key}` and
-issues this agent a 24-hour certificate. That gives you a working mesh of one.
+#### The sample authority
+
+VOX ships with a certificate authority in `vox_chat/demo_pki/`. The first `F3`
+copies it into `~/.vox/pki/` and issues this agent a 24-hour certificate
+against it, so two fresh installations on the same segment see each other with
+no setup at all.
+
+**Its private key is public** — it is in the package and in the repository — so
+anybody with a copy of VOX can issue themselves an identity for it. A sample
+mesh is open to whoever is on your network segment. VOX never hides this:
+
+- the header reads `Universe: ON-LINE (SAMPLE CERT)`;
+- the status bar appends `DEMO CERT`;
+- going online writes the warning into the transcript;
+- `vox doctor` reports `[WARN] MESH … SAMPLE CA, private key public`.
+
+When you want a mesh of your own:
+
+```text
+/mesh new-ca
+```
+
+This generates an authority that exists only on this machine, moves the sample
+`ca.crt`/`ca.key` aside as `.replaced-<timestamp>`, deletes the certificates
+issued under it, and reissues this agent. The mesh restarts on the new anchor if
+it was online. From then on every other machine needs a certificate from *your*
+authority — the label disappears from the header once nobody is on the sample
+one.
 
 There is **no shared secret**. An agent signs every announcement with its own
 private key — the same key as its certificate, mode 0600, never leaving the
@@ -575,14 +601,16 @@ machine — and attaches its certificate to the packet. A receiver checks that
 certificate against its own `ca.crt`, checks that the announced agent id is one
 the certificate names, and only then checks the signature.
 
-So a second machine needs two things, neither of them secret between peers:
+After `/mesh new-ca`, a second machine needs two things, neither of them secret
+between peers:
 
 - `ca.crt`, to judge everyone else's certificates;
 - a certificate of its own, issued by that same authority.
 
 The quick way, on a machine you trust, is to copy the whole `~/.vox/pki`
 directory — `ca.crt` and `ca.key` — and let VOX issue itself a certificate on
-its first `F3`. The careful way is to keep `ca.key` on one machine, run
+its first `F3`. (Copying it over a sample authority is enough; VOX only seeds
+the sample one when there is no authority at all.) The careful way is to keep `ca.key` on one machine, run
 
 ```bash
 python3 -c "from vox_chat.discovery.identity import issue_agent_cert; \
@@ -614,7 +642,8 @@ the same CA; without them it cannot sign anything anyone will accept.
   L2 segment this needs a seed list or a registry, which is not built yet.
 - **The CA is the whole of the trust.** Whoever holds `ca.key` can issue an
   identity for any name, so it deserves the care you would give any signing
-  key. Individual agents only ever hold their own private key, and losing one
+  key — and the sample one is held by everybody, which is the point of the
+  label in the header. Individual agents only ever hold their own private key, and losing one
   compromises exactly one agent — for at most the 24 hours its certificate has
   left to live.
 - **The WHOIS authorizer is permissive by default**: every mesh member may ask

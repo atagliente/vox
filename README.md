@@ -113,7 +113,7 @@ The bottom row shows this legend at all times.
 | `/inspect [on\|off]` | per-token measurements, live (`Ctrl+T` opens the view) |
 | `/export [html\|json\|md\|toon]` | save the session and its figures (`Ctrl+E`) |
 | `/warm` | preload the model on the server |
-| `/mesh [on\|off]`, `/universe` | join the agent mesh, see who else is there |
+| `/mesh [on\|off\|new-ca]`, `/universe` | join the mesh, see who else is there, replace the sample certificate |
 | `/agent on\|off`, `/workspace <path>` | coding-agent mode |
 | `/config`, `/settings`, `/connect`, `/stop` | configuration and connection |
 
@@ -307,17 +307,33 @@ mTLS handshake.
 
 ### What a second machine needs
 
-There is no shared secret. Every agent signs with its own private key, which
-never leaves its machine, and carries its certificate in each announcement;
-a receiver checks that certificate against the authority it trusts.
+**Out of the box, nothing.** VOX ships with a sample certificate authority, so
+two fresh installations on the same segment already trust each other: install,
+press `F3` on both, and they appear in each other's universe.
 
-So a second machine needs a certificate of its own, issued by the same CA, and
-that CA's `ca.crt` to check everyone else. VOX creates an authority and its own
-certificate on the first `F3` and tells you where they are; until another
-machine is issued one, you have a mesh of one. The simplest way is to copy the
-whole `~/.vox/pki` directory (`ca.crt` **and** `ca.key`) to the second machine
-and let it issue itself a certificate; the careful way is to keep `ca.key` on
-one machine and hand out only leaf certificates plus `ca.crt`.
+That convenience has a price, and VOX says so rather than hiding it. The sample
+authority's private key is in this repository, so **anyone holding VOX can mint
+an identity for it** — a sample mesh is open to whoever is on your network.
+While that authority is in use the header reads `Universe: ON-LINE (SAMPLE
+CERT)`, the status bar appends `DEMO CERT`, and `vox doctor` reports a warning.
+
+To make the mesh yours, replace it:
+
+```text
+/mesh new-ca
+```
+
+That generates an authority that exists only on your machine, moves the sample
+files aside, and reissues this agent against the new one. Every other machine
+then needs a certificate from *that* authority: either copy the whole
+`~/.vox/pki` directory (`ca.crt` **and** `ca.key`) to machines you trust and let
+each issue itself one, or keep `ca.key` on one machine and hand out only a leaf
+certificate plus `ca.crt`.
+
+There is no shared secret in either case. Every agent signs with its own private
+key, which never leaves its machine, and carries its certificate in each
+announcement; a receiver checks that certificate against the authority it
+trusts.
 
 Everything is on by request only — VOX announces nothing until you press the
 key. `vox doctor` shows the group, the port, the agent id, the certificate

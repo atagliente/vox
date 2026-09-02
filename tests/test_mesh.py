@@ -308,6 +308,83 @@ def test_a_replayed_announcement_is_refused(pki) -> None:
         guard.check(protocol.decode(packet, ca_public))
 
 
+# ------------------------------------------------------- the sample authority
+
+
+def test_the_sample_authority_ships_with_vox() -> None:
+    pytest.importorskip("cryptography")
+    from cryptography import x509
+
+    directory = mesh.demo_pki_dir()
+    assert (directory / "ca.crt").exists() and (directory / "ca.key").exists()
+
+    certificate = x509.load_pem_x509_certificate((directory / "ca.crt").read_bytes())
+    name = certificate.subject.rfc4514_string()
+    assert "demo" in name.lower(), f"the name must say what it is: {name}"
+    # It has to outlive the release, or a fresh download stops working.
+    import datetime as dt
+
+    remaining = certificate.not_valid_after_utc - dt.datetime.now(dt.timezone.utc)
+    assert remaining > dt.timedelta(days=365 * 5), remaining
+
+
+def test_a_fresh_install_starts_on_the_sample_authority(tmp_path: Path) -> None:
+    """The point of shipping it: no provisioning, and it still works."""
+    pytest.importorskip("cryptography")
+    directory = tmp_path / "pki"
+    assert mesh.using_demo_ca(directory) is False, "nothing there yet"
+
+    mesh.ensure_identity("vox-aaaaaaaaaaaa", directory)
+    assert mesh.using_demo_ca(directory) is True
+    assert (directory / "vox-aaaaaaaaaaaa.crt").exists()
+
+
+def test_two_fresh_installs_trust_each_other(tmp_path: Path) -> None:
+    """Two machines, no shared setup: each accepts the other's announcement."""
+    pytest.importorskip("cryptography")
+    from cryptography.hazmat.primitives import serialization
+
+    from vox_chat.discovery import protocol
+
+    first = mesh.ensure_identity("vox-aaaaaaaaaaaa", tmp_path / "a")
+    second = mesh.ensure_identity("vox-bbbbbbbbbbbb", tmp_path / "b")
+
+    packet = protocol.encode(
+        protocol.new_announce("vox-bbbbbbbbbbbb", 1, 9000, "cafe"),
+        protocol.load_signing_key(second.key_path),
+        second.certificate.public_bytes(serialization.Encoding.DER),
+    )
+    seen = protocol.decode(packet, protocol.load_ca_public_key(first.ca_path))
+    assert seen.agent_id == "vox-bbbbbbbbbbbb"
+
+
+def test_a_private_authority_replaces_the_sample_one(tmp_path: Path) -> None:
+    pytest.importorskip("cryptography")
+    from cryptography.hazmat.primitives import serialization
+
+    from vox_chat.discovery import protocol
+
+    directory = tmp_path / "pki"
+    mesh.ensure_identity("vox-aaaaaaaaaaaa", directory)
+    assert mesh.using_demo_ca(directory) is True
+
+    identity = mesh.new_ca(directory, "vox-aaaaaaaaaaaa")
+    assert mesh.using_demo_ca(directory) is False
+    assert identity.agent_id == "vox-aaaaaaaaaaaa"
+    # The old authority is kept, not destroyed.
+    assert list(directory.glob("ca.crt.replaced-*"))
+
+    # And a machine still on the sample authority is now a stranger.
+    outsider = mesh.ensure_identity("vox-bbbbbbbbbbbb", tmp_path / "elsewhere")
+    packet = protocol.encode(
+        protocol.new_announce("vox-bbbbbbbbbbbb", 1, 9000, "cafe"),
+        protocol.load_signing_key(outsider.key_path),
+        outsider.certificate.public_bytes(serialization.Encoding.DER),
+    )
+    with pytest.raises(protocol.ProtocolError, match="not issued by this mesh"):
+        protocol.decode(packet, protocol.load_ca_public_key(identity.ca_path))
+
+
 # ------------------------------------------------------------- the controller
 
 
@@ -410,12 +487,26 @@ def test_a_failure_to_join_is_reported_as_a_mesh_error(
 
 
 def test_the_sharing_note_names_the_authority_and_no_secret(
-    controller: MeshController,
+    controller: MeshController, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(mesh, "using_demo_ca", lambda directory=None: False)
     note = controller.sharing_note()
     assert "ca.crt" in note
     assert "own key" in note, "a second machine needs a certificate, not a secret"
     assert "psk" not in note.lower()
+
+
+def test_the_sample_authority_is_never_quiet_about_itself(
+    controller: MeshController, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(mesh, "using_demo_ca", lambda directory=None: True)
+    assert controller.demo_ca is True
+    note = controller.sharing_note()
+    assert "DEMO CERTIFICATE" in note
+    assert "new-ca" in note, "the warning names its own remedy"
+
+    controller.start()
+    assert "DEMO CERT" in controller.status_line()
 
 
 def test_an_identity_is_provisioned_on_first_use(tmp_path: Path) -> None:
@@ -442,9 +533,11 @@ def test_provisioning_can_be_refused(tmp_path: Path) -> None:
 class FakeController:
     """The controller as the app sees it, without any discovery underneath."""
 
-    def __init__(self, peers: list[PeerView] | None = None, fail: str = "") -> None:
+    def __init__(self, peers: list[PeerView] | None = None, fail: str = "",
+                 demo_ca: bool = False) -> None:
         self.settings = MeshSettings.from_config(default_config())
         self.online = False
+        self.demo_ca = demo_ca
         self.agent_id = "vox-test-node"
         self.category = "PROCESSOR"
         self.last_error: str | None = None
@@ -647,6 +740,50 @@ async def test_the_keys_are_bound_to_the_same_actions_as_the_commands(
         await pilot.press("f3")
         await pilot.pause()
         assert app.mesh.online is False
+
+
+async def test_the_header_says_when_the_certificate_is_the_sample_one(
+    app: VoxApp,
+) -> None:
+    app.mesh = FakeController(PEERS, demo_ca=True)
+    async with app.run_test(size=(130, 30)) as pilot:
+        await pilot.pause()
+        assert app.mesh_label() == "LOCAL"
+
+        app.run_command("/mesh on")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.mesh_label() == "ON-LINE (SAMPLE CERT)"
+        assert "SAMPLE CERT" in str(app.query_one("#header").render())
+
+
+async def test_a_private_authority_drops_the_label(app: VoxApp) -> None:
+    app.mesh = FakeController(PEERS, demo_ca=False)
+    async with app.run_test(size=(130, 30)) as pilot:
+        app.run_command("/mesh on")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.mesh_label() == "ON-LINE"
+        assert "SAMPLE CERT" not in str(app.query_one("#header").render())
+
+
+async def test_new_ca_is_reachable_from_the_command_line(app: VoxApp) -> None:
+    replaced = []
+
+    def replace_ca():
+        replaced.append(True)
+        app.mesh.demo_ca = False
+        return "new certificate authority in /tmp/pki"
+
+    app.mesh = FakeController(PEERS, demo_ca=True)
+    app.mesh.replace_ca = replace_ca
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.run_command("/mesh new-ca")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert replaced == [True]
+        assert "NEW CERTIFICATE AUTHORITY" in " ".join(transcript(app))
 
 
 async def test_the_mesh_is_stopped_when_vox_shuts_down(app: VoxApp) -> None:

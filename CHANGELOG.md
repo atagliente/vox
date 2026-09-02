@@ -54,6 +54,19 @@ machine and version named, not estimated.
   `$DISCOVERY_PSK` and `ensure_psk` are gone; the only file two machines share
   is `ca.crt`, which is public by nature. The two protocol versions do not
   interoperate.
+- **A sample authority ships with VOX, and says so.** Two fresh installations
+  used to be two meshes of one: each provisioned its own authority on first
+  use and then dropped the other's announcements — verified on this machine,
+  both registries empty. VOX now carries a certificate authority in
+  `vox_chat/demo_pki/`, copied into `~/.vox/pki` on first use, so a download
+  joins a mesh with no setup. Its private key is public by construction, so it
+  is never quiet about it: the header reads `Universe: ON-LINE (SAMPLE CERT)`,
+  the status bar appends `DEMO CERT`, the transcript says so on going online,
+  and `vox doctor` returns a WARN naming the remedy. `/mesh new-ca` generates
+  an authority private to the machine, moves the sample aside as
+  `.replaced-<timestamp>`, drops the certificates issued under it and reissues
+  this agent; a machine still on the sample authority is a stranger from then
+  on, which is a test.
 - **The identity provisions itself.** The first join creates `~/.vox/pki/ca.crt`
   and a 24-hour certificate whose SAN is the agent id. It is reissued once past
   half its life; short lives are the only practical revocation here.

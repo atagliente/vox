@@ -168,12 +168,90 @@ def category_for(verbs: list[str]) -> str:
 # ------------------------------------------------------------------ identity
 
 
+def demo_pki_dir() -> Path:
+    """Where the authority shipped with VOX lives inside the package."""
+    return Path(__file__).resolve().parent / "demo_pki"
+
+
+def _fingerprint(path: Path) -> str | None:
+    """The SHA-256 of a certificate, or None when there is nothing to read."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes
+
+    try:
+        certificate = x509.load_pem_x509_certificate(path.read_bytes())
+    except (OSError, ValueError):
+        return None
+    return certificate.fingerprint(hashes.SHA256()).hex()
+
+
+def using_demo_ca(directory: Path | None = None) -> bool:
+    """Is this machine trusting the authority that ships with VOX?
+
+    Compared by fingerprint rather than by filename, so a copied or renamed
+    demo authority is still recognised for what it is.
+    """
+    directory = Path(directory) if directory is not None else pki_dir()
+    theirs = _fingerprint(Path(directory).expanduser() / "ca.crt")
+    return theirs is not None and theirs == _fingerprint(demo_pki_dir() / "ca.crt")
+
+
+def seed_demo_ca(directory: Path) -> None:
+    """Copy the shipped authority into ``directory``.
+
+    This is what makes a fresh download useful: two installations that have
+    provisioned nothing still trust the same authority, so they see each other.
+    The private key is public — it is in the package — so this is a
+    demonstration, not a security boundary. ``new_ca`` replaces it.
+    """
+    import shutil
+
+    directory = Path(directory).expanduser()
+    directory.mkdir(parents=True, exist_ok=True)
+    for name in ("ca.crt", "ca.key"):
+        shutil.copy(demo_pki_dir() / name, directory / name)
+    try:
+        (directory / "ca.key").chmod(0o600)
+    except OSError:  # pragma: no cover - Windows has no POSIX modes
+        pass
+    log.warning(
+        "seeded %s with the demo authority shipped with VOX; its private key is "
+        "public, so replace it before the mesh carries anything that matters",
+        directory,
+    )
+
+
+def new_ca(directory: Path, agent_id: str):
+    """Replace the authority in ``directory`` with one private to this machine.
+
+    The old authority is moved aside rather than deleted — certificates issued
+    by it stay verifiable if you need to look at them — and this agent is
+    reissued immediately, so the mesh keeps working with a trust anchor nobody
+    else holds.
+    """
+    from .discovery.identity import create_ca
+
+    directory = Path(directory).expanduser()
+    directory.mkdir(parents=True, exist_ok=True)
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    for name in ("ca.crt", "ca.key"):
+        existing = directory / name
+        if existing.exists():
+            existing.rename(directory / f"{name}.replaced-{stamp}")
+    create_ca(directory)
+    log.info("created a private certificate authority in %s", directory)
+    # Every certificate under the old authority is now worthless here.
+    for stale in directory.glob("*.crt"):
+        if stale.name != "ca.crt":
+            stale.unlink()
+    return ensure_identity(agent_id, directory)
+
+
 def ensure_identity(agent_id: str, directory: Path, provision: bool = True):
     """Load this agent's identity, creating the CA and certificate if needed."""
     from .discovery.identity import (
         Identity,
         IdentityError,
-        create_ca,
         issue_agent_cert,
         validate_agent_id,
     )
@@ -190,8 +268,9 @@ def ensure_identity(agent_id: str, directory: Path, provision: bool = True):
             )
         directory.mkdir(parents=True, exist_ok=True)
         if not (ca_crt.exists() and ca_key.exists()):
-            create_ca(directory)
-            log.info("created a local certificate authority in %s", directory)
+            # A fresh installation starts on the demo authority, so it can see
+            # other fresh installations without anyone provisioning anything.
+            seed_demo_ca(directory)
         issue_agent_cert(directory, agent_id, ca_crt, ca_key, lifetime=CERT_LIFETIME)
         log.info("issued a certificate for %s", agent_id)
 
@@ -260,6 +339,11 @@ class MeshController:
     @property
     def category(self) -> str:
         return category_for(self.settings.verbs)
+
+    @property
+    def demo_ca(self) -> bool:
+        """True while this machine trusts the authority shipped with VOX."""
+        return using_demo_ca(pki_dir(self.settings))
 
     def start(self) -> str:
         """Go online. Returns a line describing exactly what was started."""
@@ -346,11 +430,31 @@ class MeshController:
             return ""
         peers = self.peers()
         active = len([peer for peer in peers if peer.state == "ACTIVE"])
-        return f"MESH ONLINE  ·  {len(peers)} agents, {active} active"
+        line = f"MESH ONLINE  ·  {len(peers)} agents, {active} active"
+        return f"{line}  ·  DEMO CERT" if self.demo_ca else line
+
+    def replace_ca(self) -> str:
+        """Swap the demo authority for a private one, and reissue ourselves."""
+        was_online = self.online
+        self.stop()
+        directory = pki_dir(self.settings)
+        new_ca(directory, self.agent_id)
+        if was_online:
+            self.start()
+        return (
+            f"new certificate authority in {directory} — every other machine "
+            f"needs a certificate issued by this one now"
+        )
 
     def sharing_note(self) -> str:
         """What another machine needs before it can see this one."""
         directory = pki_dir(self.settings)
+        if self.demo_ca:
+            return (
+                "USING THE DEMO CERTIFICATE shipped with VOX: any other VOX on "
+                "this network segment can join, and its private key is public. "
+                "/mesh new-ca replaces it with one only your machines hold"
+            )
         return (
             f"a second machine joins with a certificate of its own issued by "
             f"{directory / 'ca.crt'} — copy that authority, not a shared secret: "

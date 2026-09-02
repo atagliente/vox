@@ -138,7 +138,7 @@ def check_model(loaded: LoadedConfig, models: list[str]) -> Check:
 
 def check_mesh(loaded: LoadedConfig) -> Check:
     """What the mesh would find if it were asked to go online right now."""
-    from .mesh import MeshSettings, pki_dir
+    from .mesh import MeshSettings, pki_dir, using_demo_ca
 
     settings = MeshSettings.from_config(loaded.data)
     where = f"{settings.group}:{settings.port}"
@@ -164,8 +164,15 @@ def check_mesh(loaded: LoadedConfig) -> Check:
         return Check(
             "WARN", "MESH", f"{where} - no certificate and auto_provision is off"
         )
-    if (directory / "ca.crt").exists():
-        parts.append(f"CA {directory / 'ca.crt'}")
+    if not (directory / "ca.crt").exists():
+        parts.append("the sample authority is copied in on going online")
+        return Check("OK", "MESH", " - ".join(parts))
+    if using_demo_ca(directory):
+        # Not a failure: it is what makes a fresh install work. It is still
+        # the thing an operator most needs to know about their mesh.
+        parts.append("SAMPLE CA, private key public - /mesh new-ca replaces it")
+        return Check("WARN", "MESH", " - ".join(parts))
+    parts.append(f"CA {directory / 'ca.crt'}")
     return Check("OK", "MESH", " - ".join(parts))
 
 

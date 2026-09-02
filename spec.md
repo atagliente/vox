@@ -408,6 +408,14 @@ where the certificate SAN must equal the announced agent id, a category derived
 deterministically from the declared verbs, and a registry with PROBATION →
 ACTIVE → SUSPECT → DEAD.
 
+VOX ships a sample certificate authority in `vox_chat/demo_pki/`, copied into
+the PKI directory on first use so that two fresh installations interoperate
+without provisioning. Its private key is public by construction, so its use is
+declared everywhere it matters: `Universe: ON-LINE (SAMPLE CERT)` in the header,
+`DEMO CERT` in the status bar, a line in the transcript on going online, and a
+`WARN` from `vox doctor`. `/mesh new-ca` replaces it with an authority private
+to the machine, moving the sample aside and reissuing this agent.
+
 There is no shared secret anywhere in the protocol. A receiver validates the
 certificate in the packet against its own CA, requires the announced agent id
 to be a SAN of that certificate, and then checks the signature — so a member

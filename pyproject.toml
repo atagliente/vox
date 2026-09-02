@@ -37,6 +37,10 @@ Homepage = "https://github.com/atagliente/vox"
 [tool.setuptools.packages.find]
 include = ["vox_chat*"]
 
+[tool.setuptools.package-data]
+# The demo authority, so a fresh download joins a mesh without provisioning.
+"vox_chat.demo_pki" = ["*.crt", "*.key", "*.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
