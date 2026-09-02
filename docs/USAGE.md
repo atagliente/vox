@@ -763,6 +763,19 @@ SYS ▸ WEB - 4 sources for 'what is a circular buffer', 1 read in full
 That matters: a blocked index used to end the search, and the model would then
 answer that it had never heard of the thing you asked about.
 
+**Where the sources go, and what a small model does with them.** The retrieved
+sources are placed immediately before your question, not after it: a model
+handed context late tends to answer first and then explain that it cannot look
+things up. The prompt also opens by saying the search has already happened.
+
+Even so, a small model may misread the question rather than the sources.
+Measured with `qwen2.5:3b`: asked "mi dici quale è il cap di latiano?" it
+answered about the town, because it read the abbreviation *CAP* as *capo*; the
+same model, given the same fetched page and asked "qual è il CAP (codice di
+avviamento postale) di Latiano?", answered `72022` — the figure was in its
+context both times. Web mode puts the right pages in front of the model; it
+cannot make a 3B model read them carefully.
+
 **The question is not sent as you typed it.** Wikipedia, Stack Overflow and
 Hacker News match titles, so "mi dici quale è il cap di latiano?" is trimmed to
 `cap latiano`, and the language of the question decides which Wikipedia is

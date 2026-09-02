@@ -321,8 +321,13 @@ class _TextExtractor(HTMLParser):
     """
 
     SKIP = {"script", "style", "noscript", "svg", "head", "nav", "footer", "form"}
-    BLOCKS = {"p", "div", "br", "li", "tr", "section", "article",
-              "h1", "h2", "h3", "h4", "h5", "h6", "pre", "blockquote"}
+    # Table and definition cells matter as much as paragraphs: a facts box is
+    # a table, and without a break between its cells the label and the value
+    # arrive glued together — "Cod. postale72022" — which is exactly the shape
+    # a model fails to read an answer out of.
+    BLOCKS = {"p", "div", "br", "li", "tr", "td", "th", "dt", "dd", "section",
+              "article", "h1", "h2", "h3", "h4", "h5", "h6", "pre",
+              "blockquote", "caption", "figcaption"}
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -519,16 +524,68 @@ def gather(question: str, settings: WebSettings) -> Sources:
     return sources
 
 
+def excerpt(text: str, query: str, budget: int, head: int = 2600) -> str:
+    """The part of a page worth sending: its opening, plus what matches.
+
+    A page is mostly not about your question. Sending the first N characters
+    spends the budget on menus and history; sending everything spends the
+    model's patience. This keeps the opening — where an encyclopaedia puts the
+    summary and the facts box — and then the paragraphs that mention what was
+    asked about.
+    """
+    if len(text) <= budget:
+        return text
+    words = {word.lower() for word in query.split() if len(word) > 3}
+    # The opening is never less than half the budget: an encyclopaedia puts
+    # the summary and the facts box there, and a facts box shares no words
+    # with the question — "Cod. postale 72022" answers "what is the CAP"
+    # while matching neither word in it.
+    head = max(head, budget // 2)
+    opening, rest = text[:head], text[head:]
+    remaining = max(0, budget - len(opening))
+    if not words or remaining <= 0:
+        return text[:budget]
+
+    scored: list[tuple[int, int, str]] = []
+    for index, block in enumerate(rest.split("\n\n")):
+        lowered = block.lower()
+        score = sum(lowered.count(word) for word in words)
+        if score:
+            scored.append((score, index, block))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+
+    kept: list[tuple[int, str]] = []
+    used = 0
+    for score, index, block in scored:
+        if used + len(block) > remaining:
+            continue
+        kept.append((index, block))
+        used += len(block) + 2
+    kept.sort()   # back into the order they were written in
+    body = "\n\n".join(block for _, block in kept)
+    return (opening + "\n\n" + body).strip() if body else text[:budget]
+
+
 def research_prompt(sources: Sources, limit: int = 6000) -> str:
     """The system message that puts the sources in front of the model."""
     lines = [
+        f"The internet has already been searched for {sources.query!r} and the "
+        "results are below. You do not need to search, and must not say that "
+        "you are unable to: the looking up has been done for you. Answer the "
+        "question from these sources.",
+        "",
         UNTRUSTED_NOTE,
         "",
-        f"These sources were retrieved for this question by searching for "
-        f"{sources.query!r}. Use them to answer: prefer them over your own "
-        "recollection where they disagree, cite the URLs you rely on, and say "
-        "plainly when they do not cover what was asked rather than filling the "
-        "gap from memory.",
+        "Prefer these sources over your own recollection where they disagree, "
+        "cite the URLs you rely on, and say plainly when they do not cover what "
+        "was asked rather than filling the gap from memory.",
+        "",
+        "The sources will label things in their own words, not in the words of "
+        "the question, and abbreviations are usually written out: a page may "
+        "list 'Cod. postale' where the question said CAP, or 'population' where "
+        "it said how many people live there. Match on meaning. A fact box of "
+        "short label-and-value lines is where a page keeps exactly this kind of "
+        "answer, so read it before concluding that the page does not say.",
         "",
     ]
     for index, result in enumerate(sources.results, start=1):
@@ -539,11 +596,12 @@ def research_prompt(sources: Sources, limit: int = 6000) -> str:
     budget = max(500, limit)
     for page in sources.pages:
         share = budget // max(1, len(sources.pages))
-        text = page.text[:share]
+        text = excerpt(page.text, sources.query, share)
         lines.extend([
             "",
-            f"--- FULL TEXT: {page.title or page.url} ---",
+            f"--- FROM: {page.title or page.url} ---",
             f"{page.url}",
-            text + ("\n[…truncated]" if len(page.text) > share else ""),
+            text + ("\n[the rest of the page is not shown]"
+                    if len(text) < len(page.text) else ""),
         ])
     return "\n".join(lines)

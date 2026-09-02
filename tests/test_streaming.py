@@ -511,3 +511,46 @@ def test_tokens_before_any_delta_are_unattributed() -> None:
     events = list(consume_stream([orphan, FakeChunk(finish_reason="stop")]))
     tokens = [event for event in events if event.type == "token"]
     assert [event.phase for event in tokens] == ["unattributed"]
+
+
+def test_logprobs_are_not_asked_for_alongside_tools() -> None:
+    """Ollama answers "logprobs is not supported with tools + stream" with a
+    400, and a rejected request costs the whole turn."""
+    from vox_chat.llm_client import LLMClient
+
+    sent: list[dict] = []
+
+    class FakeCompletions:
+        def create(self, **payload):
+            sent.append(payload)
+            return iter(())
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeClient:
+        chat = FakeChat()
+
+        def with_options(self, **_kwargs):
+            return self
+
+    client = LLMClient(base_url="http://localhost:11434/v1", api_key="x")
+    # Each request builds its own disposable client, so that is what to replace.
+    client._new_request_client = lambda: FakeClient()
+
+    tools = [{"type": "function", "function": {"name": "f", "parameters": {}}}]
+    list(client.stream_chat(
+        messages=[Message(role="user", content="hi")], model="m",
+        temperature=0.0, max_tokens=10, tools=tools, top_logprobs=5,
+    ))
+    assert "logprobs" not in sent[-1], "not asked for when tools are in play"
+    assert client.logprobs_refused is True, "and the operator is told once"
+
+    # Without tools it is asked for as usual.
+    client.logprobs_refused = False
+    list(client.stream_chat(
+        messages=[Message(role="user", content="hi")], model="m",
+        temperature=0.0, max_tokens=10, top_logprobs=5,
+    ))
+    assert sent[-1]["logprobs"] is True
+    assert sent[-1]["top_logprobs"] == 5

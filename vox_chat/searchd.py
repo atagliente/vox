@@ -252,8 +252,15 @@ def wikipedia(query: str, limit: int = 3, language: str = "") -> list[Hit]:
     hits: list[Hit] = []
     seen: set[str] = set()
 
-    # The longest words first: those are the names, not the scaffolding.
-    for word in sorted(terms.split(), key=len, reverse=True)[:2]:
+    # A capitalised word is a name, and a name is what a question is about;
+    # length is only the fallback. "codice di avviamento postale di Latiano"
+    # is about Latiano, not about avviamento.
+    words = terms.split()
+    candidates = [word for word in words if word[:1].isupper()]
+    candidates += sorted(
+        (word for word in words if word not in candidates), key=len, reverse=True
+    )
+    for word in candidates[:3]:
         if len(word) < 4:
             continue
         try:

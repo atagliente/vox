@@ -161,6 +161,8 @@ class VoxApp(App[None]):
         self._web_running = False
         # The little search server, started when web mode needs one.
         self.search_server = searchd.LocalSearch()
+        # provider/model pairs that have refused to return logprobs.
+        self._logprob_refusals: set[str] = set()
         self._consensus_answers: list[cns.PeerAnswer] = []
         self._consensus_running = False
         self._consensus_round = 0
@@ -574,19 +576,37 @@ class VoxApp(App[None]):
         # "peer" and "error" are ours, not roles any provider accepts. The peer
         # answers are folded into one system message just before the question
         # they belong to, by start_consensus.
+        history: list[Message] = []
         for message in self.session.messages:
             if message.role in ("error", "peer"):
                 continue
             if message.role == "web":
                 # What a search found is context, and "web" is not a role any
                 # provider knows.
-                messages.append(Message(role="system", content=message.content))
+                history.append(Message(role="system", content=message.content))
                 continue
-            messages.append(message)
-        if self._web_prompt:
-            messages.append(Message(role="system", content=self._web_prompt))
-        if self._consensus_prompt:
-            messages.append(Message(role="system", content=self._consensus_prompt))
+            history.append(message)
+
+        research = [
+            Message(role="system", content=prompt)
+            for prompt in (self._web_prompt, self._consensus_prompt) if prompt
+        ]
+        # Everything gathered for this turn belongs in front of the question it
+        # was gathered for. The citations are appended to the session after the
+        # question, so without this they — and the sources — arrive after it,
+        # and a model reads that as "answer, then here is some reading".
+        last_user = max(
+            (index for index, message in enumerate(history)
+             if message.role == "user"),
+            default=None,
+        )
+        if last_user is not None:
+            trailing = history[last_user + 1:]
+            del history[last_user + 1:]
+            history[last_user:last_user] = research + trailing
+        else:
+            history.extend(research)
+        messages.extend(history)
         return messages
 
     def start_generation(self) -> None:
@@ -732,6 +752,14 @@ class VoxApp(App[None]):
         """The top-k to ask the provider for, or None when inspection is off."""
         if not self.inspect_enabled:
             return None
+        key = (
+            f"{self.config.get('active_provider', '')}/"
+            f"{self.config.get('active_model', '')}"
+        )
+        if key in self._logprob_refusals:
+            # It said no once. Asking again costs a rejected request and a
+            # retry on every turn, for the same answer.
+            return None
         return int(self.inspect_config().get("top_k", 5))
 
     def _new_inspection(self) -> InspectionRun:
@@ -863,17 +891,25 @@ class VoxApp(App[None]):
         self.refresh_code_blocks()
 
     def note_logprob_refusal(self) -> None:
-        """Say once that the provider would not measure, and keep chatting."""
+        """Say once per model that it will not be measured, and carry on."""
         if self.client is None or not self.client.logprobs_refused:
-            return
-        if self.inspection.note:
             return
         self.inspection.note = (
             "the provider rejected logprobs, so this answer was not measured"
         )
-        self.write_error(
-            "INSPECTION UNAVAILABLE - this provider rejects logprobs. "
-            "The answer is unaffected."
+        key = (
+            f"{self.config.get('active_provider', '')}/"
+            f"{self.config.get('active_model', '')}"
+        )
+        if key in self._logprob_refusals:
+            return
+        # Once, and as a note rather than an error: nothing failed, and the
+        # answer is exactly what it would have been.
+        self._logprob_refusals.add(key)
+        self.write_system(
+            f"NOT MEASURED - {self.config.get('active_model', '')} does not "
+            "return logprobs, so Ctrl+T has nothing to show for it. The answers "
+            "are unaffected, and this is said once per model."
         )
 
     def finish_generation(self, error: str | None) -> None:

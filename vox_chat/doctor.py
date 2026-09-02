@@ -201,8 +201,8 @@ def check_consensus(loaded: LoadedConfig) -> Check:
 
 
 def check_web(loaded: LoadedConfig) -> Check:
-    """Whether a search would work, and whether VOX can start what it needs."""
-    from .web import WebSettings
+    """Whether a search would work, and who would answer it."""
+    from .web import WebSettings, is_local_endpoint
 
     settings = WebSettings.from_config(loaded.data)
     if not settings.enabled:
@@ -210,18 +210,20 @@ def check_web(loaded: LoadedConfig) -> Check:
     reason = settings.unusable()
     if reason:
         return Check("WARN", "WEB", reason)
-    if settings.provider != "searxng":
-        return Check("OK", "WEB", settings.describe())
 
-    from . import searxng
+    mode = "web mode: every message is researched" if settings.auto else "on request"
+    if not is_local_endpoint(settings.endpoint):
+        return Check("OK", "WEB", f"{settings.describe()} - {mode}")
 
-    state = searxng.status(settings.endpoint)
-    if state.answering:
-        return Check("OK", "WEB", f"{settings.endpoint} - {state.describe()}")
-    if state.runtime and state.daemon:
-        return Check("WARN", "WEB",
-                     f"{settings.endpoint} not answering - /web start")
-    return Check("WARN", "WEB", f"{settings.endpoint} - {state.describe()}")
+    from . import searchd
+
+    if searchd.answering(settings.endpoint):
+        return Check("OK", "WEB", f"{settings.endpoint} answering - {mode}")
+    # Not running is the normal state: VOX starts it when it is needed.
+    return Check(
+        "OK", "WEB",
+        f"{settings.endpoint} - the search server starts on first use - {mode}",
+    )
 
 
 def run_checks(workspace: Path | None = None, timeout: float = 5.0) -> list[Check]:

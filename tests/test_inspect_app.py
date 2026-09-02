@@ -267,27 +267,34 @@ async def test_export_accepts_one_format_and_refuses_nonsense(app: VoxApp) -> No
 
 
 async def test_a_provider_that_refuses_logprobs_is_reported_once(app: VoxApp) -> None:
+    """Once per model, across turns: the guard used to live on the per-turn
+    inspection run, so it came back in red on every single answer."""
     async with app.run_test() as pilot:
         await pilot.pause()
         assert app.client is not None
         app.client.logprobs_refused = True
 
-        app.finish_generation(None)
-        await pilot.pause()
-
-        def errors() -> list[str]:
+        def notes() -> list[str]:
             return [
                 box.message.content for box in messages(app)
-                if box.message.role == "error"
+                if "NOT MEASURED" in box.message.content
             ]
 
-        assert any("INSPECTION UNAVAILABLE" in text for text in errors())
-        assert "rejected logprobs" in (app.inspection.note or "")
-
-        before = len(errors())
         app.finish_generation(None)
         await pilot.pause()
-        assert len(errors()) == before, "it is said once, not on every turn"
+        assert notes(), "the operator is told once"
+        assert "rejected logprobs" in (app.inspection.note or "")
+        assert not [
+            box for box in messages(app)
+            if box.message.role == "error" and "NOT MEASURED" in box.message.content
+        ], "nothing failed, so it is not an error"
+
+        # A new turn, as a real one would be, and then another.
+        for _ in range(2):
+            app.inspection = app._new_inspection()
+            app.finish_generation(None)
+            await pilot.pause()
+        assert len(notes()) == 1, "said once, not on every turn"
 
 
 async def test_exporting_an_unmeasured_session_still_works(app: VoxApp) -> None:
@@ -399,3 +406,55 @@ async def test_the_key_row_advertises_the_legend(app: VoxApp) -> None:
         assert "ctrl+l legend" in keys
         await pilot.press("escape")
         await pilot.pause()
+
+
+async def test_a_model_that_refuses_logprobs_is_mentioned_once(app: VoxApp) -> None:
+    """Regression: it was an error, in red, on every single turn."""
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.run_command("/inspect on")
+        await pilot.pause()
+        assert app.inspect_top_k() == 5
+
+        class Refusing:
+            logprobs_refused = True
+
+            def close(self):
+                pass
+
+        app.client = Refusing()
+        app.note_logprob_refusal()
+        app.note_logprob_refusal()
+        app.note_logprob_refusal()
+        await pilot.pause()
+
+        said = [
+            box.message for box in app.transcript.children
+            if isinstance(box, MessageBox) and "NOT MEASURED" in box.message.content
+        ]
+        assert len(said) == 1, "once per model, not once per turn"
+        assert said[0].role == "system", "nothing failed, so it is not an error"
+
+        # And VOX stops asking for what it has already been refused.
+        assert app.inspect_top_k() is None
+        assert app.inspect_enabled is True, "inspection stays on for other models"
+
+
+async def test_another_model_is_asked_again(app: VoxApp) -> None:
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.run_command("/inspect on")
+        await pilot.pause()
+
+        class Refusing:
+            logprobs_refused = True
+
+            def close(self):
+                pass
+
+        app.client = Refusing()
+        app.note_logprob_refusal()
+        assert app.inspect_top_k() is None
+
+        app.config["active_model"] = "another-model"
+        assert app.inspect_top_k() == 5, "the refusal belonged to the other model"

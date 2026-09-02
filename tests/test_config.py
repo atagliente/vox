@@ -147,3 +147,28 @@ def test_the_installer_keeps_unix_line_endings() -> None:
     data = script.read_bytes()
     assert b"\r\n" not in data, "install.sh must stay LF or sh cannot read it"
     assert data.startswith(b"#!/bin/sh\n")
+
+
+def test_every_doctor_check_runs(monkeypatch: pytest.MonkeyPatch, workspace: Path) -> None:
+    """Regression: doctor imported a module that had been deleted, so `vox
+    doctor` — the first thing the installer runs — died with an ImportError."""
+    import json
+
+    from vox_chat import doctor
+    from vox_chat.storage import global_config_path
+
+    config = default_config()
+    config["providers"]["local-ollama"]["base_url"] = "http://127.0.0.1:1/v1"
+    config["providers"]["local-ollama"]["timeout_seconds"] = 1
+    # The parts that are off by default still have to be checkable.
+    config["web"].update({"enabled": True, "auto": True})
+    config["mesh"]["enabled"] = True
+    global_config_path().write_text(json.dumps(config), encoding="utf-8")
+
+    checks = doctor.run_checks(workspace=workspace, timeout=1.0)
+    labels = [check.label for check in checks]
+    for expected in ("PYTHON", "DEPS", "CONFIG", "LINK", "MESH", "CONSENSUS", "WEB"):
+        assert expected in labels, f"{expected} is missing from the report"
+    assert all(check.status in ("OK", "FAIL", "WARN", "--") for check in checks)
+    # And it renders, which is what the installer prints.
+    assert doctor.report(checks, plain=True)

@@ -281,10 +281,14 @@ async def test_disagreement_is_reconciled_locally(app: VoxApp) -> None:
         assert app._consensus_prompt, "the synthesis prompt is set for the turn"
         assert "alpha" in app._consensus_prompt and "beta" in app._consensus_prompt
 
-        # And it reaches the provider as a system message, not as role=peer.
-        roles = [m.role for m in app.build_request_messages()]
+        # And it reaches the provider as a system message, not as role=peer,
+        # placed in front of the question it belongs to.
+        rendered = app.build_request_messages()
+        roles = [m.role for m in rendered]
         assert "peer" not in roles
-        assert roles[-1] == "system"
+        assert roles[-1] == "user", "the question is what the model answers"
+        assert rendered[-2].role == "system"
+        assert "alpha" in rendered[-2].content
 
 
 async def test_a_silent_agent_is_reported_and_does_not_hang_the_turn(

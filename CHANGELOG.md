@@ -72,6 +72,50 @@ machine and version named, not estimated.
   and a subject documented only in English is still found. Measured on the
   question that failed: Latiano is now the first source, and the page carries
   `Cod. postale 72022` 1,554 characters in, inside the budget the model gets.
+- **Fixed: "I don't have the capability to search".** The sources were being
+  appended after the question rather than before it, and a small model handed
+  context that late answers the question first and then explains that it
+  cannot look things up. Research now sits immediately in front of the question
+  it belongs to, and the prompt opens by saying the searching has already been
+  done and that claiming otherwise is not an option. Both local 3B models stop
+  refusing and start quoting the page.
+- **Fixed: "INSPECTION UNAVAILABLE" in red, on every answer.** Nothing had
+  failed — the model simply does not return logprobs — but it was written as an
+  error and the guard against repeating it lived on the per-turn inspection
+  run, so it came back with every reply. It is a note now, said once per
+  provider and model: "NOT MEASURED - qwen2.5:3b does not return logprobs, so
+  Ctrl+T has nothing to show for it." VOX also stops asking that model for
+  them, which was costing a rejected request and a retry on every turn for the
+  same answer; switching model asks again.
+- **Fixed: `provider returned HTTP 400` whenever agent mode and inspection
+  were both on.** Ollama answers "logprobs is not supported with tools +
+  stream" with a 400, which costs the whole turn; VOX now simply does not ask
+  for logprobs on a tool-calling turn, because such a turn cannot be measured
+  there anyway, and says so once through the usual note.
+- **The fact box was arriving glued.** Table and definition cells were not
+  treated as blocks, so Wikipedia's "Cod. postale" and "72022" reached the
+  model as `Cod. postale72022` — the one shape no model can read a value out
+  of. With the cells separated, `qwen2.5:3b` answers "il codice postale di
+  Latiano è 72022", citing the page.
+- **The title lookup preferred the longest word over the name.** "qual è il
+  codice di avviamento postale di Latiano" searched Wikipedia for
+  *avviamento*, fetched the wrong article and answered that it could not find
+  anything. Capitalised words come first now, so both that phrasing and the
+  colloquial one fetch Latiano.
+- **Sources still arrived after the question.** The earlier fix looked at the
+  last message in the conversation, but the citations are appended after the
+  question, so the check never fired. Everything gathered for a turn is moved
+  in front of the question it was gathered for, which was verified by printing
+  the messages actually sent.
+- **A page is excerpted rather than truncated.** The opening is always kept —
+  an encyclopaedia puts its summary and its facts box there, and a facts box
+  shares no words with the question — and the rest of the budget goes to the
+  paragraphs that mention what was asked about.
+- **Fixed: `vox doctor` died with an ImportError.** Its web check still
+  imported the container module that the local server replaced, so the first
+  thing the installer runs crashed. Nothing in the suite exercised the checks,
+  which is how a deleted import got through; there is a test now that runs
+  every check with mesh and web enabled and asserts the report renders.
 - **"Nothing found" is no longer reported as the last upstream's error.**
 - **Fixed: `provider returned HTTP 400` after a search.** Search results and
   fetched pages were stored with the `tool` role and no `tool_call_id` — a

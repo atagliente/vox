@@ -463,8 +463,27 @@ def test_the_prompt_shares_its_budget_between_pages() -> None:
         pages=[web.Page(f"https://{n}.example", "T", "word " * 2000) for n in range(2)],
     )
     prompt = web.research_prompt(sources, limit=1000)
-    assert len(prompt) < 2000
-    assert prompt.count("truncated") == 2
+    assert len(prompt) < 2500
+    assert prompt.count("the rest of the page is not shown") == 2
+
+
+def test_the_excerpt_keeps_the_opening_and_what_matches() -> None:
+    """Regression: a facts box shares no words with the question, so scoring
+    alone drops the answer, and Cod. postale 72022 answers what is the CAP."""
+    opening = "Latiano is a town.\n\nCod. postale\n\n72022\n\n"
+    filler = "\n\n".join(f"An unrelated paragraph number {n}." for n in range(200))
+    matching = "\n\nLatiano was founded long ago and Latiano is in Puglia."
+    text = opening + filler + matching
+
+    kept = web.excerpt(text, "cap latiano", budget=3000)
+    assert len(kept) <= 3000
+    assert "72022" in kept, "the opening is kept whatever the words"
+    assert "Latiano was founded" in kept, "and so is what matches the question"
+    assert "unrelated paragraph number 199" not in kept, "the tail is dropped"
+
+
+def test_a_short_page_is_sent_whole() -> None:
+    assert web.excerpt("short page", "anything", budget=1000) == "short page"
 
 
 def test_citations_say_what_was_read() -> None:
@@ -659,3 +678,28 @@ async def test_an_old_config_still_gets_a_server(app: VoxApp, engine) -> None:
         app.search_server = engine
         assert engine.started, "the server was started for it"
         assert "SEARCH SERVER" in transcript(app)
+
+
+def test_the_sources_sit_in_front_of_the_question(app: VoxApp) -> None:
+    """A model handed sources after the question answers the question first,
+    then explains that it cannot look things up."""
+    from vox_chat.models import Message
+
+    app.session.messages.append(Message(role="user", content="what is a buffer?"))
+    app._web_prompt = "SOURCES: a page about buffers"
+
+    rendered = app.build_request_messages()
+    roles = [message.role for message in rendered]
+    assert roles[-1] == "user", "the question is what the model answers"
+    assert rendered[-2].role == "system"
+    assert "SOURCES" in rendered[-2].content
+
+
+def test_the_prompt_says_the_searching_is_already_done() -> None:
+    """Small models otherwise reply that they are unable to search."""
+    prompt = web.research_prompt(web.Sources(
+        query="cap latiano",
+        results=[web.Result("Latiano", "https://it.wikipedia.org/wiki/Latiano")],
+    ))
+    assert "already been searched" in prompt
+    assert "must not say that you are unable to" in prompt

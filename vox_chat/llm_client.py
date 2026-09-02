@@ -388,6 +388,12 @@ class LLMClient:
             payload["tool_choice"] = "auto"
         if include_usage:
             payload["stream_options"] = {"include_usage": True}
+        if top_logprobs and tools:
+            # Ollama answers "logprobs is not supported with tools + stream"
+            # with a 400, which costs the whole turn. A tool-calling turn
+            # cannot be measured here, so do not ask.
+            self.logprobs_refused = True
+            top_logprobs = None
         if top_logprobs:
             payload["logprobs"] = True
             payload["top_logprobs"] = int(top_logprobs)
