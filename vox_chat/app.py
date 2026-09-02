@@ -32,7 +32,9 @@ from .config import (
     save_global_config,
     validate_config,
 )
-from .llm_client import LLMClient, LLMError
+from . import fitting
+from . import ollama
+from .llm_client import LLMClient, LLMError, context_overflow
 from .logging_setup import get_logger, setup_logging
 from . import consensus as cns
 from . import searchd
@@ -77,6 +79,19 @@ from .ui.widgets import (
 log = get_logger("app")
 
 
+def describe_model(row: dict[str, Any]) -> str:
+    """The line under a model name in the picker: size, parameters, precision."""
+    parts: list[str] = []
+    size = int(row.get("size") or 0)
+    if size:
+        parts.append(f"{size / 1_000_000_000:.1f} GB" if size >= 1_000_000_000
+                     else f"{size / 1_000_000:.0f} MB")
+    for key in ("parameters", "quantization"):
+        if row.get(key):
+            parts.append(str(row[key]))
+    return "  ".join(parts)
+
+
 class VoxApp(App[None]):
     """Terminal chat client for OpenAI-compatible providers."""
 
@@ -91,14 +106,14 @@ class VoxApp(App[None]):
         Binding("ctrl+p", "open_prompts", "Prompts", priority=True),
         Binding("ctrl+r", "open_roles", "Roles", priority=True),
         Binding("ctrl+comma", "open_settings", "Settings", show=False, priority=True),
-        Binding("ctrl+shift+m", "toggle_agent", "Mode", priority=True),
+        Binding("f2", "toggle_agent", "Mode", priority=True),
+        Binding("ctrl+shift+m", "toggle_agent", "Mode", show=False, priority=True),
         Binding("ctrl+g", "stop", "Stop", priority=True),
         Binding("ctrl+b", "toggle_panel", "Panel", priority=True),
         Binding("ctrl+y", "copy_code", "Copy code", priority=True),
         # Not ctrl+i: terminals send the same byte for it as for tab, so
         # Textual reports it as "tab" and the binding never fires.
         Binding("ctrl+t", "open_inspect", "Inspect", priority=True),
-        Binding("f2", "open_inspect", "Inspect", show=False, priority=True),
         Binding("ctrl+e", "export_report", "Export", priority=True),
         # Function keys only. ctrl+shift+<letter> was not delivered here, and
         # neither was ctrl+o; a function key travels through every terminal.
@@ -106,6 +121,7 @@ class VoxApp(App[None]):
         Binding("f4", "open_universe", "Universe", priority=True),
         Binding("f5", "open_round", "Round", priority=True),
         Binding("f6", "toggle_web_mode", "Web", priority=True),
+        Binding("f12", "pick_model", "Models", priority=True),
         Binding("ctrl+q", "request_quit", "Quit", priority=True),
         Binding("ctrl+c", "copy_selection", "Copy", priority=True),
         Binding("ctrl+v", "paste_clipboard", "Paste", priority=True),
@@ -643,32 +659,65 @@ class VoxApp(App[None]):
         if self.web_mode_active():
             # In web mode the operator has already asked for the internet.
             agent_config["confirm_web"] = False
-        try:
-            for event in run_turn(
-                client=self.client,
-                messages=self.build_request_messages(),
-                model=model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                workspace=self.workspace,
-                agent_config=agent_config,
-                confirm=self._confirm_from_thread,
-                cancel=self.cancel_event,
-                agent_enabled=agent_enabled,
-                include_usage=bool(
-                    self.config.get("generation", {}).get("include_usage", True)
-                ),
-                top_logprobs=self.inspect_top_k(),
-                web_settings=self.web_settings(),
-            ):
-                self.call_from_thread(self.handle_agent_event, event)
-        except LLMError as exc:
-            if self._shutting_down:
+        messages = self.build_request_messages()
+        # Two shrinks at most: each one is a real request, and a window that
+        # small is a problem to report rather than to keep working around.
+        for _ in range(3):
+            produced = False
+            try:
+                for event in run_turn(
+                    client=self.client,
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    workspace=self.workspace,
+                    agent_config=agent_config,
+                    confirm=self._confirm_from_thread,
+                    cancel=self.cancel_event,
+                    agent_enabled=agent_enabled,
+                    include_usage=bool(
+                        self.config.get("generation", {}).get("include_usage", True)
+                    ),
+                    top_logprobs=self.inspect_top_k(),
+                    web_settings=self.web_settings(),
+                ):
+                    produced = True
+                    self.call_from_thread(self.handle_agent_event, event)
+            except LLMError as exc:
+                if self._shutting_down:
+                    return
+                smaller = self._fit_to_window(exc, messages, produced)
+                if smaller is not None:
+                    self.call_from_thread(
+                        self.write_system, fitting.describe(messages, smaller)
+                    )
+                    messages = smaller
+                    continue
+                log.warning("generation failed: %s", exc.kind)
+                self.call_from_thread(self.finish_generation, f"{exc.message}")
                 return
-            log.warning("generation failed: %s", exc.kind)
-            self.call_from_thread(self.finish_generation, f"{exc.message}")
-        else:
             self.call_from_thread(self.finish_generation, None)
+            return
+        self.call_from_thread(
+            self.finish_generation, "the prompt does not fit this model's window"
+        )
+
+    def _fit_to_window(
+        self, exc: LLMError, messages: list[Message], produced: bool
+    ) -> list[Message] | None:
+        """A smaller request when the refusal was lack of room, else None.
+
+        Only before anything has been produced: retrying halfway through a
+        turn would repeat text the operator has already read.
+        """
+        if exc.kind != "context" or produced:
+            return None
+        room = context_overflow(exc.detail) or context_overflow(exc.message)
+        if room is None:
+            return None
+        used, window = room
+        return fitting.shrink(messages, used, window)
 
     def _confirm_from_thread(self, name: str, description: str) -> bool:
         """Blocking confirmation request from the worker thread."""
@@ -1315,6 +1364,10 @@ class VoxApp(App[None]):
         self.check_connection()
 
     def cmd_model(self, argument: str) -> Any:
+        parts = argument.split()
+        if parts and parts[0].lower() == "ctx":
+            self.cmd_model_ctx(" ".join(parts[1:]))
+            return None
         if argument:
             self.config["active_model"] = argument
             self.persist_config()
@@ -1325,23 +1378,145 @@ class VoxApp(App[None]):
             return None
         return self._pick_model()
 
-    async def _pick_model(self) -> None:
+    def model_items(self) -> list[PickerItem]:
+        """The models on offer, the active one first, with what they are.
+
+        On Ollama this is what ``ollama list`` shows - size, parameters,
+        quantisation - which is what tells one local build from another.
+        """
         provider = self.provider_block() or {}
+        base_url = str(provider.get("base_url", ""))
         listed = list(provider.get("models", []))
-        if self.client is not None and self.connected:
+        details: dict[str, str] = {}
+        if ollama.looks_like_ollama(base_url):
             try:
-                listed = sorted(set(listed) | set(self.client.list_models(timeout=5)))
+                for row in ollama.list_models(base_url, timeout=5):
+                    listed.append(row["name"])
+                    details[row["name"]] = describe_model(row)
+            except ollama.OllamaError as exc:
+                self.write_error(f"cannot list models: {exc}")
+        elif self.client is not None and self.connected:
+            try:
+                listed += self.client.list_models(timeout=5)
             except LLMError as exc:
                 self.write_error(f"cannot list models: {exc.message}")
-        items = [PickerItem(name, name) for name in listed]
-        choice = await self.push_screen_wait(PickerModal("MODELS", items, "no models listed"))
+        active = str(self.config.get("active_model", ""))
+        names = sorted(set(name for name in listed if name))
+        # The active model at the top: the picker opens on the first row, so
+        # a stray Enter changes nothing.
+        names.sort(key=lambda name: (name != active, name))
+        return [
+            PickerItem(name, f"{'>' if name == active else ' '} {name}",
+                       details.get(name, ""))
+            for name in names
+        ]
+
+    async def _pick_model(self) -> None:
+        choice = await self.push_screen_wait(
+            PickerModal("MODELS", self.model_items(), "no models listed")
+        )
         if choice:
-            self.config["active_model"] = choice
-            self.persist_config()
-            self.write_system(f"MODEL SET - {choice}")
-            self.refresh_status()
-            if self.connected and self.config.get("generation", {}).get("preload", True):
-                self.preload_model()
+            self.set_model(choice)
+
+    def cmd_model_ctx(self, argument: str) -> None:
+        """Show, raise or drop the context window of the active model."""
+        provider = self.provider_block() or {}
+        base_url = str(provider.get("base_url", ""))
+        model = str(self.config.get("active_model", ""))
+        if not ollama.looks_like_ollama(base_url):
+            self.write_error(
+                "MODEL CTX - only Ollama: every other provider fixes the window"
+            )
+            return
+        if not model:
+            self.write_error("MODEL CTX - no active model")
+            return
+        wanted = argument.strip().lower()
+        if wanted in ("off", "reset", "none"):
+            if not ollama.is_derived(model):
+                self.write_system(f"MODEL CTX - {model} is already the original")
+                return
+            self.revert_model_ctx(base_url, model)
+            return
+        if not wanted:
+            self.report_model_ctx(base_url, model)
+            return
+        if not wanted.isdigit():
+            self.write_error("MODEL CTX - usage: /model ctx [N|off]")
+            return
+        self.write_system(f"MODEL CTX - building a {wanted}-token build of {model}...")
+        self.build_model_ctx(base_url, model, int(wanted))
+
+    @work(thread=True, group="model-ctx")
+    def revert_model_ctx(self, base_url: str, model: str) -> None:
+        """Go back to the model this one was built from."""
+        try:
+            parent = ollama.parent_model(base_url, model)
+        except ollama.OllamaError as exc:
+            self.call_from_thread(self.write_error, f"MODEL CTX - {exc}")
+            return
+        if not parent:
+            self.call_from_thread(
+                self.write_error,
+                f"MODEL CTX - {model} does not say what it was built from",
+            )
+            return
+        self.call_from_thread(self.set_model, parent, "MODEL CTX OFF")
+
+    @work(thread=True, group="model-ctx")
+    def report_model_ctx(self, base_url: str, model: str) -> None:
+        """What window this model has now, and the most it could have."""
+        try:
+            loaded = ollama.loaded_context(base_url, model)
+            configured = ollama.configured_context(base_url, model)
+            trained = ollama.trained_context(base_url, model)
+        except ollama.OllamaError as exc:
+            self.call_from_thread(self.write_error, f"MODEL CTX - {exc}")
+            return
+        parts = [f"MODEL CTX - {model}"]
+        if loaded is not None:
+            parts.append(f"loaded with {loaded}")
+        if configured is not None:
+            parts.append(f"set to {configured}")
+        elif loaded is None:
+            parts.append("not loaded, so the server default applies")
+        if trained is not None:
+            parts.append(f"trained for up to {trained}")
+        line = "  ·  ".join(parts)
+        if configured is None:
+            line += "\n  /model ctx <N> writes a build with a larger window"
+        self.call_from_thread(self.write_system, line)
+
+    @work(thread=True, group="model-ctx")
+    def build_model_ctx(self, base_url: str, model: str, num_ctx: int) -> None:
+        """Write the derived model, then switch to it."""
+        try:
+            trained = ollama.trained_context(base_url, model)
+            if trained is not None and num_ctx > trained:
+                self.call_from_thread(
+                    self.write_error,
+                    f"MODEL CTX - {model} was trained for {trained} tokens, "
+                    f"asking for {num_ctx} would only waste memory",
+                )
+                return
+            name = ollama.create_with_context(base_url, model, num_ctx)
+        except ollama.OllamaError as exc:
+            self.call_from_thread(self.write_error, f"MODEL CTX - {exc}")
+            return
+        self.call_from_thread(
+            self.set_model, name,
+            f"MODEL CTX - {num_ctx} tokens, same weights",
+        )
+
+    def set_model(self, name: str, reason: str = "MODEL SET") -> None:
+        """Make ``name`` the active model and tell the operator."""
+        self.config["active_model"] = name
+        self.persist_config()
+        self.write_system(f"{reason} - {name}")
+        self.refresh_status()
+        self.refresh_header()
+        if self.connected and self.config.get("generation", {}).get("preload", True):
+            self.preload_model()
 
     def cmd_role(self, argument: str) -> Any:
         if argument:
@@ -2284,6 +2459,10 @@ class VoxApp(App[None]):
     @work
     async def action_open_sessions(self) -> None:
         await self._flow_sessions()
+
+    @work
+    async def action_pick_model(self) -> None:
+        await self._pick_model()
 
     @work
     async def action_open_roles(self) -> None:

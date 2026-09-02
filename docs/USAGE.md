@@ -126,6 +126,7 @@ python -m vox_chat         # same app, from a checkout
 | `Ctrl+Y` | copy last code block | `Ctrl+G` | stop generating |
 | `↑` / `↓` | input history | `Ctrl+B` | side panel |
 | `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+T` / `Ctrl+E` | inspect / export |
+| `F2` | coding-agent mode on / off | `F12` | pick a model, arrows only |
 | `F3` | join / leave the mesh | `F4` / `F5` | the universe / the round |
 | | | `Ctrl+Q` | quit |
 
@@ -133,7 +134,13 @@ python -m vox_chat         # same app, from a checkout
 bound for the ones that do. The arrows only reach the history at the first and
 last line of the input, so they still move the cursor inside a multiline draft.
 History lives in `~/.vox/history.json` (last 200 entries) and survives
-restarts. A key legend is always visible on the bottom row.
+restarts. The bottom row keeps five keys visible - send, copy/paste, quit,
+stop, mode - and no more; `/help` lists everything.
+
+`F12` opens the model list. On Ollama it is what `ollama list` shows, with the
+size, the parameter count and the quantisation under each name, the active
+model first. Up and down move, `Enter` chooses, and typing filters - but you
+never have to type: down, down, enter is a complete interaction.
 
 ### Commands
 
@@ -142,6 +149,7 @@ restarts. A key legend is always visible on the bottom row.
 | Command | Effect |
 | --- | --- |
 | `/provider [name]`, `/model [name]` | switch provider or model, no restart |
+| `/model ctx [N\|off]` | the context window of the active model (Ollama) |
 | `/role [name]`, `/roles` | choose the persona driving the system prompt |
 | `/prompts`, `/prompt <name>` | load a saved prompt into the input, unsent |
 | `/prompt-save <name>` | store the current input as a reusable prompt |
@@ -230,6 +238,52 @@ whether the thinking arrives in a dedicated field (`reasoning_content`,
 including when a tag is split across two streaming chunks. Reasoning is saved
 with the session but never replayed to the model. Turn it off with
 `"ui": { "show_reasoning": false }`.
+
+### The context window
+
+A local model is loaded with a window, and it is usually smaller than the
+weights allow: Ollama uses 4096 tokens unless it was started otherwise, whatever
+the model can do. Web mode is what finds the edge of it — a research block of
+four sources is a few thousand tokens on its own — and the failure used to be a
+bare `HTTP 400`.
+
+Two things happen now. The refusal is reported as what it is:
+
+    prompt is 4251 tokens, the model has room for 4096 - shorten the turn,
+    or load the model with a larger window
+
+and the turn is retried once with the research block cut down to fit, which is
+said out loud:
+
+    PROMPT TRIMMED - about 10365 tokens of sources dropped to fit
+
+The sources are ranked, so what goes is the tail — the least useful reading in
+the request. Nothing else is touched: the role, the history and the question
+are the last things VOX would drop.
+
+To stop trimming and raise the window instead:
+
+    /model ctx 16384
+
+The `num_ctx` parameter cannot be set per request — the OpenAI-compatible
+endpoint ignores it, whichever way it is passed — so VOX writes a derived model
+through Ollama's own API: `vox-<model>:ctx16384`, built `FROM` the original with
+`num_ctx` set, and makes it the active model. The weights are not copied. It is
+a manifest pointing at the same blobs, a few kilobytes on disk, and it takes
+about two seconds to write.
+
+    /model ctx          what this model is loaded with, and the most it could take
+    /model ctx 16384    write that build and switch to it
+    /model ctx off      back to the model it was built from
+
+A larger window is not free: prefill grows with it, and on a small local model
+that is most of the wait. Measured here on a 3B model, an 8000-token prompt at
+`num_ctx 16384` took 90 seconds against a few seconds for a short one. The
+window is also refused when it is larger than the model was trained for, since
+that only spends memory.
+
+Everything above is Ollama-only, and `/model ctx` says so on any other
+provider: a hosted API fixes the window at its end.
 
 ### Slow first token
 
@@ -343,7 +397,7 @@ you decide what actually happens.
 
 ### Inspecting the tokens
 
-`Ctrl+T` — or `F2`, or `/inspect` with no argument — turns the measurement on
+`Ctrl+T` — or `/inspect` with no argument — turns the measurement on
 if it was off and opens a full-screen table
 that fills while the answer streams and stays open afterwards. Pressing the
 same key again closes it.

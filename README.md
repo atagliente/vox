@@ -92,11 +92,14 @@ has no authentication — only on a network you trust.
 | `Ctrl+Y` | copy last code block | `Ctrl+G` | stop generating |
 | `↑` / `↓` | input history | `Ctrl+B` | side panel |
 | `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+T` / `Ctrl+E` | inspect / export |
+| `F2` | coding-agent mode on / off | `F12` | pick a model, arrows only |
 | `F3` | join / leave the mesh | `F4` / `F5` | the universe / the round |
 | `F6` | web mode: answers researched first | | |
 | | | `Ctrl+Q` | quit |
 
-The bottom row shows this legend at all times.
+The bottom row carries five of them - send, copy/paste, quit, stop, mode - and
+nothing else. `/help` has the rest; a legend nobody can read at a glance is
+decoration.
 
 ## Commands
 

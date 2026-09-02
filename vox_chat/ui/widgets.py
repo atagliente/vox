@@ -242,27 +242,13 @@ class KeyBar(Static):
     """
 
     KEYS: tuple[tuple[str, str], ...] = (
-        # Most useful first: the tail is what a narrow terminal loses.
+        # Five entries, deliberately: a legend nobody can read at a glance is
+        # decoration. Everything else is in /help, and on the function keys.
         ("enter", "send"),
         ("^C/^V", "copy/paste"),
         ("^Q", "quit"),
         ("^G", "stop"),
-        ("^⇧M", "mode"),
-        ("^Y", "copy code"),
-        ("^T", "inspect"),
-        ("^E", "export"),
-        ("F3", "online"),
-        ("F4", "universe"),
-        ("F5", "round"),
-        ("F6", "web"),
-        ("alt+enter", "new line"),
-        ("^N", "new"),
-        ("^S", "settings"),
-        ("^W", "save"),
-        ("^P", "prompts"),
-        ("^R", "roles"),
-        ("^B", "panel"),
-        ("↑↓", "history"),
+        ("F2", "mode"),
     )
 
     def __init__(self) -> None:

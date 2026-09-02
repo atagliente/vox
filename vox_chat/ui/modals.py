@@ -147,9 +147,20 @@ class TextPromptModal(ModalScreen[str | None]):
 
 
 class PickerModal(ModalScreen[str | None]):
-    """A searchable list; returns the selected value or ``None``."""
+    """A searchable list; returns the selected value or ``None``.
 
-    BINDINGS = [("escape", "cancel", "Cancel")]
+    The filter keeps the focus and the arrows move the highlight, so a choice
+    can be made without typing anything: down, down, enter. Filtering is for
+    long lists, not a step you are made to go through.
+    """
+
+    BINDINGS = [
+        ("escape", "cancel", "Cancel"),
+        Binding("down", "move(1)", "Next", show=False, priority=True),
+        Binding("up", "move(-1)", "Previous", show=False, priority=True),
+        Binding("pagedown", "move(10)", "Down", show=False, priority=True),
+        Binding("pageup", "move(-10)", "Up", show=False, priority=True),
+    ]
 
     def __init__(self, title: str, items: Iterable[PickerItem],
                  empty_message: str = "nothing here yet") -> None:
@@ -182,6 +193,27 @@ class PickerModal(ModalScreen[str | None]):
 
     def on_mount(self) -> None:
         self.query_one("#filter", Input).focus()
+        self._highlight(0)
+
+    def _highlight(self, index: int) -> None:
+        listing = self.query_one("#items", ListView)
+        if listing.children:
+            listing.index = max(0, min(index, len(listing.children) - 1))
+
+    def action_move(self, delta: int) -> None:
+        listing = self.query_one("#items", ListView)
+        if not listing.children:
+            return
+        current = listing.index if listing.index is not None else 0
+        self._highlight(current + delta)
+
+    def _selected(self) -> str | None:
+        highlighted = self.query_one("#items", ListView).highlighted_child
+        return getattr(highlighted, "value", None) if highlighted else None
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        # Enter in the filter takes the highlighted row, the way a launcher does.
+        self.dismiss(self._selected())
 
     def on_input_changed(self, event: Input.Changed) -> None:
         needle = event.value.strip().lower()
@@ -194,6 +226,7 @@ class PickerModal(ModalScreen[str | None]):
         listing.clear()
         for row in self._rows(matching):
             listing.append(row)
+        self._highlight(0)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         self.dismiss(getattr(event.item, "value", None))
@@ -202,9 +235,7 @@ class PickerModal(ModalScreen[str | None]):
         if event.button.id != "ok":
             self.dismiss(None)
             return
-        listing = self.query_one("#items", ListView)
-        highlighted = listing.highlighted_child
-        self.dismiss(getattr(highlighted, "value", None) if highlighted else None)
+        self.dismiss(self._selected())
 
     def action_cancel(self) -> None:
         self.dismiss(None)

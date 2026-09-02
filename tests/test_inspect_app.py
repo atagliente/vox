@@ -315,7 +315,7 @@ async def test_the_inspect_key_is_one_a_terminal_can_actually_send(app: VoxApp) 
     from textual.keys import KEY_ALIASES
 
     bound = {binding.key for binding in VoxApp.BINDINGS}
-    assert "ctrl+t" in bound and "f2" in bound
+    assert "ctrl+t" in bound
     assert "ctrl+i" not in bound, "it would never be delivered"
 
     ambiguous = {alias for aliases in KEY_ALIASES.values() for alias in aliases}
@@ -334,14 +334,14 @@ async def test_tab_still_belongs_to_the_input(app: VoxApp) -> None:
         )
 
 
-async def test_f2_opens_and_closes_the_view(app: VoxApp) -> None:
+async def test_ctrl_t_opens_and_closes_the_view(app: VoxApp) -> None:
     async with app.run_test(size=(100, 28)) as pilot:
         await pilot.pause()
-        await pilot.press("f2")
+        await pilot.press("ctrl+t")
         await pilot.pause()
         await pilot.pause()
         assert isinstance(app.screen, InspectScreen)
-        await pilot.press("f2")
+        await pilot.press("ctrl+t")
         await pilot.pause()
         assert not isinstance(app.screen, InspectScreen)
 

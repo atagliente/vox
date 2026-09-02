@@ -12,6 +12,45 @@ machine and version named, not estimated.
 
 ## Unreleased
 
+### The context window
+
+**2026-09-02**
+
+- **A prompt that no longer fits is trimmed and retried, not lost.** Ollama
+  loads a model with 4096 tokens unless told otherwise; web mode walks past
+  that on four sources. The turn is retried once with the research block cut
+  to fit — `PROMPT TRIMMED - about 10365 tokens of sources dropped to fit`,
+  measured on `granite4.2:3b` — and the role, the history and the question are
+  never what gets dropped.
+- **`/model ctx [N|off]` raises the window instead.** `num_ctx` cannot be set
+  per request: the OpenAI-compatible endpoint ignores it top-level and under
+  `options` alike, verified against Ollama 0.32.15. So VOX writes a derived
+  model through the native API — `vox-granite4.2-3b:ctx16384`, built `FROM` the
+  original, weights not copied, 2.2s to write — and switches to it. `/model
+  ctx` alone reports the loaded, configured and trained windows; `off` goes
+  back to the parent, which is read from Ollama rather than guessed, because
+  `granite4.2:3b` and `granite4.2-3b` flatten to the same derived name.
+  A window larger than the model was trained for is refused.
+- **The refusal says what it is.** Ollama nests its error one JSON document
+  deep inside `error.message`; VOX threw that away and printed `provider
+  returned HTTP 400`, which names no remedy. It now reads `prompt is 4251
+  tokens, the model has room for 4096`.
+- Measured cost of a larger window on this machine: an 8000-token prompt at
+  `num_ctx 16384` on a 3B model took 90s, against seconds for a short one.
+  Prefill is most of the wait on a small local model.
+
+### Keys
+
+**2026-09-02**
+
+- **`F2` is coding-agent mode** and **`F12` opens the models**, listed the way
+  `ollama list` shows them — size, parameters, quantisation — the active one
+  first. Arrows move, `Enter` chooses, typing filters; choosing never requires
+  typing.
+- **The bottom row carries five keys**: send, copy/paste, quit, stop, mode.
+  It had twenty, which is a legend nobody reads. The rest are in `/help`.
+- Inspect keeps `Ctrl+T`; it no longer answers to `F2`.
+
 ### Searching the internet
 
 **2026-09-02**
