@@ -1485,12 +1485,11 @@ class VoxApp(App[None]):
             return "CONSENSUS IS OFF - /consensus on"
         if not self.mesh.online:
             return "CONSENSUS NEEDS THE MESH - F3, OR /mesh on"
-        if self.mesh.demo_ca:
-            # On the shipped authority any VOX on the segment can join, so
-            # distributing text means handing it to strangers.
+        if self.mesh.demo_ca and not settings.get("allow_sample_ca", True):
             return (
                 "REFUSING TO DISTRIBUTE ON THE SAMPLE CERTIFICATE - anyone on "
-                "this network holding VOX could read it. /mesh new-ca first"
+                "this network holding VOX could read it. /mesh new-ca first, "
+                "or set consensus.allow_sample_ca"
             )
         return None
 
@@ -1514,6 +1513,13 @@ class VoxApp(App[None]):
             return
 
         named = ", ".join(peer.name or peer.agent_id for peer in peers)
+        if self.mesh.demo_ca:
+            # Said every round, not once: the certificate is public, so the
+            # peer list is not the same thing as who can read this.
+            self.write_error(
+                "SAMPLE CERTIFICATE - this text is readable by anyone on the "
+                "segment running VOX. /mesh new-ca for a mesh only yours"
+            )
         self.write_system(
             f"CONSENSUS - sending {len(question)} characters to {len(peers)} "
             f"agents: {named}"
@@ -1596,8 +1602,8 @@ class VoxApp(App[None]):
         settings = self.consensus_settings()
         if not settings.get("enabled", True) or not settings.get("answer_requests", True):
             raise RuntimeError("this node does not answer questions")
-        if self.mesh.demo_ca:
-            raise RuntimeError("this node is on the sample certificate")
+        if self.mesh.demo_ca and not settings.get("allow_sample_ca", True):
+            raise RuntimeError("this node does not answer on the sample certificate")
         limit = int(settings.get("max_question_chars", 4000))
         if len(question) > limit:
             raise RuntimeError(f"question over {limit} characters")

@@ -189,9 +189,13 @@ def check_consensus(loaded: LoadedConfig) -> Check:
     answers = "answers peers" if section.get("answer_requests", True) else "asks only"
     detail = f"{verb} - {answers}"
     if using_demo_ca(pki_dir(MeshSettings.from_config(loaded.data))):
+        if not section.get("allow_sample_ca", True):
+            return Check("--", "CONSENSUS",
+                         f"{detail} - refused while on the sample CA")
         return Check(
             "WARN", "CONSENSUS",
-            f"{detail} - refused on the sample CA; /mesh new-ca first",
+            f"{detail} - ON THE SAMPLE CA: what you distribute is readable by "
+            "anyone on this segment running VOX; /mesh new-ca",
         )
     return Check("OK", "CONSENSUS", detail)
 

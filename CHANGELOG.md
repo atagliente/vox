@@ -35,11 +35,17 @@ machine and version named, not estimated.
   Otherwise the local model writes the answer and is told to name where the
   agents differed. Every reply is kept in the transcript, in the side panel
   (`/panel consensus`), in the session and in the report.
-- **Refused on the sample authority.** Distributing text where anyone on the
-  segment holding VOX can read it is not something a warning covers, so there
-  is no switch to allow it: `[CNS]` errors and names `/mesh new-ca`. Refusals
-  are equally explicit when the mesh is offline, consensus is off, or the span
-  is oversize; with no peers to ask, VOX says so and answers locally.
+- **Works on the sample authority, and warns every round.** A fresh install
+  should be able to try consensus without provisioning anything first, so
+  `consensus.allow_sample_ca` is true by default. What it costs is stated
+  before every round rather than once: the shipped authority's private key is
+  public, so anyone on the segment with a copy of VOX can issue themselves a
+  certificate, join, and be one of the agents answering — the peer list shown
+  is not the same thing as who can read the text. Setting the flag false turns
+  the warning back into a refusal, for asking and answering alike. Refusals
+  stay explicit when the mesh is offline, consensus is off, the span is
+  oversize, or a tag is unclosed; with no peers to ask, VOX says so and answers
+  locally.
 - **Measured, not assumed.** Two nodes on one machine with a private authority
   and `qwen2.5-coder:3b` answering: the peer went ACTIVE, was asked, and
   answered in 14.0s, effectively all of it the model. The failure paths were

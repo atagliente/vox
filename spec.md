@@ -459,9 +459,13 @@ Every reply is kept in the transcript, the side panel, the session and the
 report: a verdict that cannot be checked is not worth having.
 
 Distribution is refused, with the remedy named, when consensus is off, the mesh
-is offline, the marked text is oversize, or **the authority is the sample one**
-— on the shipped CA anyone on the segment can join, so there is no configuration
-switch to allow it.
+is offline, the marked text is oversize, or a tag is left unclosed.
+
+On the sample authority a round proceeds and warns first, every time: its
+private key is public, so anyone on the segment running VOX can join and read
+what is distributed, and the peer list shown is not the same thing as who can
+read it. `consensus.allow_sample_ca` (true by default) turns that warning back
+into a refusal, for asking and answering alike.
 
 ## Quality rules
 

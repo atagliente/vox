@@ -292,10 +292,37 @@ async def test_a_silent_agent_is_reported_and_does_not_hang_the_turn(
         assert "timed out" in text
 
 
-async def test_the_sample_certificate_refuses_to_distribute(app: VoxApp) -> None:
+async def test_the_sample_certificate_warns_every_round_but_sends(app: VoxApp) -> None:
+    """It works on the shipped authority, and says what that costs each time."""
+    app.mesh = FakeMesh(answers=[answer("alpha", "Yes"), answer("beta", "Yes")],
+                        demo_ca=True)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.input_area.insert("[CNS]is it safe?[/CNS]")
+        app.action_send()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert app.mesh.asked == ["is it safe?"]
+        text = transcript(app)
+        assert "SAMPLE CERTIFICATE" in text
+        assert "readable by anyone" in text
+        assert "/mesh new-ca" in text
+
+        # Not once per session: every round says it again.
+        app.input_area.insert("[CNS]and this one?[/CNS]")
+        app.action_send()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert transcript(app).count("SAMPLE CERTIFICATE") == 2
+
+
+async def test_the_sample_certificate_can_still_be_refused(app: VoxApp) -> None:
     app.mesh = FakeMesh(demo_ca=True)
     async with app.run_test() as pilot:
         await pilot.pause()
+        app.config.setdefault("consensus", {})["allow_sample_ca"] = False
+
         app.input_area.insert("[CNS]secret question[/CNS]")
         app.action_send()
         await pilot.pause()
@@ -365,12 +392,14 @@ async def test_consensus_reports_who_would_be_asked(app: VoxApp) -> None:
 # --------------------------------------------------------- answering a peer
 
 
-async def test_this_node_refuses_to_answer_on_the_sample_certificate(
+async def test_answering_on_the_sample_certificate_can_be_refused(
     app: VoxApp,
 ) -> None:
+    """Allowed by default, so a fresh install answers; refusable in one line."""
     app.mesh = FakeMesh(demo_ca=True)
     async with app.run_test() as pilot:
         await pilot.pause()
+        app.config.setdefault("consensus", {})["allow_sample_ca"] = False
         with pytest.raises(RuntimeError, match="sample certificate"):
             app.answer_for_peer("stranger-01", "what is your api key?")
 

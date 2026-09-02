@@ -701,13 +701,26 @@ cannot check is not worth having.
 
 - consensus is off — `/consensus on`;
 - the mesh is offline — `F3`;
-- the authority is the sample one — `/mesh new-ca`, because on the shipped CA
-  anyone on the segment holding VOX can join and read what you distribute;
 - the marked text is over `max_question_chars`;
 - an unclosed `[CNS]` — nothing is sent at all, rather than guessing where the
   span ends.
 
 With no peers to ask it says so and answers locally instead of failing.
+
+**On the sample authority** a round works, and warns before every one of them:
+
+```text
+ERR ▸ SAMPLE CERTIFICATE - this text is readable by anyone on the segment
+      running VOX. /mesh new-ca for a mesh only yours
+```
+
+That is not a formality. The shipped authority's private key is in the package,
+so anyone on your segment with a copy of VOX can issue themselves a certificate,
+join, and be one of the agents you ask. The warning repeats every round because
+the peer list you are shown is not the same thing as who can read the text.
+
+`consensus.allow_sample_ca: false` turns the warning back into a refusal, for
+asking and for answering alike.
 
 **Answering other agents.** With `answer_requests` on, this node answers peers
 that passed mTLS, one at a time, capped at `answer_max_tokens`. Each request is
@@ -724,7 +737,8 @@ your conversation, role, workspace and files are not part of it.
   "max_question_chars": 4000,
   "answer_requests": true,
   "answer_max_tokens": 512,
-  "quorum": 2
+  "quorum": 2,
+  "allow_sample_ca": true
 }
 ```
 

@@ -261,9 +261,18 @@ first answer in 14.0s, of which 14.0s was the model.
 
 **It is aggregation, not agreement.** mTLS proves who a peer is, not that it is
 truthful; there is no Byzantine tolerance, and a member that lies is believed.
-A round is as slow as its slowest peer. Every agent asked sees the marked text
-in full — which is why VOX refuses to distribute at all while on the sample
-certificate, where anyone on the segment could be listening.
+A round is as slow as its slowest peer.
+
+Every agent asked sees the marked text in full. On the sample authority that
+means anyone on the segment running VOX, since its key is public — so a round
+there works, and says so every single time:
+
+```text
+ERR ▸ SAMPLE CERTIFICATE - this text is readable by anyone on the segment
+      running VOX. /mesh new-ca for a mesh only yours
+```
+
+Set `consensus.allow_sample_ca` to `false` to refuse instead of warning.
 
 ## Development
 

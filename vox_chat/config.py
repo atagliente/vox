@@ -85,6 +85,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "answer_requests": True,
         "answer_max_tokens": 512,
         "quorum": 2,
+        # The sample authority is public, so a round on it is readable by
+        # anyone on the segment running VOX. Allowed, and said out loud every
+        # time; set this to false to refuse instead.
+        "allow_sample_ca": True,
     },
     "ui": {
         "theme": "nasa",
@@ -275,7 +279,7 @@ def validate_config(data: Any) -> list[str]:
     if not isinstance(consensus, dict):
         errors.append("consensus must be an object")
     else:
-        for key in ("enabled", "answer_requests"):
+        for key in ("enabled", "answer_requests", "allow_sample_ca"):
             if not isinstance(consensus.get(key, False), bool):
                 errors.append(f"consensus.{key} must be a boolean")
         verb = consensus.get("verb", "infer")
