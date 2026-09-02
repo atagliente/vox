@@ -226,6 +226,7 @@ InspectScreen { background: #16150f; }
 .msg-tool { color: #c9a15a; }
 .msg-error { color: #c47a5d; }
 .msg-reasoning { color: #6b6349; text-style: italic; }
+.msg-peer { color: #7f9aa8; }
 ModalScreen { align: center middle; }
 #modal-box {
     width: 82;
@@ -299,6 +300,7 @@ InspectScreen { background: #101014; }
 .msg-tool { color: #d0b070; }
 .msg-error { color: #d08070; }
 .msg-reasoning { color: #6c6c78; text-style: italic; }
+.msg-peer { color: #7f9aa8; }
 ModalScreen { align: center middle; }
 #modal-box {
     width: 82; max-width: 96%; height: auto; max-height: 90%;
@@ -355,6 +357,7 @@ InspectScreen { background: #f4f2ec; }
 .msg-tool { color: #85601c; }
 .msg-error { color: #9c4a2f; }
 .msg-reasoning { color: #7c7768; text-style: italic; }
+.msg-peer { color: #3f6a7d; }
 ModalScreen { align: center middle; }
 #modal-box {
     width: 82; max-width: 96%; height: auto; max-height: 90%;

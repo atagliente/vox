@@ -12,6 +12,44 @@ machine and version named, not estimated.
 
 ## Unreleased
 
+### CONSENSUS
+
+**2026-09-02**
+
+- **`[CNS] … [/CNS]` sends the marked part of a message to the other agents on
+  the mesh.** Everything outside the tag stays on this machine — the boundary
+  is a pure function in `vox_chat/consensus.py`, and a test asserts that a
+  message containing a secret alongside a marked question puts only the
+  question on the network. An unclosed tag distributes nothing rather than
+  guessing where the span ends.
+- **The mesh does work, not just discovery.** A new `ASK` operation rides the
+  mTLS channel WHOIS already uses: same port, same identity, same authorizer.
+  A peer answers with its own model in a fresh two-message conversation, so no
+  context travels either way. The socket timeout is raised before the model is
+  called — the 5s handshake cap would kill every real answer — and a semaphore
+  allows one answer at a time, so a peer cannot queue generations on somebody
+  else's hardware.
+- **The replies are reconciled, and the reconciliation is shown.** Answers that
+  match once normalised form a vote when they reach the quorum *and* a strict
+  majority; two out of five agreeing is a coincidence, not a decision.
+  Otherwise the local model writes the answer and is told to name where the
+  agents differed. Every reply is kept in the transcript, in the side panel
+  (`/panel consensus`), in the session and in the report.
+- **Refused on the sample authority.** Distributing text where anyone on the
+  segment holding VOX can read it is not something a warning covers, so there
+  is no switch to allow it: `[CNS]` errors and names `/mesh new-ca`. Refusals
+  are equally explicit when the mesh is offline, consensus is off, or the span
+  is oversize; with no peers to ask, VOX says so and answers locally.
+- **Measured, not assumed.** Two nodes on one machine with a private authority
+  and `qwen2.5-coder:3b` answering: the peer went ACTIVE, was asked, and
+  answered in 14.0s, effectively all of it the model. The failure paths were
+  exercised against a real mTLS server: an oversize question refused before
+  reaching the model, a second concurrent caller told `busy`, and a node with
+  no handler answering `ask not supported`.
+- Honest about what it is: aggregation, not agreement. mTLS proves who a peer
+  is, not that it is truthful, there is no Byzantine tolerance, and a round is
+  as slow as its slowest peer.
+
 ### The agent mesh
 
 **2026-09-01**

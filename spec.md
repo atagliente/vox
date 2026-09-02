@@ -439,6 +439,30 @@ agent's life. Start and stop happen in a worker thread, because socket setup
 and certificate generation block; a failure is reported to the transcript and
 leaves the chat untouched.
 
+## CONSENSUS
+
+`[CNS] … [/CNS]` marks the part of a message that may leave the machine. The
+tag is the privacy boundary: everything outside it stays local, the parser is
+pure and lives in `vox_chat/consensus.py`, and a test asserts that nothing but
+the marked span reaches the network. An unclosed tag distributes nothing.
+
+The marked span is sent to the peers that declare the configured verb (`infer`
+by default, so the PROCESSORs; OBSERVERs are never asked) over the mTLS channel
+WHOIS already uses, as an `ASK` operation. A peer answers with its own model in
+a fresh two-message conversation, so no context travels in either direction. A
+node answers one question at a time and refuses a second with `busy`.
+
+The replies are reconciled, not agreed. Answers that match once normalised form
+a vote when they reach both the quorum and a strict majority; otherwise the
+local model synthesises a final answer and is told to name the disagreements.
+Every reply is kept in the transcript, the side panel, the session and the
+report: a verdict that cannot be checked is not worth having.
+
+Distribution is refused, with the remedy named, when consensus is off, the mesh
+is offline, the marked text is oversize, or **the authority is the sample one**
+— on the shipped CA anyone on the segment can join, so there is no configuration
+switch to allow it.
+
 ## Quality rules
 
 - Type hints on internal APIs; `dataclasses` where they add clarity.

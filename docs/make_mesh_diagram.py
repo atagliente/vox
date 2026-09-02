@@ -15,7 +15,7 @@ import math
 import random
 from pathlib import Path
 
-W, H = 1180, 900
+W, H = 1180, 1090
 SEED = 20260902
 
 INK = "#2c3038"
@@ -117,7 +117,7 @@ def step(x, y, n, label, colour=INK):
 
 parts.append(f'<rect width="{W}" height="{H}" fill="{PAPER}"/>')
 
-text(60, 56, "How VOX agents find each other", 25, INK, "start", "600")
+text(60, 56, "How VOX agents find each other, and work together", 25, INK, "start", "600")
 text(60, 82, "Nothing leaves the local network segment, and nothing is announced until you press F3.",
      15, MUTED)
 
@@ -211,6 +211,19 @@ arrow(436, 786, 436, 804, MUTED, 1.5)
 mono(446, 800, "5 intervals", 11)
 arrow(376, 800, 300, 790, SAGE, 1.5, dash="5 5")
 mono(96, 806, "an announcement brings it back", 11, SAGE)
+
+# --- 6. consensus -------------------------------------------------------
+arrow(300, 860, 300, 906, CLAY)
+arrow(870, 860, 870, 906, CLAY)
+sketch_box(60, 910, 1060, 150, CLAY, "#fbf2ee")
+step(96, 938, 6, "CONSENSUS  ·  [CNS] … [/CNS]", CLAY)
+text(96, 972, "Only the marked span leaves the machine. Each agent answers with its own model, knowing nothing else.",
+     14, INK)
+mono(96, 1000, "ASK over the same mTLS channel  →  {answer, model, elapsed}   ·   one at a time, or the peer replies \"busy\"", 13)
+text(96, 1028, "Answers that agree once normalised are a vote, with its tally. Otherwise the local model reconciles them",
+     13, MUTED)
+text(96, 1048, "and names the disagreement. Every reply is kept: aggregation is only worth having if it can be checked.",
+     13, MUTED)
 
 svg = (
     f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" '

@@ -150,7 +150,8 @@ restarts. A key legend is always visible on the bottom row.
 | `/agent on\|off`, `/workspace <path>` | control coding-agent mode |
 | `/stats` | token usage, context fill and speed for the session |
 | `/warm` | preload the active model on the server |
-| `/mesh [on\|off\|new-ca]`, `/universe` | join the mesh, see who is on it, replace the sample certificate |
+| `/mesh [on\|off\|new-ca\|sample-ca]`, `/universe` | join the mesh, see who is on it, swap the authority |
+| `/consensus [on\|off]` | ask the other agents about `[CNS] … [/CNS]` |
 | `/connect`, `/stop`, `/new`, `/clear`, `/exit` | connection and session control |
 
 Send a message that really starts with a slash by prefixing it with `//`.
@@ -659,6 +660,87 @@ the same CA; without them it cannot sign anything anyone will accept.
   declared verbs — nothing about your conversation, your model or your files.
 - Discovery answers *who is there*; it carries no work. What agents do with
   each other after they have found each other is not part of this.
+
+### CONSENSUS
+
+`[CNS] … [/CNS]` marks the part of a message that may be sent to the other
+agents on the mesh:
+
+```text
+Here is the stack trace from our staging box, with customer ids in it.
+[CNS]Is a lock-free ring buffer safe when a reader can stall indefinitely?[/CNS]
+```
+
+Everything outside the tag stays on this machine. The local model still sees
+the whole message with the markers removed; the peers see only the span, in a
+fresh conversation with no context of yours attached.
+
+```text
+SYS  ▸ CONSENSUS - sending 68 characters to 2 agents: node-b, node-c
+PEER node-b ▸ No, a stalled reader blocks reclamation.
+              [qwen2.5-coder:3b · 14.0s]
+PEER node-c ▸ Safe as long as readers never stall.
+              [llama3.1:8b · 21.4s]
+SYS  ▸ CONSENSUS - 2/2 answered · slowest 21.4s
+SYS  ▸ CONSENSUS - the agents differ; reconciling locally
+VOX  ▸ …
+```
+
+**How the answers become one answer.** If the replies agree once normalised —
+whitespace, case and trailing punctuation ignored — that is the result, and the
+tally is written into the transcript. A vote needs at least two agents and a
+strict majority: two out of five agreeing is a coincidence, not a decision.
+Anything else goes to your local model, which is told to answer and to say
+plainly where the agents agreed and where they did not.
+
+Every reply is kept: in the transcript as `PEER` lines, in the side panel
+(`/panel consensus`), in the saved session and in `/export`. A verdict you
+cannot check is not worth having.
+
+**What stops a round.** VOX refuses, and says which it is:
+
+- consensus is off — `/consensus on`;
+- the mesh is offline — `F3`;
+- the authority is the sample one — `/mesh new-ca`, because on the shipped CA
+  anyone on the segment holding VOX can join and read what you distribute;
+- the marked text is over `max_question_chars`;
+- an unclosed `[CNS]` — nothing is sent at all, rather than guessing where the
+  span ends.
+
+With no peers to ask it says so and answers locally instead of failing.
+
+**Answering other agents.** With `answer_requests` on, this node answers peers
+that passed mTLS, one at a time, capped at `answer_max_tokens`. Each request is
+written into the transcript — who asked, how long the question was, how long
+the answer took. The question is answered in a fresh two-message conversation:
+your conversation, role, workspace and files are not part of it.
+
+```json
+"consensus": {
+  "enabled": true,
+  "verb": "infer",
+  "max_peers": 5,
+  "ask_timeout_seconds": 90.0,
+  "max_question_chars": 4000,
+  "answer_requests": true,
+  "answer_max_tokens": 512,
+  "quorum": 2
+}
+```
+
+`verb` decides who is asked: `infer` means the PROCESSORs. OBSERVERs are never
+asked — an agent that declared itself passive is not given work.
+
+**Honest limits.** This is aggregation, not consensus in the distributed-systems
+sense. mTLS proves who a peer is, not that it is truthful, and there is no
+Byzantine tolerance: a member that lies is believed. Free text rarely produces
+identical answers, so most rounds end with one model judging the others — which
+is why the raw replies are always kept. A round is as slow as its slowest peer,
+bounded by `ask_timeout_seconds`. Every agent asked sees the marked text in
+full.
+
+Measured on one machine with two nodes and `qwen2.5-coder:3b` answering: 14.0s
+from asking to the answer, effectively all of it the model.
 
 ### Coding-agent mode
 

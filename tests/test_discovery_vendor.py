@@ -166,6 +166,79 @@ def test_mtls_handshake(pki: tuple[Path, Path]) -> None:
         server.stop()
 
 
+def test_ask_over_mtls(pki: tuple[Path, Path]) -> None:
+    """The ASK operation on the channel WHOIS already uses."""
+    import threading
+
+    pki, _rogue = pki
+    server_identity = issue("answerer-01", pki)
+    client_identity = issue("asker-01", pki)
+    seen: list[tuple[str, str]] = []
+
+    def handler(caller: str, question: str) -> dict:
+        seen.append((caller, question))
+        time.sleep(0.3)  # a model takes a moment; the 5s handshake cap must not bite
+        return {"answer": f"{question} -> yes", "model": "test:1b"}
+
+    server = whois.WhoisServer(
+        {"agent_id": "answerer-01", "name": "answerer",
+         "capabilities": {"verbs": ["infer"]}},
+        identity=server_identity,
+        ask_handler=handler,
+    )
+    server.start()
+    try:
+        reply = whois.ask("127.0.0.1", server.port, "answerer-01", client_identity,
+                          "is it safe", timeout=10)
+        assert reply["answer"] == "is it safe -> yes"
+        assert reply["model"] == "test:1b"
+        assert seen == [("asker-01", "is it safe")], "the peer sees the question, nothing else"
+
+        # WHOIS still works on the same socket.
+        assert whois.query("127.0.0.1", server.port, "answerer-01",
+                           client_identity)["name"] == "answerer"
+
+        # A question that is too large never reaches the model.
+        with pytest.raises(ValueError, match="bytes"):
+            whois.ask("127.0.0.1", server.port, "answerer-01", client_identity,
+                      "x" * (whois.MAX_ASK_BYTES + 1), timeout=10)
+
+        # One at a time: the second caller is told to go away, not queued.
+        results: list[str] = []
+
+        def fire() -> None:
+            try:
+                whois.ask("127.0.0.1", server.port, "answerer-01",
+                          client_identity, "concurrent", timeout=10)
+                results.append("answered")
+            except ValueError as exc:
+                results.append(str(exc))
+
+        threads = [threading.Thread(target=fire) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert sorted(results) == ["answered", "busy"]
+    finally:
+        server.stop()
+
+
+def test_a_node_that_does_not_answer_says_so(pki: tuple[Path, Path]) -> None:
+    pki, _rogue = pki
+    server = whois.WhoisServer(
+        {"agent_id": "quiet-01", "name": "quiet", "capabilities": {}},
+        identity=issue("quiet-01", pki),
+    )
+    server.start()
+    try:
+        with pytest.raises(ValueError, match="ask not supported"):
+            whois.ask("127.0.0.1", server.port, "quiet-01",
+                      issue("caller-01", pki), "hello", timeout=10)
+    finally:
+        server.stop()
+
+
 def test_integration(pki: tuple[Path, Path]) -> None:
     pki, rogue_dir = pki
     logging.basicConfig(level=logging.INFO, format="        %(message)s")

@@ -76,6 +76,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # and generates one only this machine holds.
         "demo_ca": True,
     },
+    "consensus": {
+        "enabled": True,
+        "verb": "infer",
+        "max_peers": 5,
+        "ask_timeout_seconds": 90.0,
+        "max_question_chars": 4000,
+        "answer_requests": True,
+        "answer_max_tokens": 512,
+        "quorum": 2,
+    },
     "ui": {
         "theme": "nasa",
         "show_timestamps": True,
@@ -260,6 +270,30 @@ def validate_config(data: Any) -> list[str]:
             first = group.split(".")[0]
             if not first.isdigit() or not 224 <= int(first) <= 239:
                 errors.append("mesh.group must be a multicast address (224-239.x.x.x)")
+
+    consensus = data.get("consensus", {})
+    if not isinstance(consensus, dict):
+        errors.append("consensus must be an object")
+    else:
+        for key in ("enabled", "answer_requests"):
+            if not isinstance(consensus.get(key, False), bool):
+                errors.append(f"consensus.{key} must be a boolean")
+        verb = consensus.get("verb", "infer")
+        if not isinstance(verb, str) or not verb.strip():
+            errors.append("consensus.verb must be a non-empty string")
+        for key, default in (
+            ("max_peers", 5),
+            ("max_question_chars", 4000),
+            ("answer_max_tokens", 512),
+            ("quorum", 2),
+        ):
+            value = consensus.get(key, default)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                errors.append(f"consensus.{key} must be a positive whole number")
+        timeout = consensus.get("ask_timeout_seconds", 90.0)
+        if (not isinstance(timeout, (int, float)) or isinstance(timeout, bool)
+                or timeout <= 0):
+            errors.append("consensus.ask_timeout_seconds must be a positive number")
 
     ui = data.get("ui", {})
     if not isinstance(ui, dict):

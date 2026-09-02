@@ -32,6 +32,7 @@ import socket
 import socketserver
 import ssl
 import threading
+import time
 from typing import Callable
 
 from .identity import Identity, IdentityError, client_context, peer_agent_id, server_context
@@ -66,8 +67,18 @@ PASSIVE_CATEGORIES = {"OBSERVER"}
 MAX_DESCRIPTOR_BYTES = 64 * 1024
 HANDSHAKE_TIMEOUT = 5.0
 
+# ASK carries a question for the peer's own model. It is the one operation that
+# makes the mesh do work rather than describe itself, and it rides the channel
+# that is already open and already authenticated.
+MAX_ASK_BYTES = 8 * 1024
+ASK_TIMEOUT = 120.0
+
 # A callable given the client's agent_id, deciding whether to serve it.
 Authorizer = Callable[[str], bool]
+
+# A callable given (caller_agent_id, question); it returns {"answer", "model"}
+# or raises. Answering means running a model, so it is slow and it is capped.
+AskHandler = Callable[[str, str], dict]
 
 
 def classify(capabilities: dict) -> str:
@@ -106,14 +117,57 @@ class _Handler(socketserver.StreamRequestHandler):
             if not line:
                 return
             request = json.loads(line)
-            if request.get("op") != "WHOIS":
-                self._reply({"error": "unsupported op"})
+            op = request.get("op")
+            if op == "WHOIS":
+                log.debug("whois: serving %s", caller)
+                self._reply({"ok": True, "descriptor": self.server.descriptor})
                 return
-            log.debug("whois: serving %s", caller)
-            self._reply({"ok": True, "descriptor": self.server.descriptor})
+            if op == "ASK":
+                self._answer(caller, request)
+                return
+            self._reply({"error": "unsupported op"})
         except (json.JSONDecodeError, ValueError, socket.timeout, OSError):
             # A malformed or slow peer: close without any noise.
             return
+
+    def _answer(self, caller: str, request: dict) -> None:
+        """Run this node's model for a peer, if it is willing and free."""
+        handler = getattr(self.server, "ask_handler", None)
+        if handler is None:
+            self._reply({"error": "ask not supported"})
+            return
+
+        question = str(request.get("question", ""))
+        if not question.strip():
+            self._reply({"error": "empty question"})
+            return
+        if len(question.encode("utf-8")) > MAX_ASK_BYTES:
+            self._reply({"error": f"question over {MAX_ASK_BYTES} bytes"})
+            return
+
+        # One answer at a time. Without this a peer could queue generations on
+        # somebody else's hardware just by opening connections.
+        if not self.server.ask_slot.acquire(blocking=False):
+            self._reply({"error": "busy"})
+            return
+        try:
+            # The 5s handshake timeout is nowhere near enough for a model.
+            self.connection.settimeout(self.server.ask_timeout)
+            started = time.monotonic()
+            result = handler(caller, question)
+            elapsed = time.monotonic() - started
+            log.info("ask: answered %s in %.1fs", caller, elapsed)
+            self._reply({
+                "ok": True,
+                "answer": str(result.get("answer", "")),
+                "model": str(result.get("model", "")),
+                "elapsed": round(elapsed, 2),
+            })
+        except Exception as exc:  # the peer gets a reason, not a dropped socket
+            log.warning("ask: refusing %s: %s", caller, exc)
+            self._reply({"error": str(exc)[:200]})
+        finally:
+            self.server.ask_slot.release()
 
     def _reply(self, payload: dict) -> None:
         try:
@@ -159,6 +213,8 @@ class WhoisServer:
         host: str = "0.0.0.0",
         port: int = 0,
         authorizer: Authorizer | None = None,
+        ask_handler: "AskHandler | None" = None,
+        ask_timeout: float = ASK_TIMEOUT,
     ):
         self._identity = identity
         self._server = _TLSServer((host, port), _Handler)
@@ -169,7 +225,14 @@ class WhoisServer:
         # Replace this with a real policy (by category, by tenant) as soon as
         # the mesh stops being uniformly trusted.
         self._server.authorizer = authorizer or (lambda agent_id: True)
+        self._server.ask_handler = ask_handler
+        self._server.ask_timeout = ask_timeout
+        self._server.ask_slot = threading.Semaphore(1)
         self._thread: threading.Thread | None = None
+
+    def set_ask_handler(self, handler: "AskHandler | None") -> None:
+        """Start or stop answering questions, without restarting the server."""
+        self._server.ask_handler = handler
 
     @property
     def port(self) -> int:
@@ -235,3 +298,45 @@ def query(
     if descriptor.get("agent_id") != expected_agent_id:
         raise ValueError("the agent_id in the descriptor does not match the announcement")
     return descriptor
+
+
+def ask(
+    address: str,
+    port: int,
+    expected_agent_id: str,
+    identity: Identity,
+    question: str,
+    timeout: float = ASK_TIMEOUT,
+) -> dict:
+    """Ask a peer a question, over the same mTLS channel as WHOIS.
+
+    The peer runs its own model with nothing but this question: no context
+    travels in either direction. Returns ``{"answer", "model", "elapsed"}``.
+    """
+    context = client_context(identity)
+    with socket.create_connection((address, port), timeout=timeout) as raw_sock:
+        with context.wrap_socket(raw_sock, server_hostname=expected_agent_id) as sock:
+            sock.settimeout(timeout)
+            sock.sendall(
+                json.dumps({"op": "ASK", "v": 1, "question": question}).encode()
+                + b"\n"
+            )
+
+            chunks, total = [], 0
+            while total < MAX_DESCRIPTOR_BYTES:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if b"\n" in chunk:
+                    break
+
+    payload = json.loads(b"".join(chunks).decode())
+    if not payload.get("ok"):
+        raise ValueError(str(payload.get("error", "refused")))
+    return {
+        "answer": str(payload.get("answer", "")),
+        "model": str(payload.get("model", "")),
+        "elapsed": float(payload.get("elapsed", 0.0)),
+    }

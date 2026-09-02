@@ -43,6 +43,22 @@ The fourth keeps authentication and authorisation apart: `WhoisServer` takes an
 `authorizer(agent_id) -> bool`, and the permissive default should be replaced as
 soon as the mesh stops being uniformly trusted.
 
+## The ASK operation
+
+Discovery describes; ASK is the one operation that makes the mesh work. It
+rides the channel WHOIS already opened — same port, same mTLS, same identity
+and authorizer — so nothing new is exposed:
+
+    -> {"op": "ASK", "v": 1, "question": "..."}
+    <- {"ok": true, "answer": "...", "model": "...", "elapsed": 1.2}
+    <- {"error": "busy" | "ask not supported" | "question over 8192 bytes"}
+
+A server without an `ask_handler` refuses every ASK. The handler runs a model,
+so two things differ from WHOIS: the socket timeout is raised before the
+handler is called (the 5s handshake cap would kill any real answer), and a
+semaphore allows one answer at a time — otherwise a peer could queue
+generations on somebody else's hardware by opening connections.
+
 ## Peer states
 
     PROBATION  seen, not yet interrogated  -> no work is routed to it

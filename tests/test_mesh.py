@@ -564,6 +564,7 @@ class FakeController:
         self.settings = MeshSettings.from_config(default_config())
         self.online = False
         self.demo_ca = demo_ca
+        self.answer_hook = None
         self.agent_id = "vox-test-node"
         self.category = "PROCESSOR"
         self.last_error: str | None = None
@@ -592,6 +593,9 @@ class FakeController:
 
     def sharing_note(self) -> str:
         return "issue the other machine a certificate from ca.crt; its own key stays there"
+
+    def set_answer_hook(self, hook) -> None:
+        self.answer_hook = hook
 
 
 PEERS = [

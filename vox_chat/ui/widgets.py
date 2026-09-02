@@ -21,6 +21,7 @@ _ROLE_LABEL = {
     "tool": "TOOL",
     "error": "ERR",
     "reasoning": "THINK",
+    "peer": "PEER",
 }
 
 

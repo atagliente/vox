@@ -176,6 +176,26 @@ def check_mesh(loaded: LoadedConfig) -> Check:
     return Check("OK", "MESH", " - ".join(parts))
 
 
+def check_consensus(loaded: LoadedConfig) -> Check:
+    """Whether this node would distribute a [CNS] span, and answer others."""
+    from .mesh import MeshSettings, pki_dir, using_demo_ca
+
+    section = loaded.data.get("consensus", {})
+    section = section if isinstance(section, dict) else {}
+    if not section.get("enabled", True):
+        return Check("--", "CONSENSUS", "off - /consensus on")
+
+    verb = str(section.get("verb", "infer"))
+    answers = "answers peers" if section.get("answer_requests", True) else "asks only"
+    detail = f"{verb} - {answers}"
+    if using_demo_ca(pki_dir(MeshSettings.from_config(loaded.data))):
+        return Check(
+            "WARN", "CONSENSUS",
+            f"{detail} - refused on the sample CA; /mesh new-ca first",
+        )
+    return Check("OK", "CONSENSUS", detail)
+
+
 def run_checks(workspace: Path | None = None, timeout: float = 5.0) -> list[Check]:
     """Run every check in order and return the report lines."""
     checks = [
@@ -192,6 +212,7 @@ def run_checks(workspace: Path | None = None, timeout: float = 5.0) -> list[Chec
     checks.append(link)
     checks.append(check_model(loaded, models))
     checks.append(check_mesh(loaded))
+    checks.append(check_consensus(loaded))
     return checks
 
 

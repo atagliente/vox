@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import inspect
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,7 @@ from .config import (
 )
 from .llm_client import LLMClient, LLMError
 from .logging_setup import get_logger, setup_logging
+from . import consensus as cns
 from .mesh import MeshController, MeshError, MeshSettings
 from .models import Message, Session
 from .prompts import PromptStore, find_variables, render
@@ -147,6 +149,10 @@ class VoxApp(App[None]):
         self.code_blocks: list[code_blocks.CodeBlock] = []
         self.mesh = MeshController(MeshSettings.from_config(self.config))
         self._universe_screen: UniverseScreen | None = None
+        # Set while a consensus turn is being generated, cleared afterwards.
+        self._consensus_prompt: str = ""
+        self._consensus_answers: list[cns.PeerAnswer] = []
+        self._consensus_running = False
         self.inspection = self._new_inspection()
         self._inspect_screen: InspectScreen | None = None
         self._panel_mode = "code"
@@ -501,12 +507,28 @@ class VoxApp(App[None]):
             return
         if text.startswith("//"):
             text = text[1:]
+        marked = cns.extract(text)
+        if marked.unclosed:
+            # A stray tag must never quietly ship the rest of the message.
+            self.write_error(
+                f"UNCLOSED {cns.OPEN} - nothing was distributed; close it with "
+                f"{cns.CLOSE}"
+            )
+            return
+        refusal = self.consensus_refusal() if marked.wanted else None
+        if refusal is not None:
+            self.write_error(refusal)
+            return
+
         self.input_area.clear()
         self.history.add(text)
-        message = Message(role="user", content=text)
+        message = Message(role="user", content=marked.text if marked.wanted else text)
         self.session.messages.append(message)
         self.write_message(message)
         self.dirty = True
+        if marked.wanted:
+            self.start_consensus(marked.question)
+            return
         self.start_generation()
 
     # ------------------------------------------------------------ generation
@@ -517,7 +539,14 @@ class VoxApp(App[None]):
         messages: list[Message] = []
         if role is not None and role.system_prompt:
             messages.append(Message(role="system", content=role.system_prompt))
-        messages.extend(m for m in self.session.messages if m.role != "error")
+        # "peer" and "error" are ours, not roles any provider accepts. The peer
+        # answers are folded into one system message just before the question
+        # they belong to, by start_consensus.
+        messages.extend(
+            m for m in self.session.messages if m.role not in ("error", "peer")
+        )
+        if self._consensus_prompt:
+            messages.append(Message(role="system", content=self._consensus_prompt))
         return messages
 
     def start_generation(self) -> None:
@@ -807,6 +836,7 @@ class VoxApp(App[None]):
         )
 
     def finish_generation(self, error: str | None) -> None:
+        self._consensus_prompt = ""
         self.note_logprob_refusal()
         self.generating = False
         self._assistant_box = None
@@ -1094,7 +1124,13 @@ class VoxApp(App[None]):
 
     def refresh_panel(self) -> None:
         panel = self.query_one("#side-panel")
-        panel.set_class(self._panel_mode == "code", "code")
+        panel.set_class(self._panel_mode in ("code", "consensus"), "code")
+        if self._panel_mode == "consensus":
+            self.query_one("#side-title", Static).update("VOX · CONSENSUS")
+            self.query_one("#side-content", Static).update(
+                cns.render_panel(self._consensus_answers)
+            )
+            return
         if self._panel_mode == "code":
             self.query_one("#side-title", Static).update("VOX · CODE")
             self.query_one("#side-content", Static).update(
@@ -1436,6 +1472,196 @@ class VoxApp(App[None]):
             return
         self.export_report(tuple(wanted))
 
+    # ------------------------------------------------------------- consensus
+
+    def consensus_settings(self) -> dict:
+        section = self.config.get("consensus", {})
+        return dict(section) if isinstance(section, dict) else {}
+
+    def consensus_refusal(self) -> str | None:
+        """Why this machine must not distribute the marked text, if it must not."""
+        settings = self.consensus_settings()
+        if not settings.get("enabled", True):
+            return "CONSENSUS IS OFF - /consensus on"
+        if not self.mesh.online:
+            return "CONSENSUS NEEDS THE MESH - F3, OR /mesh on"
+        if self.mesh.demo_ca:
+            # On the shipped authority any VOX on the segment can join, so
+            # distributing text means handing it to strangers.
+            return (
+                "REFUSING TO DISTRIBUTE ON THE SAMPLE CERTIFICATE - anyone on "
+                "this network holding VOX could read it. /mesh new-ca first"
+            )
+        return None
+
+    def start_consensus(self, question: str) -> None:
+        settings = self.consensus_settings()
+        limit = int(settings.get("max_question_chars", 4000))
+        if len(question) > limit:
+            self.write_error(
+                f"THE MARKED TEXT IS {len(question)} CHARACTERS, OVER THE "
+                f"{limit} ALLOWED"
+            )
+            return
+        peers = self.mesh.processors(
+            str(settings.get("verb", "infer")), int(settings.get("max_peers", 5))
+        )
+        if not peers:
+            self.write_system(
+                "NO AGENT TO ASK - answering locally. F4 shows who is out there"
+            )
+            self.start_generation()
+            return
+
+        named = ", ".join(peer.name or peer.agent_id for peer in peers)
+        self.write_system(
+            f"CONSENSUS - sending {len(question)} characters to {len(peers)} "
+            f"agents: {named}"
+        )
+        self._consensus_answers = []
+        self._consensus_running = True
+        self.show_thinking(f"ASKING {len(peers)} AGENTS")
+        self.refresh_status()
+        self.ask_the_mesh(question, settings)
+
+    @work(thread=True, group="consensus", exclusive=True)
+    def ask_the_mesh(self, question: str, settings: dict) -> None:
+        """Every peer at once; the round is as slow as the slowest of them."""
+        answers = self.mesh.ask_peers(
+            question,
+            verb=str(settings.get("verb", "infer")),
+            limit=int(settings.get("max_peers", 5)),
+            timeout=float(settings.get("ask_timeout_seconds", 90.0)),
+        )
+        self.call_from_thread(self.consensus_answered, question, answers, settings)
+
+    def consensus_answered(self, question: str, answers: list, settings: dict) -> None:
+        self._consensus_running = False
+        self._consensus_answers = answers
+        self.clear_thinking()
+        for answer in answers:
+            label = answer.name or answer.agent_id
+            if answer.ok:
+                body = f"{answer.answer.strip()}\n\n[{answer.model or 'model unknown'} · {answer.elapsed:.1f}s]"
+            else:
+                body = f"no answer: {answer.error or 'silent'}"
+            message = Message(role="peer", content=body, name=label)
+            self.session.messages.append(message)
+            self.write_message(message)
+        self.write_system(f"CONSENSUS - {cns.describe(answers)}")
+        if self.config.get("ui", {}).get("code_panel", True):
+            self._panel_mode = "consensus"
+            self.query_one("#side-panel").set_class(True, "visible")
+            self.refresh_panel()
+
+        kind, winner, clusters = cns.verdict(
+            answers, quorum=int(settings.get("quorum", cns.DEFAULT_QUORUM))
+        )
+        if kind == "vote":
+            agreed = len(clusters[0][1])
+            usable = sum(len(members) for _, members in clusters)
+            self.write_system(
+                f"CONSENSUS - {agreed} of {usable} agents gave the same answer"
+            )
+            reply = Message(role="assistant", content=winner or "")
+            self.session.messages.append(reply)
+            self.write_message(reply)
+            self.dirty = True
+            self.refresh_status()
+            return
+
+        if not any(answer.ok for answer in answers):
+            self.write_error("NO AGENT ANSWERED - answering locally")
+        else:
+            self.write_system("CONSENSUS - the agents differ; reconciling locally")
+        self._consensus_prompt = cns.synthesis_prompt(question, answers)
+        self.start_generation()
+
+    # ------------------------------------------------------- answering others
+
+    def install_answer_hook(self) -> None:
+        """Let peers ask this node questions, if the operator allows it."""
+        settings = self.consensus_settings()
+        allowed = settings.get("enabled", True) and settings.get(
+            "answer_requests", True
+        )
+        self.mesh.set_answer_hook(self.answer_for_peer if allowed else None)
+
+    def answer_for_peer(self, caller: str, question: str) -> dict:
+        """Run the local model for another agent. Called on a mesh thread.
+
+        Nothing from this machine's conversation, role or workspace goes into
+        it: a peer's answer must not leak the answerer's context either.
+        """
+        settings = self.consensus_settings()
+        if not settings.get("enabled", True) or not settings.get("answer_requests", True):
+            raise RuntimeError("this node does not answer questions")
+        if self.mesh.demo_ca:
+            raise RuntimeError("this node is on the sample certificate")
+        limit = int(settings.get("max_question_chars", 4000))
+        if len(question) > limit:
+            raise RuntimeError(f"question over {limit} characters")
+        if self.client is None:
+            raise RuntimeError("no provider configured")
+
+        model = str(self.config.get("active_model", ""))
+        self.call_from_thread(
+            self.write_system,
+            f"ASKED BY {caller} - {len(question)} characters, answering with {model}",
+        )
+        started = time.monotonic()
+        pieces: list[str] = []
+        for event in self.client.stream_chat(
+            messages=[
+                Message(role="system", content=cns.ANSWER_SYSTEM_PROMPT),
+                Message(role="user", content=question),
+            ],
+            model=model,
+            temperature=float(
+                self.config.get("generation", {}).get("temperature", 0.2)
+            ),
+            max_tokens=int(settings.get("answer_max_tokens", 512)),
+        ):
+            if event.type == "text":
+                pieces.append(event.text)
+        answer = "".join(pieces).strip()
+        elapsed = time.monotonic() - started
+        self.call_from_thread(
+            self.write_system,
+            f"ANSWERED {caller} - {len(answer)} characters in {elapsed:.1f}s",
+        )
+        return {"answer": answer, "model": model}
+
+    def cmd_consensus(self, argument: str) -> None:
+        value = argument.strip().lower()
+        settings = self.consensus_settings()
+        if value in ("on", "off"):
+            self.config.setdefault("consensus", {})["enabled"] = value == "on"
+            self.persist_config()
+            self.install_answer_hook()
+            self.write_system(f"CONSENSUS {value.upper()}")
+            return
+        if value:
+            self.write_error("USAGE: /consensus [on|off]")
+            return
+
+        state = "ON" if settings.get("enabled", True) else "OFF"
+        refusal = self.consensus_refusal()
+        peers = self.mesh.processors(
+            str(settings.get("verb", "infer")), int(settings.get("max_peers", 5))
+        )
+        lines = [
+            f"CONSENSUS IS {state} - mark text with {cns.OPEN} … {cns.CLOSE}",
+            f"answers other agents: "
+            f"{'yes' if settings.get('answer_requests', True) else 'no'}",
+        ]
+        if refusal:
+            lines.append(refusal)
+        else:
+            named = ", ".join(peer.name or peer.agent_id for peer in peers) or "nobody"
+            lines.append(f"would ask: {named}")
+        self.write_system("\n".join(lines))
+
     # ------------------------------------------------------------------ mesh
 
     def action_toggle_mesh(self) -> None:
@@ -1471,6 +1697,7 @@ class VoxApp(App[None]):
         self.config.setdefault("mesh", {})["enabled"] = True
         self.persist_config()
         self.set_mesh_border(True)
+        self.install_answer_hook()
         # Going online is an announcement on the local network, so it says so.
         self.write_system(f"MESH ONLINE - {detail}")
         self.write_system(self.mesh.sharing_note())
@@ -1570,8 +1797,8 @@ class VoxApp(App[None]):
 
     def cmd_panel(self, argument: str) -> None:
         mode = argument.strip().lower() or ("index" if self._panel_mode == "code" else "code")
-        if mode not in ("code", "index"):
-            self.write_error("USAGE: /panel code|index")
+        if mode not in ("code", "index", "consensus"):
+            self.write_error("USAGE: /panel code|index|consensus")
             return
         self._panel_mode = mode
         self.query_one("#side-panel").set_class(True, "visible")

@@ -8,7 +8,10 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 MessageRole = Literal[
-    "system", "user", "assistant", "tool", "error", "reasoning"
+    # "peer" is another agent's answer, kept in the transcript and the report.
+    # It is never sent to a provider as-is: build_request_messages folds the
+    # peer answers into one system message.
+    "system", "user", "assistant", "tool", "error", "reasoning", "peer"
 ]
 
 

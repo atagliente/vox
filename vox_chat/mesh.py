@@ -22,6 +22,7 @@ import re
 import secrets
 import socket
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -357,6 +358,9 @@ class MeshController:
     def __init__(self, settings: MeshSettings) -> None:
         self.settings = settings
         self.agent = None
+        # Set by the app when consensus is available; passed to the discovery
+        # server so peers can ask this node questions.
+        self.answer_hook = None
         self.last_error: str | None = None
         self.identity = None
         self._lock = threading.Lock()
@@ -416,6 +420,8 @@ class MeshController:
                 port=settings.port,
                 announce_interval=settings.announce_interval,
             )
+            if self.answer_hook is not None:
+                agent._whois.set_ask_handler(self.answer_hook)
             try:
                 agent.start()
             except OSError as exc:
@@ -443,13 +449,69 @@ class MeshController:
 
     # ----------------------------------------------------------------- peers
 
+    def processors(self, verb: str = "infer", limit: int = 5) -> list[Any]:
+        """Active peers that declare ``verb`` — who a question can go to.
+
+        OBSERVERs are already excluded by ``peers_for``: an agent that declared
+        itself passive is not asked to work.
+        """
+        agent = self.agent
+        if agent is None:
+            return []
+        return list(agent.peers_for(verb))[:limit]
+
+    def ask_peers(self, question: str, verb: str = "infer", limit: int = 5,
+                  timeout: float = 90.0) -> list["PeerAnswer"]:
+        """Ask every matching peer the same question, in parallel.
+
+        A peer that fails or times out comes back with ``error`` set rather
+        than vanishing: a silent agent and an agent that refused are different
+        things, and the operator should see which happened.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+        from .consensus import PeerAnswer
+        from .discovery import whois
+
+        agent = self.agent
+        targets = self.processors(verb, limit)
+        if agent is None or not targets:
+            return []
+
+        def one(peer) -> PeerAnswer:
+            label = peer.name or peer.agent_id
+            started = time.monotonic()
+            try:
+                reply = whois.ask(
+                    peer.address, peer.whois_port, peer.agent_id,
+                    agent.identity, question, timeout=timeout,
+                )
+            except Exception as exc:  # noqa: BLE001 - every failure is a result
+                return PeerAnswer(
+                    agent_id=peer.agent_id, name=label,
+                    error=str(exc)[:200] or exc.__class__.__name__,
+                    elapsed=time.monotonic() - started,
+                )
+            return PeerAnswer(
+                agent_id=peer.agent_id, name=label,
+                model=reply.get("model", ""), answer=reply.get("answer", ""),
+                elapsed=reply.get("elapsed") or (time.monotonic() - started),
+            )
+
+        with ThreadPoolExecutor(max_workers=max(1, len(targets))) as pool:
+            return list(pool.map(one, targets))
+
+    def set_answer_hook(self, hook) -> None:
+        """Install (or remove) what answers other agents' questions."""
+        self.answer_hook = hook
+        agent = self.agent
+        if agent is not None:
+            agent._whois.set_ask_handler(hook)
+
     def peers(self) -> list[PeerView]:
         """Everyone the registry has seen, newest sighting first."""
         agent = self.agent
         if agent is None:
             return []
-        import time
-
         now = time.time()
         views = []
         for peer in agent.registry.snapshot():

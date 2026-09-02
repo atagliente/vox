@@ -110,6 +110,7 @@ The bottom row shows this legend at all times.
 | `/export [html\|json\|md\|toon]` | save the session and its figures (`Ctrl+E`) |
 | `/warm` | preload the model on the server |
 | `/mesh [on\|off\|new-ca\|sample-ca]`, `/universe` | the agent mesh |
+| `/consensus [on\|off]` | ask the other agents, marked with `[CNS] … [/CNS]` |
 | `/agent on\|off`, `/workspace <path>` | coding-agent mode |
 | `/config`, `/settings`, `/connect`, `/stop` | configuration and connection |
 
@@ -188,7 +189,7 @@ universe. `F3` again goes offline. `/mesh on|off` and `/universe` do the same.
 
 ![The universe screen](docs/universe.svg)
 
-![How VOX agents find each other: announce over signed multicast, verify the certificate, WHOIS over mTLS, classify by declared verbs, then heartbeat](docs/mesh.svg)
+![How VOX agents find each other and work together: announce over signed multicast, verify the certificate, WHOIS over mTLS, classify by declared verbs, heartbeat, and CONSENSUS](docs/mesh.svg)
 
 `caps_digest` is how a peer says its capabilities changed: a different digest
 sends it back to PROBATION and a fresh WHOIS follows. `incarnation` is the
@@ -232,6 +233,37 @@ hand out only a leaf certificate plus `ca.crt`.
 
 There is no shared secret either way. Every agent signs with its own private key,
 which never leaves its machine.
+
+## CONSENSUS
+
+Mark part of a message and it goes to the other agents on the mesh:
+
+```text
+Here is the stack trace from our staging box, with customer ids in it.
+[CNS]Is a lock-free ring buffer safe when a reader can stall indefinitely?[/CNS]
+```
+
+Only the marked span leaves the machine. Everything around it stays local, and
+that boundary is held by a test, not by good intentions.
+
+Each agent answers with its own model, knowing nothing but the question. What
+comes back is reconciled: if the answers agree once normalised, that is the
+result and the tally is reported; otherwise your local model writes the final
+answer and names where the agents differed. Either way every reply stays on
+screen, in the transcript and in the side panel (`/panel consensus`), and in
+the exported report.
+
+`/consensus` shows who would be asked. `/consensus off` stops both asking and
+answering.
+
+Measured on one machine, two nodes, `qwen2.5-coder:3b` answering: discovery to
+first answer in 14.0s, of which 14.0s was the model.
+
+**It is aggregation, not agreement.** mTLS proves who a peer is, not that it is
+truthful; there is no Byzantine tolerance, and a member that lies is believed.
+A round is as slow as its slowest peer. Every agent asked sees the marked text
+in full — which is why VOX refuses to distribute at all while on the sample
+certificate, where anyone on the segment could be listening.
 
 ## Development
 
