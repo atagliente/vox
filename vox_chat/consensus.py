@@ -216,13 +216,17 @@ class RoundLog:
         self.fragments: list[Fragment] = []
         self.question: str = ""
         self.conversation_id: str = ""
+        # Set when this round is somebody else's: the agent that asked us.
+        self.asked_by: str = ""
         self.started: float = 0.0
         self._limit = limit
 
-    def begin(self, question: str, started: float, conversation_id: str = "") -> None:
+    def begin(self, question: str, started: float, conversation_id: str = "",
+              asked_by: str = "") -> None:
         self.fragments = []
         self.question = question
         self.conversation_id = conversation_id
+        self.asked_by = asked_by
         self.started = started
 
     def add(self, agent: str, kind: str, text: str, ts: float) -> None:

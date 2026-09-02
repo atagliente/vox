@@ -65,7 +65,9 @@ class RoundScreen(Screen[None]):
 
     def refresh_view(self) -> None:
         agents = self.round_log.agents()
-        title = Text("THE ROUND", style="bold")
+        title = Text(
+            "ANSWERING" if self.round_log.asked_by else "THE ROUND", style="bold"
+        )
         if agents:
             title.append("  ·  ")
             for index, agent in enumerate(agents):
@@ -77,7 +79,10 @@ class RoundScreen(Screen[None]):
         self.query_one("#round-title", Static).update(title)
 
         question = self.round_log.question or "no question yet"
-        line = Text(f"asked: {question}", style="dim")
+        if self.round_log.asked_by:
+            line = Text(f"asked by {self.round_log.asked_by}: {question}", style="dim")
+        else:
+            line = Text(f"asked: {question}", style="dim")
         if self.round_log.conversation_id:
             line.append(
                 f"\nconversation {self.round_log.conversation_id}", style="dim"

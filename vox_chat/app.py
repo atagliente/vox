@@ -1645,6 +1645,7 @@ class VoxApp(App[None]):
             f"ASKED BY {caller} - {len(question)} characters, answering with "
             f"{model}" + (f" · conversation {conversation}" if conversation else ""),
         )
+        self.call_from_thread(self.answering_started, caller, question, conversation)
         started = time.monotonic()
         pieces: list[str] = []
         for event in self.client.stream_chat(
@@ -1662,16 +1663,47 @@ class VoxApp(App[None]):
                 pieces.append(event.text)
                 if emit is not None:
                     emit("text", event.text)
-            elif event.type == "reasoning" and emit is not None:
-                # The asker sees the thinking too, marked as thinking.
-                emit("reasoning", event.text)
+                self.call_from_thread(self.answering_event, "text", event.text)
+            elif event.type == "reasoning":
+                # The asker sees the thinking too, marked as thinking — and so
+                # does whoever is sitting at this machine.
+                if emit is not None:
+                    emit("reasoning", event.text)
+                self.call_from_thread(self.answering_event, "reasoning", event.text)
         answer = "".join(pieces).strip()
         elapsed = time.monotonic() - started
-        self.call_from_thread(
-            self.write_system,
-            f"ANSWERED {caller} - {len(answer)} characters in {elapsed:.1f}s",
-        )
+        self.call_from_thread(self.answering_finished, caller, answer, elapsed)
         return {"answer": answer, "model": model}
+
+    # A peer's question is a round too, seen from the other side. It fills the
+    # same F5 view, so both machines can watch the same exchange.
+
+    def answering_started(self, caller: str, question: str, conversation: str) -> None:
+        if self._consensus_running:
+            # We are mid-round ourselves; that log is the one on screen and
+            # overwriting it would lose what we are waiting for.
+            return
+        self.consensus_log.begin(question, time.time(), conversation, asked_by=caller)
+        if self._round_screen is not None:
+            self._round_screen.refresh_view()
+
+    def answering_event(self, kind: str, text: str) -> None:
+        if self._consensus_running:
+            return
+        self.consensus_log.add(self.mesh.agent_id, kind, text, time.time())
+        if self._round_screen is not None:
+            self._round_screen.refresh_view()
+
+    def answering_finished(self, caller: str, answer: str, elapsed: float) -> None:
+        self.write_system(
+            f"ANSWERED {caller} - {len(answer)} characters in {elapsed:.1f}s"
+        )
+        # What we told them, kept out of the session: it is their conversation,
+        # not ours, and it must never reach our own model as context.
+        if answer:
+            self.write_message(
+                Message(role="peer", content=answer.strip(), name=f"to {caller}")
+            )
 
     def cmd_consensus(self, argument: str) -> None:
         value = argument.strip().lower()

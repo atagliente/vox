@@ -749,7 +749,24 @@ asking and for answering alike.
 **Answering other agents.** With `answer_requests` on, this node answers peers
 that passed mTLS, one at a time, capped at `answer_max_tokens`. Each request is
 written into the transcript — who asked, which conversation it belongs to, how
-long the question was, how long the answer took. The question is answered in a fresh two-message conversation:
+long the question was, how long the answer took — followed by the answer given.
+
+`F5` works on this side too, and shows the same exchange from the other end:
+
+```text
+ANSWERING · vox-b6ffa342e0d3
+asked by vox-1a2b3c4d5e6f: Is a lock-free ring buffer safe when a reader stalls?
+conversation 7f3c1a9b2e04
+
+14:32:07 vox-b6ffa342e0d3: · weighing the reclamation problem
+14:32:09 vox-b6ffa342e0d3: No: a stalled reader blocks reclamation.
+```
+
+The conversation id is the asker's, so both machines' records of the round can
+be lined up afterwards. What was answered is shown but never stored in this
+machine's session: it is their conversation, and it must not become context for
+your own model. A round you started yourself takes precedence — an incoming
+question will not overwrite the view of one you are waiting on. The question is answered in a fresh two-message conversation:
 your conversation, role, workspace and files are not part of it.
 
 ```json

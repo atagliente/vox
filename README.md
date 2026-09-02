@@ -264,7 +264,9 @@ rather than silent:
 ```
 
 Timestamps are when each fragment arrived, one colour per agent, italics for
-thinking and upright for the answer. It is a separate view from the transcript
+thinking and upright for the answer. The machine being asked sees the same
+round from its end — `ANSWERING`, who asked, the conversation id, and its own
+reasoning as it writes. It is a separate view from the transcript
 because the transcript shows each answer as one block, which loses who was
 writing at the same time as whom.
 

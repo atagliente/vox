@@ -40,6 +40,14 @@ machine and version named, not estimated.
   time as whom. The caller caps how much a peer may stream. Measured on one
   machine with `qwen2.5-coder:3b` answering: the first fragment 4.1s in, then
   roughly ten tokens a second until the answer completed.
+- **Both ends of a round can watch it.** The machine being asked filled no
+  view of its own: it wrote two summary lines and kept its reasoning to
+  itself. `F5` there now shows `ANSWERING`, who asked, the conversation id and
+  its own fragments as they are produced, and the transcript gains the answer
+  it gave. That answer is shown but never stored in the local session — it
+  belongs to the asker's conversation and must not become context for the
+  local model, which is a test. A round you started yourself is not
+  overwritten by an incoming question.
 - **One conversation id ties the round together.** The session already had an
   id; it now travels with the question, so the asking machine's round view, the
   answering machine's log line and the exported report all name the same

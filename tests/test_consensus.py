@@ -581,3 +581,94 @@ async def test_answering_names_the_conversation_it_belongs_to(app: VoxApp) -> No
         await pilot.pause()
         assert "ASKED BY peer-01" in transcript(app)
         assert "conversation abc123" in transcript(app)
+
+
+# ------------------------------------------------- the round, seen from the far side
+
+
+class Streaming:
+    """A client whose stream_chat produces a couple of fragments."""
+
+    def __init__(self, events=(("reasoning", "weighing it"), ("text", "Yes."))) -> None:
+        self._events = events
+
+    def stream_chat(self, **kwargs):
+        from vox_chat.llm_client import StreamEvent
+
+        for kind, text in self._events:
+            yield StreamEvent(type=kind, text=text)
+
+    def close(self):
+        pass
+
+
+async def test_the_answering_machine_sees_the_round_too(app: VoxApp) -> None:
+    """The other side of the exchange is a round as well, and shows as one."""
+    import asyncio
+
+    from vox_chat.ui.round_screen import RoundScreen
+
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        app.client = Streaming()
+        app.run_command("/round")
+        await pilot.pause()
+        assert isinstance(app.screen, RoundScreen)
+
+        await asyncio.to_thread(
+            app.answer_for_peer, "asker-01", "is it safe?", None, "conv-42"
+        )
+        await pilot.pause()
+
+        # The question, who asked it, and which conversation it belongs to.
+        header = text_of(app.screen, "#round-question")
+        assert "asked by asker-01" in header
+        assert "is it safe?" in header
+        assert "conv-42" in header
+        assert "ANSWERING" in text_of(app.screen, "#round-title")
+
+        # And the reasoning, not only the answer.
+        body = text_of(app.screen, "#round-lines")
+        assert "weighing it" in body
+        assert "Yes." in body
+
+
+async def test_the_answering_machine_shows_what_it_replied(app: VoxApp) -> None:
+    import asyncio
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.client = Streaming()
+        await asyncio.to_thread(
+            app.answer_for_peer, "asker-01", "is it safe?", None, "conv-42"
+        )
+        await pilot.pause()
+
+        text = transcript(app)
+        assert "ASKED BY asker-01" in text
+        assert "conversation conv-42" in text
+        assert "ANSWERED asker-01" in text
+        assert "Yes." in text
+
+        # Their conversation, not ours: it never enters our session or the
+        # context our own model is given.
+        assert all(m.role != "peer" for m in app.session.messages)
+        assert "Yes." not in "".join(
+            m.content for m in app.build_request_messages()
+        )
+
+
+async def test_answering_does_not_overwrite_our_own_round(app: VoxApp) -> None:
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.client = Streaming()
+        app.consensus_log.begin("our own question", 1_000_000.0, "ours")
+        app._consensus_running = True
+
+        app.answering_started("asker-01", "their question", "theirs")
+        app.answering_event("text", "their answer")
+        await pilot.pause()
+
+        assert app.consensus_log.question == "our own question"
+        assert app.consensus_log.asked_by == ""
+        assert all(f.text != "their answer" for f in app.consensus_log.fragments)
