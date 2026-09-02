@@ -49,6 +49,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": False,
         "confirm_writes": True,
         "confirm_commands": True,
+        "confirm_web": True,
         "command_timeout_seconds": 60,
         "max_tool_cycles": 8,
         "max_output_bytes": 8192,
@@ -89,6 +90,18 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # anyone on the segment running VOX. Allowed, and said out loud every
         # time; set this to false to refuse instead.
         "allow_sample_ca": True,
+    },
+    "web": {
+        "enabled": False,
+        "provider": "searxng",
+        "endpoint": "http://localhost:8888",
+        "api_key": "",
+        "max_results": 5,
+        "timeout_seconds": 15.0,
+        "fetch_max_bytes": 409600,
+        "allow_fetch": True,
+        "allow_private_addresses": False,
+        "language": "",
     },
     "ui": {
         "theme": "nasa",
@@ -217,7 +230,7 @@ def validate_config(data: Any) -> list[str]:
     if not isinstance(agent, dict):
         errors.append("agent must be an object")
     else:
-        for key in ("enabled", "confirm_writes", "confirm_commands"):
+        for key in ("enabled", "confirm_writes", "confirm_commands", "confirm_web"):
             if not isinstance(agent.get(key, False), bool):
                 errors.append(f"agent.{key} must be a boolean")
         for key in ("command_timeout_seconds", "max_tool_cycles", "max_output_bytes"):
@@ -274,6 +287,28 @@ def validate_config(data: Any) -> list[str]:
             first = group.split(".")[0]
             if not first.isdigit() or not 224 <= int(first) <= 239:
                 errors.append("mesh.group must be a multicast address (224-239.x.x.x)")
+
+    web = data.get("web", {})
+    if not isinstance(web, dict):
+        errors.append("web must be an object")
+    else:
+        for key in ("enabled", "allow_fetch", "allow_private_addresses"):
+            if not isinstance(web.get(key, False), bool):
+                errors.append(f"web.{key} must be a boolean")
+        provider = web.get("provider", "searxng")
+        if provider not in ("searxng", "brave"):
+            errors.append("web.provider must be searxng or brave")
+        for key in ("endpoint", "api_key", "language"):
+            if not isinstance(web.get(key, ""), str):
+                errors.append(f"web.{key} must be a string")
+        for key, default in (("max_results", 5), ("fetch_max_bytes", 409600)):
+            value = web.get(key, default)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                errors.append(f"web.{key} must be a positive whole number")
+        timeout = web.get("timeout_seconds", 15.0)
+        if (not isinstance(timeout, (int, float)) or isinstance(timeout, bool)
+                or timeout <= 0):
+            errors.append("web.timeout_seconds must be a positive number")
 
     consensus = data.get("consensus", {})
     if not isinstance(consensus, dict):

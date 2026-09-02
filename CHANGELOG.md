@@ -12,6 +12,37 @@ machine and version named, not estimated.
 
 ## Unreleased
 
+### Searching the internet
+
+**2026-09-02**
+
+- **`/web on`, then `/search <query>` and `/fetch <url>`.** Results go into the
+  conversation for the model to use; a page is read only when asked for.
+  In agent mode the model gets `web_search` and `fetch_url` as tools, offered
+  only while the feature is on, and confirmed under `agent.confirm_web` like
+  writes and commands — a search's confirmation shows the query, because that
+  query is what leaves the machine.
+- **Two honest backends.** `searxng` is an instance you run: no key, no
+  account, and the query reaches only your own machines. `brave` is one free
+  key and nothing to host, with the key sent as a header and never in a URL.
+  A SearXNG that answers HTML instead of JSON is told what to fix in its
+  `settings.yml` rather than failing obscurely.
+- **No new dependency.** A search is a GET and a page is `html.parser` output
+  with the script, style and navigation dropped; both are standard library.
+- **What comes back is data, not instructions.** Results and pages reach the
+  model behind a line saying so, because a page telling you to ignore your
+  previous instructions is a page, not an operator.
+- **Private addresses are refused**, checked after the host resolves rather
+  than on the URL text, so a public name pointing at loopback is caught with
+  `localhost`. Without it, "read this URL" is a way to reach a router's admin
+  page, an Ollama server or a cloud metadata endpoint from inside the network
+  that trusts it. `web.allow_private_addresses` lifts it deliberately, and the
+  configured search endpoint is exempt since it is normally on localhost.
+- Only http and https, only text content types, at most `fetch_max_bytes` per
+  page, and a page cut short says it was cut rather than looking complete.
+  Verified against real pages: example.com read and extracted, a PNG refused by
+  its content type, and the size cap reported instead of returning a fragment.
+
 ### CONSENSUS
 
 **2026-09-02**

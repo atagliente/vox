@@ -439,6 +439,31 @@ agent's life. Start and stop happen in a worker thread, because socket setup
 and certificate generation block; a failure is reported to the transcript and
 leaves the chat untouched.
 
+## Searching the internet
+
+Off by default, and the only outbound call VOX makes to a service that is not
+the operator's. `vox_chat/web.py` holds it, using nothing but the standard
+library: a search is a GET, a page is text extracted with `html.parser`.
+
+Two backends, chosen by `web.provider`: `searxng` (an instance the operator
+runs, no key) and `brave` (one API key, sent as a header and never in a URL).
+`/web on|off`, `/search <query>` and `/fetch <url>` are the commands; in agent
+mode the model is additionally offered `web_search` and `fetch_url`, but only
+while the feature is enabled, and both are confirmed under `agent.confirm_web`
+like writes and commands.
+
+Two rules hold regardless of backend:
+
+- **Fetched text is data.** Results and pages reach the model prefixed with a
+  statement that they are information and not instructions.
+- **Private, loopback, link-local and reserved addresses are refused**, checked
+  after DNS resolution rather than on the URL text, so a public name pointing at
+  loopback is caught too. `web.allow_private_addresses` lifts it; the configured
+  search endpoint is exempt because it is normally localhost.
+
+Only `http` and `https` are fetched, only text content types, and at most
+`web.fetch_max_bytes`; a truncated page says so.
+
 ## CONSENSUS
 
 `[CNS] … [/CNS]` marks the part of a message that may leave the machine. The

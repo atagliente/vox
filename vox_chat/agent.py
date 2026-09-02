@@ -18,6 +18,8 @@ from .models import Message, ToolCall, utc_now
 from .tools import (
     COMMAND_TOOLS,
     TOOL_SCHEMAS,
+    WEB_SCHEMAS,
+    WEB_TOOLS,
     ToolError,
     ToolResult,
     Workspace,
@@ -68,6 +70,8 @@ def needs_confirmation(name: str, agent_config: dict[str, Any]) -> bool:
         return bool(agent_config.get("confirm_writes", True))
     if name in COMMAND_TOOLS:
         return bool(agent_config.get("confirm_commands", True))
+    if name in WEB_TOOLS:
+        return bool(agent_config.get("confirm_web", True))
     return False
 
 
@@ -84,6 +88,7 @@ def run_turn(
     agent_enabled: bool = False,
     include_usage: bool = True,
     top_logprobs: int | None = None,
+    web_settings=None,
 ) -> Iterator[AgentEvent]:
     """Drive one user turn, including any tool cycles it triggers.
 
@@ -94,6 +99,10 @@ def run_turn(
     history = list(messages)
     produced: list[Message] = []
     use_tools = bool(agent_enabled and workspace is not None)
+    schemas = list(TOOL_SCHEMAS)
+    if web_settings is not None and getattr(web_settings, "enabled", False):
+        # The model is only told the internet exists when it is switched on.
+        schemas += WEB_SCHEMAS
     max_cycles = int(agent_config.get("max_tool_cycles", 8))
     max_output = int(agent_config.get("max_output_bytes", 8192))
     command_timeout = int(agent_config.get("command_timeout_seconds", 60))
@@ -147,7 +156,7 @@ def run_turn(
                 model=model,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                tools=TOOL_SCHEMAS if use_tools else None,
+                tools=schemas if use_tools else None,
                 cancel=cancel,
                 include_usage=include_usage,
                 top_logprobs=top_logprobs,
@@ -209,7 +218,8 @@ def run_turn(
                 yield AgentEvent("cancelled", messages=produced)
                 return
             result_message = _run_tool(
-                call, workspace, agent_config, confirm, command_timeout, max_output
+                call, workspace, agent_config, confirm, command_timeout,
+                max_output, web_settings,
             )
             history.append(result_message)
             produced.append(result_message)
@@ -249,9 +259,10 @@ def _run_tool(
     confirm: ConfirmCallback,
     command_timeout: int,
     max_output: int,
+    web_settings=None,
 ) -> Message:
     """Execute one tool call, asking for confirmation when required."""
-    if workspace is None:
+    if workspace is None and call.name not in WEB_TOOLS:
         call.result = "no workspace configured"
         call.approved = False
         return _tool_message(call)
@@ -278,7 +289,8 @@ def _run_tool(
 
     try:
         result: ToolResult = execute(
-            call.name, arguments, workspace, command_timeout, max_output
+            call.name, arguments, workspace, command_timeout, max_output,
+            web_settings,
         )
         call.result = result.as_text()
     except ToolError as exc:

@@ -35,6 +35,7 @@ from .config import (
 from .llm_client import LLMClient, LLMError
 from .logging_setup import get_logger, setup_logging
 from . import consensus as cns
+from . import web as web_module
 from .mesh import MeshController, MeshError, MeshSettings
 from .models import Message, Session
 from .prompts import PromptStore, find_variables, render
@@ -607,6 +608,7 @@ class VoxApp(App[None]):
                     self.config.get("generation", {}).get("include_usage", True)
                 ),
                 top_logprobs=self.inspect_top_k(),
+                web_settings=self.web_settings(),
             ):
                 self.call_from_thread(self.handle_agent_event, event)
         except LLMError as exc:
@@ -1490,6 +1492,105 @@ class VoxApp(App[None]):
             )
             return
         self.export_report(tuple(wanted))
+
+    # --------------------------------------------------------------- the web
+
+    def web_settings(self) -> web_module.WebSettings:
+        return web_module.WebSettings.from_config(self.config)
+
+    def cmd_web(self, argument: str) -> None:
+        value = argument.strip().lower()
+        settings = self.web_settings()
+        if value in ("on", "off"):
+            self.config.setdefault("web", {})["enabled"] = value == "on"
+            self.persist_config()
+            settings = self.web_settings()
+            reason = settings.unusable() if value == "on" else None
+            self.write_system(f"WEB SEARCH {value.upper()} - {settings.describe()}")
+            if reason:
+                self.write_error(f"NOT USABLE YET - {reason}")
+            return
+        if value:
+            self.write_error("USAGE: /web [on|off]")
+            return
+        state = "ON" if settings.enabled else "OFF"
+        lines = [f"WEB SEARCH IS {state} - {settings.describe()}"]
+        reason = settings.unusable()
+        if reason:
+            lines.append(reason)
+        lines.append(
+            f"pages are {'read on request' if settings.allow_fetch else 'never read'}"
+            f" · {settings.max_results} results at a time"
+        )
+        self.write_system("\n".join(lines))
+
+    def cmd_search(self, argument: str) -> None:
+        query = argument.strip()
+        if not query:
+            self.write_error("USAGE: /search <what you are looking for>")
+            return
+        settings = self.web_settings()
+        reason = settings.unusable()
+        if reason:
+            self.write_error(f"CANNOT SEARCH - {reason}")
+            return
+        self.write_system(f"SEARCHING {settings.describe()} FOR: {query}")
+        self.run_search(query, settings)
+
+    @work(thread=True, group="web", exclusive=True)
+    def run_search(self, query: str, settings: web_module.WebSettings) -> None:
+        try:
+            results = web_module.search(query, settings)
+        except web_module.WebError as exc:
+            self.call_from_thread(self.write_error, f"SEARCH FAILED - {exc}")
+            return
+        self.call_from_thread(self.search_finished, query, results)
+
+    def search_finished(self, query: str, results: list) -> None:
+        text = web_module.render_results(query, results)
+        # Into the conversation, so the model can use what was found, and
+        # labelled so it treats the text as information rather than orders.
+        message = Message(
+            role="tool", name="web_search",
+            content=f"{web_module.UNTRUSTED_NOTE}\n\n{text}",
+        )
+        self.session.messages.append(message)
+        self.write_message(message)
+        self.dirty = True
+
+    def cmd_fetch(self, argument: str) -> None:
+        url = argument.strip()
+        if not url:
+            self.write_error("USAGE: /fetch <url>")
+            return
+        settings = self.web_settings()
+        if not settings.enabled:
+            self.write_error("CANNOT FETCH - web access is off - /web on")
+            return
+        self.write_system(f"READING {url}")
+        self.run_fetch(url, settings)
+
+    @work(thread=True, group="web", exclusive=True)
+    def run_fetch(self, url: str, settings: web_module.WebSettings) -> None:
+        try:
+            page = web_module.fetch(url, settings)
+        except web_module.WebError as exc:
+            self.call_from_thread(self.write_error, f"FETCH FAILED - {exc}")
+            return
+        self.call_from_thread(self.fetch_finished, page)
+
+    def fetch_finished(self, page: web_module.Page) -> None:
+        message = Message(
+            role="tool", name="fetch_url",
+            content=web_module.render_page(page),
+        )
+        self.session.messages.append(message)
+        self.write_message(message)
+        self.dirty = True
+        self.write_system(
+            f"READ {page.url} - {len(page.text)} characters"
+            + (" (truncated)" if page.truncated else "")
+        )
 
     # ------------------------------------------------------------- consensus
 

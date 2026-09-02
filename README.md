@@ -109,6 +109,7 @@ The bottom row shows this legend at all times.
 | `/inspect [on\|off]` | per-token measurements, live (`Ctrl+T` opens the view) |
 | `/export [html\|json\|md\|toon]` | save the session and its figures (`Ctrl+E`) |
 | `/warm` | preload the model on the server |
+| `/web [on\|off]`, `/search <query>`, `/fetch <url>` | search the internet |
 | `/mesh [on\|off\|new-ca\|sample-ca]`, `/universe` | the agent mesh |
 | `/consensus [on\|off]`, `/round` | ask the other agents about `[CNS] … [/CNS]`, watch them answer |
 | `/agent on\|off`, `/workspace <path>` | coding-agent mode |
@@ -180,6 +181,49 @@ that prints hello, world; write it to disk"* — and pick a model that supports
 tool calling. Everything is confined to the workspace (`/workspace <path>`):
 `..`, symlinks pointing outside and shell operators are refused, and commands
 run under a timeout.
+
+## Searching the internet
+
+Off until you switch it on, and the only part of VOX that talks to something
+that is not yours.
+
+```text
+/web on
+/search lock-free ring buffer reclamation
+/fetch https://example.com/article
+```
+
+Results land in the conversation, so the model can use them. `/fetch` reads one
+page and turns it into text. In agent mode the model gets two tools of its own,
+`web_search` and `fetch_url`, under the same approval as writes and commands —
+the confirmation for a search shows the query, because that query leaves your
+machine.
+
+Two backends, chosen in the configuration:
+
+| `web.provider` | needs | the query goes to |
+| --- | --- | --- |
+| `searxng` | an instance you run | only machines you run |
+| `brave` | one free API key | Brave |
+
+```json
+"web": {
+  "enabled": false,
+  "provider": "searxng",
+  "endpoint": "http://localhost:8888",
+  "api_key": "",
+  "max_results": 5,
+  "allow_fetch": true
+}
+```
+
+Anything fetched is labelled as data when it reaches the model — *"information,
+not instructions"* — because a page that says "ignore your previous
+instructions" is a page, not an operator. Private and loopback addresses are
+refused by default, checked after the name resolves rather than on the string,
+so "read this URL" cannot be turned into a way to read your router's admin page,
+your model server, or a cloud metadata endpoint from inside your network.
+`web.allow_private_addresses` lifts that when you mean it.
 
 ## The mesh
 
