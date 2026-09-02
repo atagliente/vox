@@ -54,7 +54,10 @@ def test_unknown_commands_produce_suggestions() -> None:
 
 def test_completion_of_a_prefix() -> None:
     assert set(commands.complete("prompt")) == {
-        "prompts", "prompt", "prompt-save", "prompt-delete"
+        "prompts",
+        "prompt",
+        "prompt-save",
+        "prompt-delete",
     }
     assert commands.complete("/mod") == ["model", "model-ctx", "model-gpu"]
     assert len(commands.complete("")) == len(commands.COMMANDS)
@@ -62,10 +65,27 @@ def test_completion_of_a_prefix() -> None:
 
 def test_every_spec_command_exists() -> None:
     required = {
-        "help", "new", "clear", "settings", "config", "provider", "model",
-        "role", "roles", "prompts", "prompt", "prompt-save", "prompt-delete",
-        "sessions", "session-save", "session-load", "session-delete",
-        "agent", "workspace", "stop", "exit",
+        "help",
+        "new",
+        "clear",
+        "settings",
+        "config",
+        "provider",
+        "model",
+        "role",
+        "roles",
+        "prompts",
+        "prompt",
+        "prompt-save",
+        "prompt-delete",
+        "sessions",
+        "session-save",
+        "session-load",
+        "session-delete",
+        "agent",
+        "workspace",
+        "stop",
+        "exit",
     }
     assert required <= {spec.name for spec in commands.COMMANDS}
 
@@ -74,8 +94,22 @@ def test_help_text_lists_every_command() -> None:
     text = commands.help_text()
     for spec in commands.COMMANDS:
         assert spec.usage in text
-    assert "enter       send" in text
-    assert "alt+enter   new line" in text
+    assert "KEYS" in text
+    assert commands.keys_text() in text
+
+
+def test_the_legend_is_written_down_once() -> None:
+    """/help and the ctrl+shift+l modal render the same table, so a key
+    cannot be added to one and go missing from the other."""
+    text = commands.keys_text()
+    for group in ("WRITING", "SESSION", "GENERATION", "MESH AND WEB", "THIS LEGEND"):
+        assert group in text
+    for keys in ("enter", "alt+enter", "ctrl+q", "f2", "f12", "ctrl+shift+l", "f1"):
+        assert f"  {keys.ljust(12)}" in text
+    # Every description starts in the same column, whatever the group.
+    entries = [line for line in text.splitlines() if line.startswith("  ")]
+    assert len(entries) == sum(len(group) for _title, group in commands.KEY_GROUPS)
+    assert all(line[16] == " " and line[17] != " " for line in entries)
 
 
 def test_arguments_are_also_exposed_as_a_list() -> None:

@@ -6,6 +6,7 @@ thread and posts updates back through ``call_from_thread``.
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 import threading
 import time
@@ -19,7 +20,10 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.widgets import Static
 
-from . import __version__, clipboard, code_blocks, commands
+from . import __version__, clipboard, code_blocks, commands, fitting, ollama, searchd
+from . import consensus as cns
+from . import report as reporting
+from . import web as web_module
 from .agent import AgentEvent, run_turn
 from .config import (
     ConfigError,
@@ -32,39 +36,33 @@ from .config import (
     save_global_config,
     validate_config,
 )
-from . import fitting
-from . import ollama
-from .llm_client import LLMClient, LLMError, context_overflow
-from .logging_setup import get_logger, setup_logging
-from . import consensus as cns
-from . import searchd
-from . import web as web_module
-from .mesh import MeshController, MeshError, MeshSettings
-from .models import Message, Session
-from .prompts import PromptStore, find_variables, render
 from .history import InputHistory
 from .inspection import (
     Alternative,
     InspectionRun,
     criteria_from_config,
 )
+from .llm_client import LLMClient, LLMError, context_overflow
+from .logging_setup import get_logger, setup_logging
+from .mesh import MeshController, MeshError, MeshSettings
+from .models import Message, Session
+from .prompts import PromptStore, find_variables, render
 from .roles import RoleStore
 from .sessions import SessionStore
 from .storage import global_config_path
-from . import report as reporting
 from .tools import Workspace
-from .usage import LiveMeter, UsageTracker
 from .ui import branding
 from .ui.inspect_screen import InspectScreen
-from .ui.round_screen import RoundScreen
-from .ui.universe_screen import UniverseScreen
 from .ui.modals import (
     ConfirmModal,
+    KeysModal,
     PickerItem,
     PickerModal,
     SettingsModal,
     TextPromptModal,
 )
+from .ui.round_screen import RoundScreen
+from .ui.universe_screen import UniverseScreen
 from .ui.widgets import (
     HeaderBar,
     KeyBar,
@@ -75,6 +73,7 @@ from .ui.widgets import (
     Transcript,
     spinner_frame,
 )
+from .usage import LiveMeter, UsageTracker
 
 log = get_logger("app")
 
@@ -84,8 +83,11 @@ def describe_model(row: dict[str, Any]) -> str:
     parts: list[str] = []
     size = int(row.get("size") or 0)
     if size:
-        parts.append(f"{size / 1_000_000_000:.1f} GB" if size >= 1_000_000_000
-                     else f"{size / 1_000_000:.0f} MB")
+        parts.append(
+            f"{size / 1_000_000_000:.1f} GB"
+            if size >= 1_000_000_000
+            else f"{size / 1_000_000:.0f} MB"
+        )
     for key in ("parameters", "quantization"):
         if row.get(key):
             parts.append(str(row[key]))
@@ -103,8 +105,10 @@ def describe_residency(resident: ollama.Residency) -> str:
         parts.append(f"{resident.context} tokens")
     line = "  -  ".join(parts)
     if resident.spilling():
-        line += ("\n  the card is full, so the rest is in shared memory - "
-                 "slower than leaving those layers on the CPU")
+        line += (
+            "\n  the card is full, so the rest is in shared memory - "
+            "slower than leaving those layers on the CPU"
+        )
     return line
 
 
@@ -138,6 +142,11 @@ class VoxApp(App[None]):
         Binding("f5", "open_round", "Round", priority=True),
         Binding("f6", "toggle_web_mode", "Web", priority=True),
         Binding("f12", "pick_model", "Models", priority=True),
+        # The legend asked for on ctrl+shift+l, and on f1 as well because
+        # ctrl+shift+<letter> is not delivered by every terminal (see the
+        # note above); /keys reaches it when neither key arrives.
+        Binding("ctrl+shift+l", "open_keys", "Keys", priority=True),
+        Binding("f1", "open_keys", "Keys", show=False, priority=True),
         Binding("ctrl+q", "request_quit", "Quit", priority=True),
         Binding("ctrl+c", "copy_selection", "Copy", priority=True),
         Binding("ctrl+v", "paste_clipboard", "Paste", priority=True),
@@ -158,7 +167,9 @@ class VoxApp(App[None]):
         type(self).CSS = branding.theme_css(theme)
         super().__init__()
 
-        self.show_splash = show_splash and bool(self.config.get("ui", {}).get("splash", True))
+        self.show_splash = show_splash and bool(
+            self.config.get("ui", {}).get("splash", True)
+        )
         self.role_store = RoleStore()
         self.prompt_store = PromptStore()
         # Sessions and reports belong to the work, so they follow the
@@ -210,7 +221,9 @@ class VoxApp(App[None]):
         yield HeaderBar()
         with Horizontal(id="body"):
             yield Transcript(
-                show_timestamps=bool(self.config.get("ui", {}).get("show_timestamps", True))
+                show_timestamps=bool(
+                    self.config.get("ui", {}).get("show_timestamps", True)
+                )
             )
             with VerticalScroll(id="side-panel"):
                 yield Static("", id="side-title")
@@ -348,9 +361,13 @@ class VoxApp(App[None]):
                 else ""
             ),
             busy=(
-                f"PRELOADING {self._preloading}" if self._preloading is not None
-                else ("ASKING THE MESH" if self._consensus_running
-                      else ("LOOKING IT UP" if self._web_running else ""))
+                f"PRELOADING {self._preloading}"
+                if self._preloading is not None
+                else (
+                    "ASKING THE MESH"
+                    if self._consensus_running
+                    else ("LOOKING IT UP" if self._web_running else "")
+                )
             ),
         )
 
@@ -400,14 +417,14 @@ class VoxApp(App[None]):
         self._preloading = model
         # Naming the endpoint makes a config pointing at the wrong server
         # obvious, instead of looking like the model is slow.
-        self.show_thinking(f"PRELOADING {model} ON {endpoint}" if endpoint
-                           else f"PRELOADING {model}")
+        self.show_thinking(
+            f"PRELOADING {model} ON {endpoint}" if endpoint else f"PRELOADING {model}"
+        )
         if self._usage_timer is None:
             self._usage_timer = self.set_interval(0.1, self._tick_status)
         self.refresh_status()
 
-    def end_preload(self, model: str, elapsed: float | None,
-                    error: str | None) -> None:
+    def end_preload(self, model: str, elapsed: float | None, error: str | None) -> None:
         if self._preloading is None:
             return  # the operator stopped waiting for it
         self._preloading = None
@@ -422,9 +439,7 @@ class VoxApp(App[None]):
                 "/settings if that endpoint is not the one you meant."
             )
         else:
-            self.write_system(
-                f"MODEL RESIDENT - {model} ready in {elapsed:.1f}s"
-            )
+            self.write_system(f"MODEL RESIDENT - {model} ready in {elapsed:.1f}s")
         self.refresh_status()
 
     def cancel_preload(self) -> bool:
@@ -592,7 +607,9 @@ class VoxApp(App[None]):
             return
         if self.web_mode_active():
             settings = self.web_settings()
-            if not self.wants_local_server(settings) or self.ensure_search_server(settings):
+            if not self.wants_local_server(settings) or self.ensure_search_server(
+                settings
+            ):
                 self.start_web_turn(message.content)
                 return
         self.start_generation()
@@ -621,20 +638,20 @@ class VoxApp(App[None]):
 
         research = [
             Message(role="system", content=prompt)
-            for prompt in (self._web_prompt, self._consensus_prompt) if prompt
+            for prompt in (self._web_prompt, self._consensus_prompt)
+            if prompt
         ]
         # Everything gathered for this turn belongs in front of the question it
         # was gathered for. The citations are appended to the session after the
         # question, so without this they — and the sources — arrive after it,
         # and a model reads that as "answer, then here is some reading".
         last_user = max(
-            (index for index, message in enumerate(history)
-             if message.role == "user"),
+            (index for index, message in enumerate(history) if message.role == "user"),
             default=None,
         )
         if last_user is not None:
-            trailing = history[last_user + 1:]
-            del history[last_user + 1:]
+            trailing = history[last_user + 1 :]
+            del history[last_user + 1 :]
             history[last_user:last_user] = research + trailing
         else:
             history.extend(research)
@@ -771,7 +788,9 @@ class VoxApp(App[None]):
                     content=f"REQUESTED {event.tool_call.name}",
                 )
             )
-        elif event.type in ("tool_result", "tool_denied") and event.tool_call is not None:
+        elif (
+            event.type in ("tool_result", "tool_denied") and event.tool_call is not None
+        ):
             self.show_thinking("WAITING FOR MODEL")
             self.write_message(
                 Message(
@@ -873,14 +892,11 @@ class VoxApp(App[None]):
                 # anything already measured.
                 self.inspection = self._new_inspection()
             self.write_system(
-                "INSPECTION ON - the next answer is measured. "
-                "/inspect off stops it."
+                "INSPECTION ON - the next answer is measured. /inspect off stops it."
             )
             self.refresh_status()
             just_enabled = True
-        screen = InspectScreen(
-            self.inspection, enabled=True, just_enabled=just_enabled
-        )
+        screen = InspectScreen(self.inspection, enabled=True, just_enabled=just_enabled)
         self._inspect_screen = screen
         self.push_screen(screen, lambda _result: self._forget_inspect_screen())
 
@@ -1076,7 +1092,9 @@ class VoxApp(App[None]):
         name = self.session_name
         if not name:
             name = await self.push_screen_wait(
-                TextPromptModal("SAVE SESSION AS", placeholder="name", value=self.session.title)
+                TextPromptModal(
+                    "SAVE SESSION AS", placeholder="name", value=self.session.title
+                )
             )
         if not name:
             return
@@ -1088,7 +1106,9 @@ class VoxApp(App[None]):
         self.session.model = str(self.config.get("active_model", ""))
         self.session.role = str(self.config.get("active_role", ""))
         self.session.workspace = str(self.workspace_path)
-        self.session.agent_enabled = bool(self.config.get("agent", {}).get("enabled", False))
+        self.session.agent_enabled = bool(
+            self.config.get("agent", {}).get("enabled", False)
+        )
         try:
             path = self.session_store.save(self.session, name)
         except OSError as exc:
@@ -1109,14 +1129,19 @@ class VoxApp(App[None]):
         self.session_name = name
         self.dirty = False
         self.transcript.clear_messages()
-        self.write_system(f"SESSION LOADED - {session.title} ({len(session.messages)} messages)")
+        self.write_system(
+            f"SESSION LOADED - {session.title} ({len(session.messages)} messages)"
+        )
         for message in session.messages:
             if message.reasoning and self.config.get("ui", {}).get(
                 "show_reasoning", True
             ):
                 self.write_message(
-                    Message(role="reasoning", content=message.reasoning,
-                            timestamp=message.timestamp)
+                    Message(
+                        role="reasoning",
+                        content=message.reasoning,
+                        timestamp=message.timestamp,
+                    )
                 )
             self.write_message(message)
         if session.workspace:
@@ -1129,7 +1154,8 @@ class VoxApp(App[None]):
             PickerItem(
                 entry.name,
                 entry.title,
-                entry.error or f"{entry.updated_at}  {entry.message_count} msg  {entry.model}",
+                entry.error
+                or f"{entry.updated_at}  {entry.message_count} msg  {entry.model}",
             )
             for entry in entries
         ]
@@ -1172,7 +1198,8 @@ class VoxApp(App[None]):
             PickerItem(
                 prompt.name,
                 prompt.name,
-                f"{prompt.description}  [{', '.join(prompt.tags)}]" if prompt.tags
+                f"{prompt.description}  [{', '.join(prompt.tags)}]"
+                if prompt.tags
                 else prompt.description,
             )
             for prompt in self.prompt_store.all()
@@ -1223,7 +1250,9 @@ class VoxApp(App[None]):
             save_global_config(data)
         except ConfigError as exc:
             self.write_error(f"settings not saved: {exc}")
-        type(self).CSS = branding.theme_css(str(data.get("ui", {}).get("theme", "nasa")))
+        type(self).CSS = branding.theme_css(
+            str(data.get("ui", {}).get("theme", "nasa"))
+        )
         self.rebuild_client()
         self.connected = False
         self.refresh_header()
@@ -1298,7 +1327,9 @@ class VoxApp(App[None]):
             return
         sessions = self.session_store.list()
         lines = ["SESSIONS"]
-        lines.extend(f"  {entry.name}  ({entry.message_count})" for entry in sessions[:10])
+        lines.extend(
+            f"  {entry.name}  ({entry.message_count})" for entry in sessions[:10]
+        )
         lines.append("")
         lines.append("PROMPTS")
         lines.extend(f"  {prompt.name}" for prompt in self.prompt_store.all()[:10])
@@ -1318,7 +1349,11 @@ class VoxApp(App[None]):
         if not parsed.is_command:
             return
         if parsed.error is not None:
-            hint = f" DID YOU MEAN: {', '.join(parsed.suggestions[:5])}" if parsed.suggestions else ""
+            hint = (
+                f" DID YOU MEAN: {', '.join(parsed.suggestions[:5])}"
+                if parsed.suggestions
+                else ""
+            )
             self.write_error(parsed.error.upper() + hint)
             return
         handler = getattr(self, f"cmd_{parsed.name.replace('-', '_')}", None)
@@ -1331,6 +1366,9 @@ class VoxApp(App[None]):
 
     def cmd_help(self, argument: str) -> None:
         self.write_system(commands.help_text())
+
+    def cmd_keys(self, argument: str) -> None:
+        self.action_open_keys()
 
     def cmd_new(self, argument: str) -> None:
         self.action_new_session()
@@ -1352,14 +1390,18 @@ class VoxApp(App[None]):
         if not argument:
             return self._pick_provider(providers)
         if argument not in providers:
-            self.write_error(f"UNKNOWN PROVIDER: {argument} - HAVE: {', '.join(providers)}")
+            self.write_error(
+                f"UNKNOWN PROVIDER: {argument} - HAVE: {', '.join(providers)}"
+            )
             return None
         self._set_provider(argument)
         return None
 
     async def _pick_provider(self, providers: list[str]) -> None:
         items = [
-            PickerItem(name, name, str(self.config["providers"][name].get("base_url", "")))
+            PickerItem(
+                name, name, str(self.config["providers"][name].get("base_url", ""))
+            )
             for name in providers
         ]
         choice = await self.push_screen_wait(PickerModal("PROVIDERS", items))
@@ -1392,7 +1434,9 @@ class VoxApp(App[None]):
             self.persist_config()
             self.write_system(f"MODEL SET - {argument}")
             self.refresh_status()
-            if self.connected and self.config.get("generation", {}).get("preload", True):
+            if self.connected and self.config.get("generation", {}).get(
+                "preload", True
+            ):
                 self.preload_model()
             return None
         return self._pick_model()
@@ -1425,8 +1469,9 @@ class VoxApp(App[None]):
         # a stray Enter changes nothing.
         names.sort(key=lambda name: (name != active, name))
         return [
-            PickerItem(name, f"{'>' if name == active else ' '} {name}",
-                       details.get(name, ""))
+            PickerItem(
+                name, f"{'>' if name == active else ' '} {name}", details.get(name, "")
+            )
             for name in names
         ]
 
@@ -1531,12 +1576,14 @@ class VoxApp(App[None]):
         layers = parameters.get("num_gpu")
         detail = f", {layers} layers on the GPU" if layers is not None else ""
         self.call_from_thread(
-            self.set_model, name,
+            self.set_model,
+            name,
             f"MODEL CTX - {num_ctx} tokens{detail}, same weights",
         )
 
-    def _build_parameters(self, base_url: str, model: str,
-                          num_ctx: int) -> dict[str, Any]:
+    def _build_parameters(
+        self, base_url: str, model: str, num_ctx: int
+    ) -> dict[str, Any]:
         """The Modelfile parameters for a build. Runs on the worker thread.
 
         num_gpu "max" is measured, not assumed: the largest number of layers
@@ -1608,8 +1655,11 @@ class VoxApp(App[None]):
             return
         if resident is None:
             card = ollama.vram_mb()
-            where = (f"card has {card[1]} MB, {card[0]} MB in use"
-                     if card else "no NVIDIA card reported")
+            where = (
+                f"card has {card[1]} MB, {card[0]} MB in use"
+                if card
+                else "no NVIDIA card reported"
+            )
             tail = f"  -  {layers} layers" if layers else ""
             self.call_from_thread(
                 self.write_system,
@@ -1624,9 +1674,8 @@ class VoxApp(App[None]):
     def build_model_gpu(self, base_url: str, model: str, layers: int | None) -> None:
         """Write a build with this many layers on the GPU, and switch to it."""
         try:
-            window = (
-                ollama.configured_context(base_url, model)
-                or int(self.config.get("generation", {}).get("context_window", 8192))
+            window = ollama.configured_context(base_url, model) or int(
+                self.config.get("generation", {}).get("context_window", 8192)
             )
             if layers is None:
                 reserve = int(self.build_config().get("vram_reserve_mb", 384) or 0)
@@ -1636,7 +1685,9 @@ class VoxApp(App[None]):
                 )
                 layers, resident = ollama.fit_layers(base_url, model, window, reserve)
                 if resident is not None:
-                    self.call_from_thread(self.write_system, describe_residency(resident))
+                    self.call_from_thread(
+                        self.write_system, describe_residency(resident)
+                    )
                 if layers <= 0:
                     self.call_from_thread(
                         self.write_error,
@@ -1650,7 +1701,8 @@ class VoxApp(App[None]):
             self.call_from_thread(self.write_error, f"MODEL GPU - {exc}")
             return
         self.call_from_thread(
-            self.set_model, name,
+            self.set_model,
+            name,
             f"MODEL GPU - {layers} layers on the card at {window} tokens",
         )
 
@@ -1811,7 +1863,8 @@ class VoxApp(App[None]):
         role = self.role_store.get(str(self.config.get("active_role", "")))
         parameters: dict[str, Any] = {
             "temperature": (
-                role.temperature if role is not None
+                role.temperature
+                if role is not None
                 else generation.get("temperature", 0.2)
             ),
             "max_tokens": generation.get("max_tokens"),
@@ -1914,7 +1967,9 @@ class VoxApp(App[None]):
                 self.persist_config()
                 self.write_error(f"WEB MODE NEEDS A BACKEND - {reason}")
                 return
-            if self.wants_local_server(settings) and not self.ensure_search_server(settings):
+            if self.wants_local_server(settings) and not self.ensure_search_server(
+                settings
+            ):
                 section["auto"] = False
                 self.persist_config()
                 self.refresh_header()
@@ -1939,8 +1994,10 @@ class VoxApp(App[None]):
 
     def wants_local_server(self, settings) -> bool:
         """Is this endpoint one VOX should be serving itself?"""
-        return (settings.provider in ("local", "searxng")
-                and web_module.is_local_endpoint(settings.endpoint))
+        return settings.provider in (
+            "local",
+            "searxng",
+        ) and web_module.is_local_endpoint(settings.endpoint)
 
     def ensure_search_server(self, settings) -> bool:
         """Start the local search server if it is not already up.
@@ -2058,7 +2115,9 @@ class VoxApp(App[None]):
         if reason:
             self.write_error(f"CANNOT SEARCH - {reason}")
             return
-        if self.wants_local_server(settings) and not self.ensure_search_server(settings):
+        if self.wants_local_server(settings) and not self.ensure_search_server(
+            settings
+        ):
             return
         self.write_system(f"SEARCHING {settings.describe()} FOR: {query}")
         self.run_search(query, settings)
@@ -2073,15 +2132,17 @@ class VoxApp(App[None]):
             return
         self.call_from_thread(self.search_finished, query, results, notes)
 
-    def search_finished(self, query: str, results: list,
-                        notes: list | None = None) -> None:
+    def search_finished(
+        self, query: str, results: list, notes: list | None = None
+    ) -> None:
         if notes:
             self.write_system("WEB - " + "  ·  ".join(notes))
         text = web_module.render_results(query, results)
         # Into the conversation, so the model can use what was found, and
         # labelled so it treats the text as information rather than orders.
         message = Message(
-            role="tool", name="web_search",
+            role="tool",
+            name="web_search",
             content=f"{web_module.UNTRUSTED_NOTE}\n\n{text}",
         )
         self.session.messages.append(message)
@@ -2111,7 +2172,8 @@ class VoxApp(App[None]):
 
     def fetch_finished(self, page: web_module.Page) -> None:
         message = Message(
-            role="web", name="fetch_url",
+            role="web",
+            name="fetch_url",
             content=web_module.render_page(page),
         )
         self.session.messages.append(message)
@@ -2214,8 +2276,9 @@ class VoxApp(App[None]):
         if self._panel_mode == "consensus":
             self.refresh_panel()
 
-    def consensus_answered(self, question: str, answers: list, settings: dict,
-                           round_number: int = 0) -> None:
+    def consensus_answered(
+        self, question: str, answers: list, settings: dict, round_number: int = 0
+    ) -> None:
         if round_number and round_number != self._consensus_round:
             # The operator abandoned this round, or started another one. Its
             # answers belong to a question that is no longer on screen.
@@ -2272,8 +2335,9 @@ class VoxApp(App[None]):
         )
         self.mesh.set_answer_hook(self.answer_for_peer if allowed else None)
 
-    def answer_for_peer(self, caller: str, question: str, emit=None,
-                        conversation: str = "") -> dict:
+    def answer_for_peer(
+        self, caller: str, question: str, emit=None, conversation: str = ""
+    ) -> dict:
         """Run the local model for another agent. Called on a mesh thread.
 
         Nothing from this machine's conversation, role or workspace goes into
@@ -2284,7 +2348,9 @@ class VoxApp(App[None]):
         silent.
         """
         settings = self.consensus_settings()
-        if not settings.get("enabled", True) or not settings.get("answer_requests", True):
+        if not settings.get("enabled", True) or not settings.get(
+            "answer_requests", True
+        ):
             raise RuntimeError("this node does not answer questions")
         if self.mesh.demo_ca and not settings.get("allow_sample_ca", True):
             raise RuntimeError("this node does not answer on the sample certificate")
@@ -2436,10 +2502,15 @@ class VoxApp(App[None]):
 
     def set_mesh_border(self, online: bool) -> None:
         """The red border is the standing reminder that we are announcing."""
-        try:
+        with contextlib.suppress(IndexError):  # pragma: no cover - no screen yet
             self.screen_stack[0].set_class(online, "mesh-online")
-        except IndexError:  # pragma: no cover - before the screen exists
-            pass
+
+    def action_open_keys(self) -> None:
+        """Ctrl+Shift+L: every key combination, without leaving the screen."""
+        if isinstance(self.screen, KeysModal):
+            self.screen.dismiss(None)
+            return
+        self.push_screen(KeysModal())
 
     def action_open_universe(self) -> None:
         """Ctrl+Shift+U: who else is out there."""
@@ -2539,7 +2610,9 @@ class VoxApp(App[None]):
         self.copy_code_block(number)
 
     def cmd_panel(self, argument: str) -> None:
-        mode = argument.strip().lower() or ("index" if self._panel_mode == "code" else "code")
+        mode = argument.strip().lower() or (
+            "index" if self._panel_mode == "code" else "code"
+        )
         if mode not in ("code", "index", "consensus"):
             self.write_error("USAGE: /panel code|index|consensus")
             return
@@ -2589,7 +2662,6 @@ class VoxApp(App[None]):
         self._stop_status_timer()
         if self.client is not None:
             self.client.close()
-
 
     # Modal flows must run inside a worker: push_screen_wait suspends until the
     # screen is dismissed, and Textual refuses that on the main task.

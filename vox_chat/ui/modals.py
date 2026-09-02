@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Iterable, NamedTuple
+from collections.abc import Iterable
+from typing import Any, NamedTuple
 
 from rich.text import Text
-
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, ListItem, ListView, Static, TextArea
 
+from ..commands import keys_text
 
 _DIFF_STYLES = (
     ("+++ ", "bold"),
@@ -61,8 +62,13 @@ class ConfirmModal(ModalScreen[bool]):
         Binding("shift+tab", "move(-1)", "Previous", show=False, priority=True),
     ]
 
-    def __init__(self, title: str, body: str, authorize_label: str = "AUTHORIZE",
-                 deny_label: str = "DENY") -> None:
+    def __init__(
+        self,
+        title: str,
+        body: str,
+        authorize_label: str = "AUTHORIZE",
+        deny_label: str = "DENY",
+    ) -> None:
         super().__init__()
         self.title_text = title
         self.body_text = body
@@ -109,6 +115,32 @@ class ConfirmModal(ModalScreen[bool]):
 
     def action_deny(self) -> None:
         self.dismiss(False)
+
+
+class KeysModal(ModalScreen[None]):
+    """The whole key legend, on ctrl+shift+l.
+
+    The bar at the bottom of the screen carries five keys because a legend
+    nobody can read at a glance is decoration. This is where the rest lives,
+    one keystroke away instead of buried in /help.
+    """
+
+    BINDINGS = [
+        Binding("escape", "close", "Close", priority=True),
+        Binding("q", "close", "Close", show=False, priority=True),
+        Binding("f1", "close", "Close", show=False, priority=True),
+        Binding("ctrl+shift+l", "close", "Close", show=False, priority=True),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="modal-box"):
+            yield Label("KEYS", id="modal-title")
+            with VerticalScroll():
+                yield Static(keys_text(), id="keys-table")
+            yield Static("esc close", id="modal-hint")
+
+    def action_close(self) -> None:
+        self.dismiss(None)
 
 
 class TextPromptModal(ModalScreen[str | None]):
@@ -162,8 +194,12 @@ class PickerModal(ModalScreen[str | None]):
         Binding("pageup", "move(-10)", "Up", show=False, priority=True),
     ]
 
-    def __init__(self, title: str, items: Iterable[PickerItem],
-                 empty_message: str = "nothing here yet") -> None:
+    def __init__(
+        self,
+        title: str,
+        items: Iterable[PickerItem],
+        empty_message: str = "nothing here yet",
+    ) -> None:
         super().__init__()
         self.title_text = title
         self.items = list(items)
@@ -185,7 +221,9 @@ class PickerModal(ModalScreen[str | None]):
     def _rows(self, items: list[PickerItem]) -> list[ListItem]:
         rows: list[ListItem] = []
         for item in items:
-            label = item.title if not item.subtitle else f"{item.title}\n  {item.subtitle}"
+            label = (
+                item.title if not item.subtitle else f"{item.title}\n  {item.subtitle}"
+            )
             row = ListItem(Static(label))
             row.value = item.value
             rows.append(row)
@@ -250,8 +288,9 @@ class SettingsModal(ModalScreen[dict[str, Any] | None]):
 
     BINDINGS = [("escape", "cancel", "Cancel")]
 
-    def __init__(self, config: dict[str, Any], masked: dict[str, Any],
-                 validate: Any) -> None:
+    def __init__(
+        self, config: dict[str, Any], masked: dict[str, Any], validate: Any
+    ) -> None:
         super().__init__()
         self.config = config
         self.masked = masked
@@ -281,7 +320,9 @@ class SettingsModal(ModalScreen[dict[str, Any] | None]):
         try:
             candidate = json.loads(text)
         except json.JSONDecodeError as exc:
-            self._show_error(f"invalid JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}")
+            self._show_error(
+                f"invalid JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}"
+            )
             return
         if not isinstance(candidate, dict):
             self._show_error("configuration root must be a JSON object")
@@ -300,9 +341,11 @@ class SettingsModal(ModalScreen[dict[str, Any] | None]):
         for name, provider in candidate.get("providers", {}).items():
             if not isinstance(provider, dict):
                 continue
-            masked_value = shown.get(name, {}).get("api_key") if isinstance(
-                shown.get(name), dict
-            ) else None
+            masked_value = (
+                shown.get(name, {}).get("api_key")
+                if isinstance(shown.get(name), dict)
+                else None
+            )
             if masked_value is not None and provider.get("api_key") == masked_value:
                 original = live.get(name, {})
                 if isinstance(original, dict) and "api_key" in original:

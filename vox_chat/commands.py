@@ -7,6 +7,89 @@ recognises them and produces help and completions.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import NamedTuple
+
+
+class KeyEntry(NamedTuple):
+    """One key combination and what it does."""
+
+    keys: str
+    what: str
+
+
+# The one place the keys are written down. /help renders it, the legend modal
+# renders it, and the bindings in app.py are checked against it by a test, so
+# a key cannot be added in one place and go missing in the other two.
+KEY_GROUPS: tuple[tuple[str, tuple[KeyEntry, ...]], ...] = (
+    (
+        "WRITING",
+        (
+            KeyEntry("enter", "send"),
+            KeyEntry("alt+enter", "new line"),
+            KeyEntry("ctrl+j", "new line"),
+            KeyEntry("shift+enter", "new line"),
+            KeyEntry("up / down", "walk the input history, at the edges of the text"),
+            KeyEntry("ctrl+c", "copy"),
+            KeyEntry("ctrl+v", "paste"),
+            KeyEntry("ctrl+y", "copy the last code block"),
+        ),
+    ),
+    (
+        "SESSION",
+        (
+            KeyEntry("ctrl+n", "new session"),
+            KeyEntry("ctrl+w", "save session"),
+            KeyEntry("ctrl+s", "settings"),
+            KeyEntry("ctrl+p", "prompts"),
+            KeyEntry("ctrl+r", "roles"),
+            KeyEntry("ctrl+e", "export"),
+            KeyEntry("ctrl+q", "quit"),
+        ),
+    ),
+    (
+        "GENERATION",
+        (
+            KeyEntry("ctrl+g", "stop generation"),
+            KeyEntry("f2", "agent mode on/off"),
+            KeyEntry("f12", "models, arrows to choose"),
+            KeyEntry("ctrl+t", "inspect"),
+            KeyEntry("ctrl+b", "side panel"),
+        ),
+    ),
+    (
+        "MESH AND WEB",
+        (
+            KeyEntry("f3", "mesh online/off"),
+            KeyEntry("f4", "universe"),
+            KeyEntry("f5", "the round: agents thinking, live"),
+            KeyEntry("f6", "web mode: answers researched first"),
+        ),
+    ),
+    (
+        "THIS LEGEND",
+        (
+            # ctrl+shift+<letter> is not delivered by every terminal, so the
+            # legend is on a function key as well. Neither is worth much if the
+            # only way to find them is to already know them, hence /keys too.
+            KeyEntry("ctrl+shift+l", "open this legend"),
+            KeyEntry("f1", "open it where the terminal swallows ctrl+shift+l"),
+            KeyEntry("/keys", "the same legend, written into the transcript"),
+            KeyEntry("esc", "close it"),
+        ),
+    ),
+)
+
+
+def keys_text(indent: str = "  ") -> str:
+    """The whole key legend, one group per block, keys in a fixed column."""
+    width = max(len(entry.keys) for _title, group in KEY_GROUPS for entry in group)
+    lines: list[str] = []
+    for title, group in KEY_GROUPS:
+        if lines:
+            lines.append("")
+        lines.append(title)
+        lines.extend(f"{indent}{e.keys.ljust(width)}   {e.what}" for e in group)
+    return "\n".join(lines)
 
 
 @dataclass(frozen=True)
@@ -21,16 +104,21 @@ class CommandSpec:
 
 COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("help", "/help", "Show this help", ("h", "?")),
+    CommandSpec("keys", "/keys", "Every key combination, in one place"),
     CommandSpec("new", "/new", "Start a new session", ("n",)),
     CommandSpec("clear", "/clear", "Clear the transcript, keep the session"),
     CommandSpec("settings", "/settings", "Open the settings modal"),
     CommandSpec("config", "/config", "Edit config.json in $VISUAL / $EDITOR"),
     CommandSpec("provider", "/provider [name]", "Show or switch provider"),
     CommandSpec("model", "/model [name]", "Show or switch model"),
-    CommandSpec("model-ctx", "/model ctx [N|off]",
-                "Context window of the active model (Ollama)"),
-    CommandSpec("model-gpu", "/model gpu [max|N|off]",
-                "How many layers of it live on the GPU (Ollama)"),
+    CommandSpec(
+        "model-ctx", "/model ctx [N|off]", "Context window of the active model (Ollama)"
+    ),
+    CommandSpec(
+        "model-gpu",
+        "/model gpu [max|N|off]",
+        "How many layers of it live on the GPU (Ollama)",
+    ),
     CommandSpec("role", "/role [name]", "Show or switch the active role"),
     CommandSpec("roles", "/roles", "Open the role picker"),
     CommandSpec("prompts", "/prompts", "Open the saved prompt picker"),
@@ -45,21 +133,32 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("workspace", "/workspace <path>", "Set the agent workspace"),
     CommandSpec("stats", "/stats", "Token usage, context and speed", ("usage",)),
     CommandSpec("inspect", "/inspect [on|off]", "Per-token measurements, live"),
-    CommandSpec("export", "/export [html|json|md|toon]", "Save the session and its figures"),
+    CommandSpec(
+        "export", "/export [html|json|md|toon]", "Save the session and its figures"
+    ),
     CommandSpec("code", "/code [n]", "Show code blocks, copy one by number"),
     CommandSpec("panel", "/panel code|index|consensus", "Switch the side panel"),
     CommandSpec("connect", "/connect", "Re-check the provider connection"),
     CommandSpec("warm", "/warm", "Preload the active model on the server"),
-    CommandSpec("mesh", "/mesh [on|off|new-ca|sample-ca]",
-                "Join or leave the mesh; swap the certificate authority"),
+    CommandSpec(
+        "mesh",
+        "/mesh [on|off|new-ca|sample-ca]",
+        "Join or leave the mesh; swap the certificate authority",
+    ),
     CommandSpec("universe", "/universe", "Agents on the mesh, with their category"),
-    CommandSpec("web", "/web [on|off|start|stop|status]",
-                "Internet search on or off; start or stop the local engine"),
+    CommandSpec(
+        "web",
+        "/web [on|off|start|stop|status]",
+        "Internet search on or off; start or stop the local engine",
+    ),
     CommandSpec("search", "/search <query>", "Search the internet"),
     CommandSpec("fetch", "/fetch <url>", "Read one web page into the conversation"),
     CommandSpec("round", "/round", "The live log of the current consensus round"),
-    CommandSpec("consensus", "/consensus [on|off]",
-                "Answer [CNS] … [/CNS] with the other agents on the mesh"),
+    CommandSpec(
+        "consensus",
+        "/consensus [on|off]",
+        "Answer [CNS] … [/CNS] with the other agents on the mesh",
+    ),
     CommandSpec("stop", "/stop", "Stop the current generation"),
     CommandSpec("exit", "/exit", "Quit VOX", ("quit", "q")),
 )
@@ -142,28 +241,15 @@ def help_text() -> str:
     width = max(len(spec.usage) for spec in COMMANDS)
     lines = ["AVAILABLE COMMANDS", ""]
     lines.extend(f"  {spec.usage.ljust(width)}   {spec.help}" for spec in COMMANDS)
+    lines.extend(["", "KEYS", ""])
+    lines.extend(keys_text().splitlines())
     lines.extend(
         [
-            "",
-            "KEYS",
-            "  enter       send             f2      agent mode on/off",
-            "  alt+enter   new line         f12     models, arrows to choose",
-            "  ctrl+j      new line         ctrl+n  new session",
-            "  ctrl+g      stop generation  ctrl+s  settings",
-            "  ctrl+b      side panel       ctrl+p  prompts",
-            "  ctrl+c      copy             ctrl+r  roles",
-            "  ctrl+v      paste            ctrl+w  save session",
-            "  ctrl+y      copy last code block",
-            "  ctrl+t      inspect          ctrl+e  export",
             "",
             "CONSENSUS",
             "  Mark part of a message with [CNS] … [/CNS] and it is answered by",
             "  the other agents on the mesh. Only the marked text leaves this",
             "  machine. /consensus shows who would be asked.",
-            "  f3          mesh online/off  f4      universe",
-            "  f5          the round (agents thinking, live)",
-            "  f6          web mode: answers researched first",
-            "  ctrl+q      quit",
             "",
             "Start a message with // to send text that begins with a slash.",
         ]

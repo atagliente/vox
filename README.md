@@ -94,12 +94,16 @@ has no authentication — only on a network you trust.
 | `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+T` / `Ctrl+E` | inspect / export |
 | `F2` | coding-agent mode on / off | `F12` | pick a model, arrows only |
 | `F3` | join / leave the mesh | `F4` / `F5` | the universe / the round |
-| `F6` | web mode: answers researched first | | |
-| | | `Ctrl+Q` | quit |
+| `F6` | web mode: answers researched first | `Ctrl+Q` | quit |
+| `Ctrl+Shift+L` / `F1` | this legend, on screen | | |
 
 The bottom row carries five of them - send, copy/paste, quit, stop, mode - and
-nothing else. `/help` has the rest; a legend nobody can read at a glance is
-decoration.
+nothing else: a legend nobody can read at a glance is decoration. The rest is
+one keystroke away on `Ctrl+Shift+L`, which opens the whole table over the
+conversation. `F1` does the same, because `Ctrl+Shift+<letter>` is not
+delivered by every terminal, and `/keys` writes it into the transcript when
+neither key arrives. All three read from the same table, so they cannot drift
+apart.
 
 ## Commands
 

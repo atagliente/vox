@@ -22,6 +22,7 @@ def messages(app: VoxApp) -> list[MessageBox]:
     """Only the real messages: the spinner is a transcript child too."""
     return [box for box in app.transcript.children if isinstance(box, MessageBox)]
 
+
 UNREACHABLE = "http://127.0.0.1:1/v1"
 
 
@@ -85,11 +86,10 @@ async def test_help_command_answers(offline_app: VoxApp) -> None:
         await pilot.pause()
         offline_app.run_command("/help")
         await pilot.pause()
-        text = "\n".join(
-            box.message.content for box in messages(offline_app)
-        )
+        text = "\n".join(box.message.content for box in messages(offline_app))
         assert "/session-save" in text
-        assert "alt+enter   new line" in text
+        assert "KEYS" in text
+        assert "alt+enter" in text and "new line" in text
 
 
 async def test_unknown_command_suggests_alternatives(offline_app: VoxApp) -> None:
@@ -102,7 +102,9 @@ async def test_unknown_command_suggests_alternatives(offline_app: VoxApp) -> Non
         assert "sessions" in last.content
 
 
-async def test_agent_toggle_and_workspace_command(offline_app: VoxApp, tmp_path: Path) -> None:
+async def test_agent_toggle_and_workspace_command(
+    offline_app: VoxApp, tmp_path: Path
+) -> None:
     async with offline_app.run_test() as pilot:
         await pilot.pause()
         offline_app.run_command("/agent on")
@@ -253,7 +255,9 @@ async def test_ctrl_c_copies_and_never_quits(offline_app: VoxApp, monkeypatch) -
     from vox_chat import clipboard
 
     copied: list[str] = []
-    monkeypatch.setattr(clipboard, "copy", lambda text: (copied.append(text), (True, "fake"))[1])
+    monkeypatch.setattr(
+        clipboard, "copy", lambda text: (copied.append(text), (True, "fake"))[1]
+    )
     async with offline_app.run_test() as pilot:
         await pilot.pause()
         area = offline_app.input_area
@@ -537,7 +541,9 @@ async def test_ctrl_shift_c_still_works_as_an_alias(
     from vox_chat import clipboard
 
     copied: list[str] = []
-    monkeypatch.setattr(clipboard, "copy", lambda text: (copied.append(text), (True, "fake"))[1])
+    monkeypatch.setattr(
+        clipboard, "copy", lambda text: (copied.append(text), (True, "fake"))[1]
+    )
     async with offline_app.run_test() as pilot:
         await pilot.pause()
         area = offline_app.input_area
@@ -559,7 +565,9 @@ async def test_ctrl_shift_c_falls_back_to_the_last_answer(
     from vox_chat.models import Message as ChatMessage
 
     copied: list[str] = []
-    monkeypatch.setattr(clipboard, "copy", lambda text: (copied.append(text), (True, "fake"))[1])
+    monkeypatch.setattr(
+        clipboard, "copy", lambda text: (copied.append(text), (True, "fake"))[1]
+    )
     async with offline_app.run_test() as pilot:
         await pilot.pause()
         offline_app.session.messages.append(
@@ -573,7 +581,9 @@ async def test_ctrl_shift_c_falls_back_to_the_last_answer(
         assert copied == ["the answer to copy"]
 
 
-async def test_a_failing_clipboard_is_reported(offline_app: VoxApp, monkeypatch) -> None:
+async def test_a_failing_clipboard_is_reported(
+    offline_app: VoxApp, monkeypatch
+) -> None:
     from vox_chat import clipboard
 
     monkeypatch.setattr(clipboard, "paste", lambda: (None, "no clipboard helper found"))
@@ -583,7 +593,10 @@ async def test_a_failing_clipboard_is_reported(offline_app: VoxApp, monkeypatch)
         await pilot.press("ctrl+shift+v")
         for _ in range(20):
             await pilot.pause()
-            if messages(offline_app) and messages(offline_app)[-1].message.role == "error":
+            if (
+                messages(offline_app)
+                and messages(offline_app)[-1].message.role == "error"
+            ):
                 break
         last = messages(offline_app)[-1].message
         assert last.role == "error"
@@ -644,12 +657,16 @@ async def test_an_answer_without_code_leaves_the_panel_alone(
         assert not offline_app.query_one("#side-panel").has_class("visible")
 
 
-async def test_ctrl_y_copies_the_last_code_block(offline_app: VoxApp, monkeypatch) -> None:
+async def test_ctrl_y_copies_the_last_code_block(
+    offline_app: VoxApp, monkeypatch
+) -> None:
     from vox_chat import clipboard
     from vox_chat.models import Message as ChatMessage
 
     copied: list[str] = []
-    monkeypatch.setattr(clipboard, "copy", lambda text: (copied.append(text), (True, "fake"))[1])
+    monkeypatch.setattr(
+        clipboard, "copy", lambda text: (copied.append(text), (True, "fake"))[1]
+    )
     async with offline_app.run_test() as pilot:
         await pilot.pause()
         offline_app.session.messages.append(
@@ -664,12 +681,16 @@ async def test_ctrl_y_copies_the_last_code_block(offline_app: VoxApp, monkeypatc
         assert copied == ["x = 1\nprint(x)"]
 
 
-async def test_code_command_copies_a_numbered_block(offline_app: VoxApp, monkeypatch) -> None:
+async def test_code_command_copies_a_numbered_block(
+    offline_app: VoxApp, monkeypatch
+) -> None:
     from vox_chat import clipboard
     from vox_chat.models import Message as ChatMessage
 
     copied: list[str] = []
-    monkeypatch.setattr(clipboard, "copy", lambda text: (copied.append(text), (True, "fake"))[1])
+    monkeypatch.setattr(
+        clipboard, "copy", lambda text: (copied.append(text), (True, "fake"))[1]
+    )
     answer = CODE_ANSWER + "\nand:\n\n```bash\nls -la\n```\n"
     async with offline_app.run_test() as pilot:
         await pilot.pause()
@@ -781,7 +802,9 @@ async def test_a_second_answer_replaces_the_code_in_the_panel(
         offline_app.handle_agent_event(
             AgentEvent(
                 "assistant_done",
-                messages=[ChatMessage(role="assistant", content="```python\nx = 1\n```")],
+                messages=[
+                    ChatMessage(role="assistant", content="```python\nx = 1\n```")
+                ],
             )
         )
         await pilot.pause()
@@ -796,7 +819,9 @@ async def test_a_second_answer_replaces_the_code_in_the_panel(
         offline_app.handle_agent_event(
             AgentEvent(
                 "assistant_done",
-                messages=[ChatMessage(role="assistant", content="```python\nx = 2\n```")],
+                messages=[
+                    ChatMessage(role="assistant", content="```python\nx = 2\n```")
+                ],
             )
         )
         await pilot.pause()
@@ -813,7 +838,9 @@ async def test_an_answer_with_no_code_empties_the_panel(offline_app: VoxApp) -> 
         offline_app.handle_agent_event(
             AgentEvent(
                 "assistant_done",
-                messages=[ChatMessage(role="assistant", content="```python\nx = 1\n```")],
+                messages=[
+                    ChatMessage(role="assistant", content="```python\nx = 1\n```")
+                ],
             )
         )
         await pilot.pause()
@@ -860,7 +887,10 @@ async def test_a_finished_preload_reports_how_long_it_took(offline_app: VoxApp) 
         offline_app.end_preload("m", 42.5, None)
         await pilot.pause()
         assert not offline_app.query(ThinkingBox)
-        assert "MODEL RESIDENT - m ready in 42.5s" in messages(offline_app)[-1].message.content
+        assert (
+            "MODEL RESIDENT - m ready in 42.5s"
+            in messages(offline_app)[-1].message.content
+        )
         assert "IDLE" in str(offline_app.query_one("#status").render())
 
 
@@ -897,3 +927,49 @@ async def test_ctrl_g_stops_waiting_for_a_preload(offline_app: VoxApp) -> None:
         assert "STOPPED WAITING FOR m" in messages(offline_app)[-1].message.content, (
             "a late answer does not re-announce a preload nobody is waiting for"
         )
+
+
+async def test_ctrl_shift_l_opens_the_key_legend(offline_app: VoxApp) -> None:
+    """The legend the key bar has no room for, one keystroke away."""
+    from vox_chat.ui.modals import KeysModal
+
+    async with offline_app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("ctrl+shift+l")
+        await pilot.pause()
+        assert isinstance(offline_app.screen, KeysModal)
+        shown = offline_app.screen.query_one("#keys-table")._Static__content
+        shown = shown.plain if hasattr(shown, "plain") else str(shown)
+        assert "ctrl+shift+l" in shown
+        assert "ctrl+q" in shown
+
+        # The same key closes it again, and so does escape.
+        await pilot.press("ctrl+shift+l")
+        await pilot.pause()
+        assert not isinstance(offline_app.screen, KeysModal)
+
+
+async def test_f1_reaches_the_legend_where_ctrl_shift_is_swallowed(
+    offline_app: VoxApp,
+) -> None:
+    """ctrl+shift+<letter> does not arrive on every terminal, so the legend
+    has a function key too, and /keys for when neither does."""
+    from vox_chat.ui.modals import KeysModal
+
+    actions: dict[str, list[str]] = {}
+    for binding in VoxApp.BINDINGS:
+        actions.setdefault(binding.action, []).append(binding.key)
+    assert actions["open_keys"] == ["ctrl+shift+l", "f1"]
+
+    async with offline_app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("f1")
+        await pilot.pause()
+        assert isinstance(offline_app.screen, KeysModal)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(offline_app.screen, KeysModal)
+
+        offline_app.run_command("/keys")
+        await pilot.pause()
+        assert isinstance(offline_app.screen, KeysModal)
