@@ -138,7 +138,7 @@ def check_model(loaded: LoadedConfig, models: list[str]) -> Check:
 
 def check_mesh(loaded: LoadedConfig) -> Check:
     """What the mesh would find if it were asked to go online right now."""
-    from .mesh import MeshSettings, pki_dir, psk_path, PSK_ENV
+    from .mesh import MeshSettings, pki_dir
 
     settings = MeshSettings.from_config(loaded.data)
     where = f"{settings.group}:{settings.port}"
@@ -164,12 +164,8 @@ def check_mesh(loaded: LoadedConfig) -> Check:
         return Check(
             "WARN", "MESH", f"{where} - no certificate and auto_provision is off"
         )
-    if os.environ.get(PSK_ENV, "").strip():
-        parts.append(f"key from ${PSK_ENV}")
-    elif psk_path().exists():
-        parts.append(f"key from {psk_path()}")
-    else:
-        parts.append("no shared key yet; a local one is generated on going online")
+    if (directory / "ca.crt").exists():
+        parts.append(f"CA {directory / 'ca.crt'}")
     return Check("OK", "MESH", " - ".join(parts))
 
 

@@ -685,7 +685,12 @@ async def test_code_command_copies_a_numbered_block(offline_app: VoxApp, monkeyp
         assert copied == ["ls -la"]
 
         offline_app.run_command("/code 9")
-        await pilot.pause()
+        # The copy above runs in a worker, so its own message can still be in
+        # flight; wait for this one rather than for a fixed number of frames.
+        for _ in range(20):
+            await pilot.pause()
+            if "NO SUCH BLOCK" in messages(offline_app)[-1].message.content:
+                break
         assert "NO SUCH BLOCK" in messages(offline_app)[-1].message.content
 
 

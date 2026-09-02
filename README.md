@@ -236,15 +236,18 @@ while it is announcing itself to other agents.
               │                                                │
               │  1. ANNOUNCE — UDP multicast 239.17.42.1:45177, TTL 1
               │     {agent_id, incarnation, whois_port, caps_digest, ts, nonce}
-              │     signed HMAC-SHA256 with the shared key
+              │     signed Ed25519 with the agent's OWN key, carrying its
+              │     certificate so a receiver can check it against the CA
               ▼                                                ▼
          ╔══════════════════ the local network segment ══════════════════╗
          ║   every member hears every announcement; TTL 1 means it       ║
          ║   never leaves this segment — no router, no cloud VPC         ║
          ╚═══════════════════════════════════════════════════════════════╝
               │                                                │
-              │  2. the listener checks signature, timestamp and nonce,
-              │     then asks the registry: new? restarted? just a heartbeat?
+              │  2. the listener checks, in order: the certificate against the
+              │     CA, that the announced id is one of its SANs, the Ed25519
+              │     signature, then the timestamp and nonce. Only then does it
+              │     ask the registry: new? restarted? just a heartbeat?
               │
               │  3. WHOIS — unicast, mTLS, only when the answer is
               │     "new" or "restarted"
@@ -304,12 +307,17 @@ mTLS handshake.
 
 ### What a second machine needs
 
-Two nodes see each other only if they share **both** the certificate authority
-(`~/.vox/pki/ca.crt`) and the pre-shared key (`~/.vox/mesh-psk`, or
-`$DISCOVERY_PSK`). VOX creates its own on the first `F3` and tells
-you where they are; until they are copied you have a mesh of one. The key
-alone is not enough: an intruder holding it can announce, and still fails the
-mTLS handshake without a certificate from the same CA.
+There is no shared secret. Every agent signs with its own private key, which
+never leaves its machine, and carries its certificate in each announcement;
+a receiver checks that certificate against the authority it trusts.
+
+So a second machine needs a certificate of its own, issued by the same CA, and
+that CA's `ca.crt` to check everyone else. VOX creates an authority and its own
+certificate on the first `F3` and tells you where they are; until another
+machine is issued one, you have a mesh of one. The simplest way is to copy the
+whole `~/.vox/pki` directory (`ca.crt` **and** `ca.key`) to the second machine
+and let it issue itself a certificate; the careful way is to keep `ca.key` on
+one machine and hand out only leaf certificates plus `ca.crt`.
 
 Everything is on by request only — VOX announces nothing until you press the
 key. `vox doctor` shows the group, the port, the agent id, the certificate

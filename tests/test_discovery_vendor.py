@@ -38,9 +38,6 @@ from vox_chat.discovery.identity import (  # noqa: E402
 )
 from vox_chat.discovery.registry import Observation, PeerState, Registry  # noqa: E402
 
-KEY = b"a-test-key-that-is-long-enough"
-
-
 @pytest.fixture(scope="module")
 def pki() -> tuple[Path, Path]:
     """A throwaway certificate authority, plus a second, foreign one."""
@@ -62,15 +59,10 @@ def issue(agent_id: str, directory: Path, ca: Path | None = None) -> Identity:
 
 
 def test_protocol() -> None:
-    announce = protocol.new_announce("a1", 1, 9000, "deadbeef")
-    assert protocol.decode(protocol.encode(announce, KEY), KEY) == announce
-
-    tampered = bytearray(protocol.encode(announce, KEY))
-    tampered[-8] ^= 0x40
-    with pytest.raises(protocol.ProtocolError):
-        protocol.decode(bytes(tampered), KEY)
-
+    """The signing paths are covered in tests/test_mesh.py, which needs no
+    sockets; what is left here is the replay window."""
     guard = protocol.ReplayGuard()
+    announce = protocol.new_announce("a1", 1, 9000, "deadbeef")
     guard.check(announce)
     with pytest.raises(protocol.ProtocolError):
         guard.check(announce)  # the same nonce twice
@@ -187,7 +179,6 @@ def test_integration(pki: tuple[Path, Path]) -> None:
             identity=issue(agent_id, pki),
             name=name,
             capabilities={"verbs": verbs},
-            psk=KEY,
             announce_interval=2.0,
         )
         for name, agent_id, verbs in specs
@@ -207,20 +198,18 @@ def test_integration(pki: tuple[Path, Path]) -> None:
         assert watcher.category == "OBSERVER"
         assert watcher not in agents[0].peers_for("observe")
 
-        # An intruder holding the key but a foreign certificate announces
-        # successfully and still never completes the handshake.
+        # An intruder from another CA: its announcements no longer even parse,
+        # because the certificate they carry is not one this mesh trusts.
         intruder = DiscoveryAgent(
             identity=Identity.load("intruder-01", rogue_dir, ca_path=rogue_dir / "ca.crt"),
             name="intruder",
             capabilities={"verbs": ["observe"]},
-            psk=KEY,
             announce_interval=2.0,
         )
         intruder.start()
         time.sleep(7)
         seen = [p for p in agents[0].registry.snapshot() if p.agent_id == "intruder-01"]
         assert not seen, f"the intruder entered the registry: {seen}"
-        assert "intruder-01" in agents[0]._rejected
         intruder.stop()
 
         agents[2].stop()

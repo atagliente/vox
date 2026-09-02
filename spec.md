@@ -402,10 +402,17 @@ off until asked: nothing is announced before the operator presses the key.
   commands are always the fallback.
 
 The protocol lives in `vox_chat/discovery/`, vendored with only its imports
-changed: signed multicast announcements (239.17.42.1:45177, TTL 1), a WHOIS
-handshake over mTLS where the certificate SAN must equal the announced agent
-id, a category derived deterministically from the declared verbs, and a
-registry with PROBATION → ACTIVE → SUSPECT → DEAD.
+changed: multicast announcements (239.17.42.1:45177, TTL 1) signed per agent
+with Ed25519 and carrying the signer's certificate, a WHOIS handshake over mTLS
+where the certificate SAN must equal the announced agent id, a category derived
+deterministically from the declared verbs, and a registry with PROBATION →
+ACTIVE → SUSPECT → DEAD.
+
+There is no shared secret anywhere in the protocol. A receiver validates the
+certificate in the packet against its own CA, requires the announced agent id
+to be a SAN of that certificate, and then checks the signature — so a member
+cannot announce itself as another member, and a stranger's packet is dropped
+before it reaches the registry.
 
 The agent id always ends in a fingerprint of the machine — the first 12 hex
 characters of the SHA-256 of its MAC address — appended to the label from
@@ -416,8 +423,7 @@ announced; with no hardware MAC the fingerprint falls back to a hash of user
 and host.
 
 `vox_chat/mesh.py` is the only part the interface talks to. It owns the
-identity (`~/.vox/pki`, a 24h certificate reissued past half life), the
-pre-shared key (`$DISCOVERY_PSK`, else `~/.vox/mesh-psk` at 0600), and the
+identity (`~/.vox/pki`, a 24h certificate reissued past half life) and the
 agent's life. Start and stop happen in a worker thread, because socket setup
 and certificate generation block; a failure is reported to the transcript and
 leaves the chat untouched.

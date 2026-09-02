@@ -10,12 +10,13 @@ The orchestration: four threads sharing one registry.
 from __future__ import annotations
 
 import logging
-import os
 import queue
 import random
 import ssl
 import threading
 import time
+
+from cryptography.hazmat.primitives import serialization
 
 from . import protocol, transport, whois
 from .identity import Identity
@@ -30,7 +31,6 @@ class DiscoveryAgent:
         identity: Identity,
         name: str,
         capabilities: dict,
-        psk: bytes,
         group: str = transport.DEFAULT_GROUP,
         port: int = transport.DEFAULT_PORT,
         announce_interval: float = 60.0,
@@ -38,14 +38,14 @@ class DiscoveryAgent:
         whois_port: int = 0,
         authorizer=None,
     ):
-        if len(psk) < 16:
-            raise ValueError("the pre-shared key is too short")
-
         self.identity = identity
         self.agent_id = identity.agent_id
         self.name = name
         self.capabilities = capabilities
-        self._psk = psk
+        # Signing material: the private half never leaves this process, and
+        # the certificate travels with every announcement so a receiver can
+        # check it against the CA without having met us before.
+        self._load_signing_material(identity)
         self._group = group
         self._port = port
         self._interval = announce_interval
@@ -121,7 +121,10 @@ class DiscoveryAgent:
                     self.agent_id, self.incarnation, self._whois.port, self._caps_digest
                 )
                 try:
-                    sock.sendto(protocol.encode(announce, self._psk), (self._group, self._port))
+                    packet = protocol.encode(
+                        announce, self._signing_key, self._certificate_der
+                    )
+                    sock.sendto(packet, (self._group, self._port))
                 except OSError as exc:
                     log.warning("[%s] sending the announcement failed: %s", self.name, exc)
                 self._stop.wait(self._next_delay())
@@ -146,7 +149,7 @@ class DiscoveryAgent:
 
     def _handle_packet(self, raw: bytes, address: str) -> None:
         try:
-            announce = protocol.decode(raw, self._psk)
+            announce = protocol.decode(raw, self._ca_public_key)
             self._replay.check(announce)
         except protocol.ProtocolError as exc:
             # The payload is not logged: it would be noise, and a log
@@ -259,9 +262,18 @@ class DiscoveryAgent:
         if identity.agent_id != self.agent_id:
             raise ValueError("a renewal cannot change the agent_id")
         self.identity = identity
+        self._load_signing_material(identity)
         self._whois.reload_identity(identity)
         log.info("[%s] certificate renewed, valid until %s",
                  self.name, identity.expires_at().isoformat())
+
+    def _load_signing_material(self, identity: Identity) -> None:
+        """The key we sign with, the certificate we show, the CA we trust."""
+        self._signing_key = protocol.load_signing_key(identity.key_path)
+        self._certificate_der = identity.certificate.public_bytes(
+            serialization.Encoding.DER
+        )
+        self._ca_public_key = protocol.load_ca_public_key(identity.ca_path)
 
     # ---------------------------------------------------------------- query API
 
@@ -274,13 +286,3 @@ class DiscoveryAgent:
         ]
 
 
-def load_psk(env_var: str = "DISCOVERY_PSK") -> bytes:
-    """The key does not belong in the source. In production it comes from a
-    secret manager, and it can be rotated. Note that a shared PSK is an
-    all-or-nothing model: whoever holds it can announce itself as anyone. A
-    real per-agent identity needs asymmetric keys (an Ed25519 signature) or
-    SPIFFE/SPIRE."""
-    value = os.environ.get(env_var)
-    if not value:
-        raise RuntimeError(f"{env_var} is not set")
-    return value.encode()

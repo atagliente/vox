@@ -27,9 +27,8 @@ machine and version named, not estimated.
   refreshes once a second while open; `Ctrl+L` explains the states and the
   taxonomy.
 - **Going online says exactly what it did** — the agent id, the category, the
-  group and the interval — and names the two files a second machine needs, the
-  CA certificate and the pre-shared key. Announcing presence on a network is
-  not something to do quietly.
+  group and the interval — and names what a second machine needs. Announcing
+  presence on a network is not something to do quietly.
 - **Names cannot collide, whatever the configuration says.** The agent id ends
   in a fingerprint of the machine: the first 12 hex characters of the SHA-256
   of its MAC address. It is appended even when `mesh.agent_id` is set, so one
@@ -39,11 +38,25 @@ machine and version named, not estimated.
   announced. Where there is no hardware MAC, `uuid.getnode` invents a random
   node and flags it with the multicast bit; that value changes every run, so
   it is rejected and the fingerprint falls back to a hash of user and host.
+- **Every agent signs with its own key, and there is no shared secret.**
+  Announcements were signed with a pre-shared key, which meant every machine
+  signed with the same one: identical signatures, and anyone holding the key
+  could announce as anyone else — the CA only entered at the WHOIS, by which
+  point the impostor already sat in the registry on probation. Protocol
+  version 2 signs each announcement with the agent's own Ed25519 key and
+  carries its certificate in the packet (374 bytes DER, 760 in all, well
+  inside the 4096 limit). A receiver checks the certificate against its CA,
+  requires the announced id to be one of that certificate's SANs, and only
+  then checks the signature. Verified by attempting the forgeries: a member
+  announcing as another member, a certificate from a foreign CA, an edited
+  body, and a borrowed certificate signed with the wrong key — all four are
+  refused, now before the packet reaches the registry. `mesh-psk`,
+  `$DISCOVERY_PSK` and `ensure_psk` are gone; the only file two machines share
+  is `ca.crt`, which is public by nature. The two protocol versions do not
+  interoperate.
 - **The identity provisions itself.** The first join creates `~/.vox/pki/ca.crt`
-  and a 24-hour certificate whose SAN is the agent id, and generates
-  `~/.vox/mesh-psk` at mode 0600 unless `$DISCOVERY_PSK` is set. The
-  certificate is reissued once past half its life; short lives are the only
-  practical revocation here.
+  and a 24-hour certificate whose SAN is the agent id. It is reissued once past
+  half its life; short lives are the only practical revocation here.
 - **Measured, not assumed.** Two real agents on one machine: VOX (PROCESSOR,
   `infer`) and a second agent declaring `ingest`. It appeared as NEW, completed
   the WHOIS over mTLS, was classified SOURCE and went ACTIVE within a second at
@@ -66,7 +79,7 @@ machine and version named, not estimated.
   the masking helper is deleted, not merely unused.
 - `cryptography` becomes a required dependency, and `vox doctor` gains a MESH
   line: the group and port, the agent id and its category, the certificate
-  expiry, and where the pre-shared key comes from.
+  expiry, and the authority it trusts.
 - The discovery package is vendored under `vox_chat/discovery/` with only its
   imports changed, and translated into English along with its own suite, which
   binds real sockets and therefore runs only under `VOX_TEST_MESH=1`. 31 new

@@ -1,8 +1,12 @@
 """Joining the agent mesh: identity, keys, and the discovery agent's life.
 
 Everything the interface must not know about lives here — where the
-certificate comes from, where the pre-shared key is kept, and how the
-announcer is started and stopped. The UI asks for ``online`` and gets peers.
+certificate comes from, how it is renewed, and how the announcer is started
+and stopped. The UI asks for ``online`` and gets peers.
+
+There is no shared secret anywhere: an agent signs its announcements with its
+own private key, and the only file a second machine needs from this one is the
+certificate authority, whose private half stays behind.
 
 Going online announces this machine's presence on the local network segment.
 That is a deliberate act, so the controller reports exactly what it did.
@@ -28,8 +32,6 @@ from .storage import vox_home
 
 log = get_logger("mesh")
 
-PSK_ENV = "DISCOVERY_PSK"
-MIN_PSK_BYTES = 16
 CERT_LIFETIME = dt.timedelta(hours=24)
 
 _LABEL_RE = re.compile(r"[^a-zA-Z0-9-]+")
@@ -43,10 +45,6 @@ def pki_dir(settings: "MeshSettings" | None = None) -> Path:
     if settings is not None and settings.pki_dir:
         return Path(settings.pki_dir).expanduser()
     return vox_home() / "pki"
-
-
-def psk_path() -> Path:
-    return vox_home() / "mesh-psk"
 
 
 ID_HASH_CHARS = 12
@@ -170,42 +168,6 @@ def category_for(verbs: list[str]) -> str:
 # ------------------------------------------------------------------ identity
 
 
-def ensure_psk(generate: bool = True) -> bytes:
-    """The pre-shared key: the environment first, then a file we may create.
-
-    Every member of a mesh must hold the same key, so a generated one only
-    ever gives you a mesh of one until it is copied.
-    """
-    from_env = os.environ.get(PSK_ENV, "").strip()
-    if from_env:
-        key = from_env.encode("utf-8")
-        if len(key) < MIN_PSK_BYTES:
-            raise MeshError(
-                f"${PSK_ENV} is only {len(key)} bytes; the mesh needs at least "
-                f"{MIN_PSK_BYTES}"
-            )
-        return key
-
-    path = psk_path()
-    if path.exists():
-        key = path.read_bytes().strip()
-        if len(key) < MIN_PSK_BYTES:
-            raise MeshError(f"{path} holds a key shorter than {MIN_PSK_BYTES} bytes")
-        return key
-
-    if not generate:
-        raise MeshError(f"no pre-shared key: set ${PSK_ENV} or write {path}")
-    key = secrets.token_hex(32).encode("ascii")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(key)
-    try:
-        path.chmod(0o600)
-    except OSError:  # pragma: no cover - Windows has no POSIX modes
-        pass
-    log.info("generated a mesh pre-shared key at %s", path)
-    return key
-
-
 def ensure_identity(agent_id: str, directory: Path, provision: bool = True):
     """Load this agent's identity, creating the CA and certificate if needed."""
     from .discovery.identity import (
@@ -316,13 +278,10 @@ class MeshController:
             identity = ensure_identity(
                 agent_id, pki_dir(settings), provision=settings.auto_provision
             )
-            psk = ensure_psk(generate=settings.auto_provision)
-
             agent = DiscoveryAgent(
                 identity=identity,
                 name=settings.name,
                 capabilities=settings.capabilities(),
-                psk=psk,
                 group=settings.group,
                 port=settings.port,
                 announce_interval=settings.announce_interval,
@@ -391,7 +350,9 @@ class MeshController:
 
     def sharing_note(self) -> str:
         """What another machine needs before it can see this one."""
+        directory = pki_dir(self.settings)
         return (
-            f"a second machine joins only with the same {pki_dir(self.settings) / 'ca.crt'} "
-            f"and the same key from {psk_path()}"
+            f"a second machine joins with a certificate of its own issued by "
+            f"{directory / 'ca.crt'} — copy that authority, not a shared secret: "
+            f"every agent signs with its own key"
         )

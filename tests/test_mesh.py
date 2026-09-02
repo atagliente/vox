@@ -147,35 +147,165 @@ def test_the_category_follows_the_declared_verbs(verbs: list[str], category: str
     assert mesh.category_for(verbs) == category
 
 
-# -------------------------------------------------------------------- the key
+# ------------------------------------------------------------- the signature
 
 
-def test_the_key_comes_from_the_environment_first(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(mesh.PSK_ENV, "a-key-of-at-least-16-bytes")
-    assert mesh.ensure_psk() == b"a-key-of-at-least-16-bytes"
-    assert not mesh.psk_path().exists(), "nothing is written when the env supplies it"
+@pytest.fixture
+def pki(tmp_path: Path):
+    """One authority, a second foreign one, and identities under each."""
+    pytest.importorskip("cryptography")
+    from vox_chat.discovery.identity import Identity, create_ca, issue_agent_cert
+
+    ours, theirs = tmp_path / "ours", tmp_path / "theirs"
+    create_ca(ours)
+    create_ca(theirs, common_name="rogue-ca")
+
+    def identity(agent_id: str, directory: Path):
+        issue_agent_cert(
+            directory, agent_id, directory / "ca.crt", directory / "ca.key"
+        )
+        return Identity.load(agent_id, directory, ca_path=directory / "ca.crt")
+
+    return ours, theirs, identity
 
 
-def test_a_short_key_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(mesh.PSK_ENV, "tooshort")
-    with pytest.raises(MeshError, match="at least"):
-        mesh.ensure_psk()
+def _material(identity):
+    from cryptography.hazmat.primitives import serialization
+
+    from vox_chat.discovery import protocol
+
+    return (
+        protocol.load_signing_key(identity.key_path),
+        identity.certificate.public_bytes(serialization.Encoding.DER),
+    )
 
 
-def test_a_generated_key_is_written_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv(mesh.PSK_ENV, raising=False)
-    first = mesh.ensure_psk()
-    assert len(first) >= mesh.MIN_PSK_BYTES
-    assert mesh.psk_path().exists()
-    assert mesh.ensure_psk() == first, "the key is stable across restarts"
+def test_every_agent_signs_with_its_own_key(pki) -> None:
+    """No pre-shared key: two agents produce two different signatures."""
+    import json
+
+    from vox_chat.discovery import protocol
+
+    ours, _theirs, identity = pki
+    ca_public = protocol.load_ca_public_key(ours / "ca.crt")
+
+    alice_key, alice_cert = _material(identity("alice-01", ours))
+    bob_key, bob_cert = _material(identity("bob-01", ours))
+
+    announce = protocol.new_announce("alice-01", 1, 9000, "cafe")
+    packet = protocol.encode(announce, alice_key, alice_cert)
+    assert protocol.decode(packet, ca_public) == announce
+    assert len(packet) <= protocol.MAX_PACKET_BYTES
+
+    # The same body signed by two agents gives two different signatures, which
+    # is the whole point: version 1 gave both of them the same one.
+    body = announce.canonical()
+    assert alice_key.sign(body) != bob_key.sign(body)
+    assert json.loads(packet)["v"] == 2
 
 
-def test_without_a_key_and_without_permission_to_make_one(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv(mesh.PSK_ENV, raising=False)
-    with pytest.raises(MeshError, match="no pre-shared key"):
-        mesh.ensure_psk(generate=False)
+def test_a_member_cannot_announce_as_somebody_else(pki) -> None:
+    from vox_chat.discovery import protocol
+
+    ours, _theirs, identity = pki
+    ca_public = protocol.load_ca_public_key(ours / "ca.crt")
+    identity("alice-01", ours)
+    mallory_key, mallory_cert = _material(identity("mallory-01", ours))
+
+    forged = protocol.encode(
+        protocol.new_announce("alice-01", 1, 9000, "cafe"), mallory_key, mallory_cert
+    )
+    with pytest.raises(protocol.ProtocolError, match="does not name"):
+        protocol.decode(forged, ca_public)
+
+
+def test_a_certificate_from_another_authority_is_refused(pki) -> None:
+    from vox_chat.discovery import protocol
+
+    ours, theirs, identity = pki
+    ca_public = protocol.load_ca_public_key(ours / "ca.crt")
+    key, cert = _material(identity("stranger-01", theirs))
+
+    outside = protocol.encode(
+        protocol.new_announce("stranger-01", 1, 9000, "cafe"), key, cert
+    )
+    with pytest.raises(protocol.ProtocolError, match="not issued by this mesh"):
+        protocol.decode(outside, ca_public)
+
+
+def test_a_borrowed_certificate_does_not_help(pki) -> None:
+    """Holding someone's certificate is useless without their private key."""
+    from vox_chat.discovery import protocol
+
+    ours, _theirs, identity = pki
+    ca_public = protocol.load_ca_public_key(ours / "ca.crt")
+    alice_key, _ = _material(identity("alice-01", ours))
+    _, mallory_cert = _material(identity("mallory-01", ours))
+
+    mixed = protocol.encode(
+        protocol.new_announce("mallory-01", 1, 9000, "cafe"), alice_key, mallory_cert
+    )
+    with pytest.raises(protocol.ProtocolError, match="invalid signature"):
+        protocol.decode(mixed, ca_public)
+
+
+def test_an_edited_announcement_is_refused(pki) -> None:
+    import base64
+    import json
+
+    from vox_chat.discovery import protocol
+
+    ours, _theirs, identity = pki
+    ca_public = protocol.load_ca_public_key(ours / "ca.crt")
+    key, cert = _material(identity("alice-01", ours))
+
+    packet = protocol.encode(
+        protocol.new_announce("alice-01", 1, 9000, "cafe"), key, cert
+    )
+    envelope = json.loads(packet)
+    body = json.loads(base64.b64decode(envelope["body"]))
+    body["whois_port"] = 31337  # send the traffic somewhere else
+    envelope["body"] = base64.b64encode(
+        json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+    ).decode()
+
+    with pytest.raises(protocol.ProtocolError, match="invalid signature"):
+        protocol.decode(json.dumps(envelope).encode(), ca_public)
+
+
+def test_an_expired_certificate_is_refused(pki) -> None:
+    import datetime as dt
+
+    from vox_chat.discovery import protocol
+
+    ours, _theirs, identity = pki
+    ca_public = protocol.load_ca_public_key(ours / "ca.crt")
+    key, cert = _material(identity("alice-01", ours))
+    packet = protocol.encode(
+        protocol.new_announce("alice-01", 1, 9000, "cafe"), key, cert
+    )
+
+    later = dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=2)
+    with pytest.raises(protocol.ProtocolError, match="expired"):
+        protocol.decode(packet, ca_public, now=later)
+
+
+def test_a_replayed_announcement_is_refused(pki) -> None:
+    from vox_chat.discovery import protocol
+
+    ours, _theirs, identity = pki
+    ca_public = protocol.load_ca_public_key(ours / "ca.crt")
+    key, cert = _material(identity("alice-01", ours))
+
+    packet = protocol.encode(
+        protocol.new_announce("alice-01", 1, 9000, "cafe"), key, cert
+    )
+    guard = protocol.ReplayGuard()
+    guard.check(protocol.decode(packet, ca_public))
+    # A recording of a valid packet is still a valid packet; the nonce is what
+    # stops it being useful.
+    with pytest.raises(protocol.ProtocolError, match="replay"):
+        guard.check(protocol.decode(packet, ca_public))
 
 
 # ------------------------------------------------------------- the controller
@@ -229,7 +359,6 @@ def controller(monkeypatch: pytest.MonkeyPatch) -> MeshController:
         StubPeer("legacy-01", "legacy", None, "PROBATION", "10.0.0.2", [], now - 0.5),
     ]
     monkeypatch.setattr(mesh, "ensure_identity", lambda *a, **k: object())
-    monkeypatch.setattr(mesh, "ensure_psk", lambda **k: b"a-key-of-at-least-16-bytes")
     monkeypatch.setattr(
         "vox_chat.discovery.agent.DiscoveryAgent",
         lambda **kwargs: StubAgent(peers, **kwargs),
@@ -266,7 +395,6 @@ def test_a_failure_to_join_is_reported_as_a_mesh_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(mesh, "ensure_identity", lambda *a, **k: object())
-    monkeypatch.setattr(mesh, "ensure_psk", lambda **k: b"a-key-of-at-least-16-bytes")
 
     class Refusing(StubAgent):
         def start(self):
@@ -281,9 +409,13 @@ def test_a_failure_to_join_is_reported_as_a_mesh_error(
     assert controller.online is False
 
 
-def test_the_sharing_note_names_both_files(controller: MeshController) -> None:
+def test_the_sharing_note_names_the_authority_and_no_secret(
+    controller: MeshController,
+) -> None:
     note = controller.sharing_note()
-    assert "ca.crt" in note and "mesh-psk" in note
+    assert "ca.crt" in note
+    assert "own key" in note, "a second machine needs a certificate, not a secret"
+    assert "psk" not in note.lower()
 
 
 def test_an_identity_is_provisioned_on_first_use(tmp_path: Path) -> None:
@@ -340,7 +472,7 @@ class FakeController:
         return f"MESH ONLINE  ·  {len(self.peers())} agents" if self.online else ""
 
     def sharing_note(self) -> str:
-        return "copy ca.crt and mesh-psk to the other machine"
+        return "issue the other machine a certificate from ca.crt; its own key stays there"
 
 
 PEERS = [

@@ -483,8 +483,9 @@ nothing until you ask: `F3`, or `/mesh on`.
 SYS ▸ JOINING THE MESH…
 SYS ▸ MESH ONLINE - vox-b6ffa342e0d3 · PROCESSOR · announcing on
       239.17.42.1:45177 every 60s
-SYS ▸ a second machine joins only with the same ~/.vox/pki/ca.crt and the same
-      key from ~/.vox/mesh-psk
+SYS ▸ a second machine joins with a certificate of its own issued by
+      ~/.vox/pki/ca.crt — copy that authority, not a shared secret: every
+      agent signs with its own key
 ```
 
 The border turns red for as long as VOX is announcing, the header switches
@@ -565,19 +566,33 @@ PROCESSOR.
 
 #### Keys and certificates
 
-With `auto_provision` on, the first `F3` creates
-`~/.vox/pki/ca.{crt,key}`, issues a 24-hour certificate for this agent, and
-generates `~/.vox/mesh-psk` (mode 0600). That gives you a working mesh of one.
+With `auto_provision` on, the first `F3` creates `~/.vox/pki/ca.{crt,key}` and
+issues this agent a 24-hour certificate. That gives you a working mesh of one.
 
-A second machine joins only with **both**:
+There is **no shared secret**. An agent signs every announcement with its own
+private key — the same key as its certificate, mode 0600, never leaving the
+machine — and attaches its certificate to the packet. A receiver checks that
+certificate against its own `ca.crt`, checks that the announced agent id is one
+the certificate names, and only then checks the signature.
 
-- the same `ca.crt` — copy it into its `~/.vox/pki/`, and issue it a
-  certificate from the same CA;
-- the same pre-shared key — copy `mesh-psk`, or set `$DISCOVERY_PSK` on both.
+So a second machine needs two things, neither of them secret between peers:
 
-The key alone is not enough. An intruder holding it can announce itself and
-still fails the mTLS handshake, because its certificate is not from your CA;
-it is logged, dropped, and not asked again.
+- `ca.crt`, to judge everyone else's certificates;
+- a certificate of its own, issued by that same authority.
+
+The quick way, on a machine you trust, is to copy the whole `~/.vox/pki`
+directory — `ca.crt` and `ca.key` — and let VOX issue itself a certificate on
+its first `F3`. The careful way is to keep `ca.key` on one machine, run
+
+```bash
+python3 -c "from vox_chat.discovery.identity import issue_agent_cert; \
+    issue_agent_cert('pki', 'vox-<their-fingerprint>', 'pki/ca.crt', 'pki/ca.key')"
+```
+
+there, and hand the other machine only its `<agent-id>.crt`, `<agent-id>.key`
+and `ca.crt`. An intruder with none of those can still send packets; they are
+rejected before they reach the registry, because the certificate they carry was
+not issued by your authority.
 
 Certificates are short-lived on purpose: a day is the most practical form of
 revocation when there is no CRL. VOX reissues automatically once one is past
@@ -586,20 +601,22 @@ half its life.
 To see a real second agent, the vendored runner starts one:
 
 ```bash
-export DISCOVERY_PSK="$(cat ~/.vox/mesh-psk)"
 python3 -m vox_chat.discovery.run_agent --name ingestor \
     --agent-id ingestor-01 --pki ~/.vox/pki --verbs ingest --interval 5
 ```
 
-Issue it a certificate from the same CA first, or it will announce and never
-be admitted.
+It needs `ingestor-01.crt` and `ingestor-01.key` in that directory, issued by
+the same CA; without them it cannot sign anything anyone will accept.
 
 #### Limits worth knowing
 
 - **Multicast does not cross routers**, and cloud VPCs disable it. Beyond one
   L2 segment this needs a seed list or a registry, which is not built yet.
-- **The pre-shared key is all-or-nothing**: whoever holds it can announce as
-  anyone. Only the mTLS handshake tells the impostors apart.
+- **The CA is the whole of the trust.** Whoever holds `ca.key` can issue an
+  identity for any name, so it deserves the care you would give any signing
+  key. Individual agents only ever hold their own private key, and losing one
+  compromises exactly one agent — for at most the 24 hours its certificate has
+  left to live.
 - **The WHOIS authorizer is permissive by default**: every mesh member may ask
   VOX to describe itself. The descriptor holds the agent id, the name and the
   declared verbs — nothing about your conversation, your model or your files.

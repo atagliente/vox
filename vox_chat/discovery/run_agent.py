@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """A command line discovery agent, handy for testing a mesh of more than one.
 
-    DISCOVERY_PSK=a-key-of-at-least-16-bytes \
-        python3 -m vox_chat.discovery.run_agent --name ingestor \
-        --agent-id ingestor-01 --verbs ingest,publish --interval 5
+    python3 -m vox_chat.discovery.run_agent --name ingestor \
+        --agent-id ingestor-01 --pki ~/.vox/pki --verbs ingest,publish --interval 5
+
+The agent needs a certificate of its own in the PKI directory, issued by the
+same authority as everyone else's; there is no shared secret to pass in.
 """
 
 import argparse
@@ -11,7 +13,7 @@ import logging
 import time
 from pathlib import Path
 
-from vox_chat.discovery.agent import DiscoveryAgent, load_psk
+from vox_chat.discovery.agent import DiscoveryAgent
 from vox_chat.discovery.identity import Identity
 
 
@@ -45,7 +47,6 @@ def main() -> None:
             "formats": ["application/json"],
             "max_concurrency": 8,
         },
-        psk=load_psk(),
         announce_interval=args.interval,
     )
     agent.start()
