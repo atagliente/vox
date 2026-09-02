@@ -175,8 +175,11 @@ def test_ask_over_mtls(pki: tuple[Path, Path]) -> None:
     client_identity = issue("asker-01", pki)
     seen: list[tuple[str, str]] = []
 
-    def handler(caller: str, question: str) -> dict:
-        seen.append((caller, question))
+    def handler(caller: str, question: str, emit=None, conversation: str = "") -> dict:
+        seen.append((caller, question, conversation))
+        if emit is not None:
+            emit("reasoning", "weighing it")
+            emit("text", "partial ")
         time.sleep(0.3)  # a model takes a moment; the 5s handshake cap must not bite
         return {"answer": f"{question} -> yes", "model": "test:1b"}
 
@@ -188,11 +191,17 @@ def test_ask_over_mtls(pki: tuple[Path, Path]) -> None:
     )
     server.start()
     try:
+        streamed: list[tuple[str, str]] = []
         reply = whois.ask("127.0.0.1", server.port, "answerer-01", client_identity,
-                          "is it safe", timeout=10)
+                          "is it safe", timeout=10, conversation="conv-42",
+                          on_event=lambda kind, text, ts: streamed.append((kind, text)))
         assert reply["answer"] == "is it safe -> yes"
         assert reply["model"] == "test:1b"
-        assert seen == [("asker-01", "is it safe")], "the peer sees the question, nothing else"
+        assert seen == [("asker-01", "is it safe", "conv-42")], (
+            "the peer sees the question and which conversation it belongs to"
+        )
+        # The fragments arrive before the answer, and are told apart by kind.
+        assert streamed == [("reasoning", "weighing it"), ("text", "partial ")]
 
         # WHOIS still works on the same socket.
         assert whois.query("127.0.0.1", server.port, "answerer-01",

@@ -126,7 +126,7 @@ python -m vox_chat         # same app, from a checkout
 | `Ctrl+Y` | copy last code block | `Ctrl+G` | stop generating |
 | `↑` / `↓` | input history | `Ctrl+B` | side panel |
 | `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+T` / `Ctrl+E` | inspect / export |
-| `F3` | join / leave the mesh | `F4` | the universe |
+| `F3` | join / leave the mesh | `F4` / `F5` | the universe / the round |
 | | | `Ctrl+Q` | quit |
 
 `Enter` sends because `Ctrl+Enter` is not delivered by most terminals; it stays
@@ -151,7 +151,7 @@ restarts. A key legend is always visible on the bottom row.
 | `/stats` | token usage, context fill and speed for the session |
 | `/warm` | preload the active model on the server |
 | `/mesh [on\|off\|new-ca\|sample-ca]`, `/universe` | join the mesh, see who is on it, swap the authority |
-| `/consensus [on\|off]` | ask the other agents about `[CNS] … [/CNS]` |
+| `/consensus [on\|off]`, `/round` | ask the other agents, watch them answer |
 | `/connect`, `/stop`, `/new`, `/clear`, `/exit` | connection and session control |
 
 Send a message that really starts with a slash by prefixing it with `//`.
@@ -686,6 +686,30 @@ SYS  ▸ CONSENSUS - the agents differ; reconciling locally
 VOX  ▸ …
 ```
 
+**Watching them think.** `F5` (or `/round`) opens the round as it happens.
+Peers stream what they are writing over the same mTLS channel — no websocket,
+because that channel is already an authenticated two-way stream — and each
+fragment is shown with the time it arrived:
+
+```text
+THE ROUND · node-b  node-c
+asked: Is a lock-free ring buffer safe when a reader can stall?
+conversation 7f3c1a9b2e04
+
+14:32:07 node-b: · weighing the reclamation problem
+14:32:09 node-c: Yes, provided readers never stall.
+14:32:11 node-b: No: a stalled reader blocks reclamation indefinitely.
+```
+
+One colour per agent, italics for its thinking and upright for its answer. This
+is a separate view from the transcript on purpose: the transcript shows each
+peer's answer as one block, which is right for reading afterwards and loses who
+was writing at the same time as whom.
+
+A peer that does not stream simply appears when it is done. Measured on one
+machine with `qwen2.5-coder:3b`: the first fragment 4.1s in, then roughly ten
+tokens a second until the answer completed.
+
 **How the answers become one answer.** If the replies agree once normalised —
 whitespace, case and trailing punctuation ignored — that is the result, and the
 tally is written into the transcript. A vote needs at least two agents and a
@@ -724,8 +748,8 @@ asking and for answering alike.
 
 **Answering other agents.** With `answer_requests` on, this node answers peers
 that passed mTLS, one at a time, capped at `answer_max_tokens`. Each request is
-written into the transcript — who asked, how long the question was, how long
-the answer took. The question is answered in a fresh two-message conversation:
+written into the transcript — who asked, which conversation it belongs to, how
+long the question was, how long the answer took. The question is answered in a fresh two-message conversation:
 your conversation, role, workspace and files are not part of it.
 
 ```json

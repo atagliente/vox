@@ -51,6 +51,9 @@ class Report:
 
     title: str = "VOX session"
     created_at: str = ""
+    # The session this came from, so a report, a saved session and a peer's
+    # log of being asked can all be tied back to the same conversation.
+    conversation_id: str = ""
     vox_version: str = __version__
     provider: str = ""
     endpoint: str = ""
@@ -74,6 +77,7 @@ class Report:
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
             "schema": "vox.report/1",
+            "conversation_id": self.conversation_id,
             "created_at": self.created_at,
             "vox_version": self.vox_version,
             "question": self.question,
@@ -157,6 +161,7 @@ def render_markdown(report: Report) -> str:
         f"| provider | `{report.provider}` |",
         f"| endpoint | `{report.endpoint}` |",
         f"| role | `{report.role}` |",
+        f"| conversation | `{report.conversation_id}` |",
     ]
     lines.extend(f"| {label} | {value} |" for label, value in _pairs(report.parameters))
     lines.extend(["", "## Exchange", ""])
@@ -274,6 +279,7 @@ def render_html(report: Report) -> str:
             ("provider", report.provider),
             ("endpoint", report.endpoint),
             ("role", report.role),
+            ("conversation", report.conversation_id),
             *_pairs(report.parameters),
         ]),
         "</table>",

@@ -461,7 +461,8 @@ class MeshController:
         return list(agent.peers_for(verb))[:limit]
 
     def ask_peers(self, question: str, verb: str = "infer", limit: int = 5,
-                  timeout: float = 90.0) -> list["PeerAnswer"]:
+                  timeout: float = 90.0, on_event=None,
+                  conversation: str = "") -> list["PeerAnswer"]:
         """Ask every matching peer the same question, in parallel.
 
         A peer that fails or times out comes back with ``error`` set rather
@@ -480,10 +481,17 @@ class MeshController:
         def one(peer) -> PeerAnswer:
             label = peer.name or peer.agent_id
             started = time.monotonic()
+
+            def relay(kind: str, text: str, ts: float) -> None:
+                if on_event is not None:
+                    on_event(label, kind, text, ts)
+
             try:
                 reply = whois.ask(
                     peer.address, peer.whois_port, peer.agent_id,
                     agent.identity, question, timeout=timeout,
+                    on_event=relay if on_event is not None else None,
+                    conversation=conversation,
                 )
             except Exception as exc:  # noqa: BLE001 - every failure is a result
                 return PeerAnswer(

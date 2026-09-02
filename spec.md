@@ -452,6 +452,14 @@ WHOIS already uses, as an `ASK` operation. A peer answers with its own model in
 a fresh two-message conversation, so no context travels in either direction. A
 node answers one question at a time and refuses a second with `busy`.
 
+A peer streams what it writes — reasoning and answer, tagged — as
+newline-delimited JSON on that same connection before the final reply, so the
+asker can watch rather than wait. No websocket is involved: the channel is
+already an authenticated bidirectional stream. `F5` (`/round`) shows those
+fragments in arrival order, timestamped and coloured per agent, which the
+transcript cannot do because it groups each answer into one block. The caller
+caps how much a peer may stream.
+
 The replies are reconciled, not agreed. Answers that match once normalised form
 a vote when they reach both the quorum and a strict majority; otherwise the
 local model synthesises a final answer and is told to name the disagreements.

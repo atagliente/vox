@@ -72,13 +72,18 @@ HANDSHAKE_TIMEOUT = 5.0
 # that is already open and already authenticated.
 MAX_ASK_BYTES = 8 * 1024
 ASK_TIMEOUT = 120.0
+# A peer streams what it is writing before the final reply. This caps how much
+# of that a caller will read, so a chatty or hostile peer cannot stream for
+# ever into the asker's memory.
+MAX_STREAM_BYTES = 256 * 1024
 
 # A callable given the client's agent_id, deciding whether to serve it.
 Authorizer = Callable[[str], bool]
 
-# A callable given (caller_agent_id, question); it returns {"answer", "model"}
-# or raises. Answering means running a model, so it is slow and it is capped.
-AskHandler = Callable[[str, str], dict]
+# A callable given (caller_agent_id, question, emit, conversation_id); it
+# returns {"answer", "model"} or raises, and may call emit(kind, text) as it
+# writes. Answering means running a model, so it is slow and it is capped.
+AskHandler = Callable[[str, str, Callable[[str, str], None], str], dict]
 
 
 def classify(capabilities: dict) -> str:
@@ -138,6 +143,8 @@ class _Handler(socketserver.StreamRequestHandler):
             return
 
         question = str(request.get("question", ""))
+        # The asker's conversation, so both sides can be tied to one exchange.
+        conversation = str(request.get("conversation", ""))[:64]
         if not question.strip():
             self._reply({"error": "empty question"})
             return
@@ -154,7 +161,7 @@ class _Handler(socketserver.StreamRequestHandler):
             # The 5s handshake timeout is nowhere near enough for a model.
             self.connection.settimeout(self.server.ask_timeout)
             started = time.monotonic()
-            result = handler(caller, question)
+            result = handler(caller, question, self._emit, conversation)
             elapsed = time.monotonic() - started
             log.info("ask: answered %s in %.1fs", caller, elapsed)
             self._reply({
@@ -168,6 +175,26 @@ class _Handler(socketserver.StreamRequestHandler):
             self._reply({"error": str(exc)[:200]})
         finally:
             self.server.ask_slot.release()
+
+    def _emit(self, kind: str, text: str) -> None:
+        """Send one line of the answer as it is produced.
+
+        The asker sees the peer think rather than waiting in silence for a
+        minute. These lines precede the final reply, and are told apart by
+        carrying ``event``; anything that cannot be written is dropped, because
+        losing the live view must never lose the answer.
+        """
+        try:
+            self.wfile.write(
+                json.dumps(
+                    {"event": kind, "text": text, "ts": time.time()},
+                    separators=(",", ":"),
+                ).encode()
+                + b"\n"
+            )
+            self.wfile.flush()
+        except OSError:
+            pass
 
     def _reply(self, payload: dict) -> None:
         try:
@@ -307,32 +334,58 @@ def ask(
     identity: Identity,
     question: str,
     timeout: float = ASK_TIMEOUT,
+    on_event=None,
+    conversation: str = "",
 ) -> dict:
     """Ask a peer a question, over the same mTLS channel as WHOIS.
 
     The peer runs its own model with nothing but this question: no context
     travels in either direction. Returns ``{"answer", "model", "elapsed"}``.
+
+    The peer streams what it is producing as newline-delimited JSON before the
+    final reply — ``{"event": "text" | "reasoning", "text": ..., "ts": ...}``.
+    ``on_event(kind, text, ts)`` is called for each, so the asker can watch a
+    slow agent think instead of staring at nothing. No websocket is involved:
+    this channel is already an authenticated bidirectional stream.
     """
     context = client_context(identity)
+    payload: dict | None = None
     with socket.create_connection((address, port), timeout=timeout) as raw_sock:
         with context.wrap_socket(raw_sock, server_hostname=expected_agent_id) as sock:
             sock.settimeout(timeout)
             sock.sendall(
-                json.dumps({"op": "ASK", "v": 1, "question": question}).encode()
+                json.dumps(
+                    {"op": "ASK", "v": 2, "question": question, "stream": True,
+                     "conversation": conversation}
+                ).encode()
                 + b"\n"
             )
-
-            chunks, total = [], 0
-            while total < MAX_DESCRIPTOR_BYTES:
-                chunk = sock.recv(4096)
-                if not chunk:
+            with sock.makefile("rb") as stream:
+                streamed = 0
+                while True:
+                    line = stream.readline(MAX_DESCRIPTOR_BYTES)
+                    if not line:
+                        break
+                    try:
+                        message = json.loads(line)
+                    except ValueError:
+                        break
+                    if "event" in message:
+                        streamed += len(line)
+                        if streamed > MAX_STREAM_BYTES:
+                            raise ValueError("peer streamed too much")
+                        if on_event is not None:
+                            on_event(
+                                str(message.get("event", "text")),
+                                str(message.get("text", "")),
+                                float(message.get("ts", 0.0)),
+                            )
+                        continue
+                    payload = message
                     break
-                chunks.append(chunk)
-                total += len(chunk)
-                if b"\n" in chunk:
-                    break
 
-    payload = json.loads(b"".join(chunks).decode())
+    if payload is None:
+        raise ValueError("the peer closed without answering")
     if not payload.get("ok"):
         raise ValueError(str(payload.get("error", "refused")))
     return {

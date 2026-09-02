@@ -252,6 +252,7 @@ class KeyBar(Static):
         ("^E", "export"),
         ("F3", "online"),
         ("F4", "universe"),
+        ("F5", "round"),
         ("alt+enter", "new line"),
         ("^N", "new"),
         ("^S", "settings"),

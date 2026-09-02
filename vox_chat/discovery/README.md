@@ -49,9 +49,16 @@ Discovery describes; ASK is the one operation that makes the mesh work. It
 rides the channel WHOIS already opened — same port, same mTLS, same identity
 and authorizer — so nothing new is exposed:
 
-    -> {"op": "ASK", "v": 1, "question": "..."}
+    -> {"op": "ASK", "v": 2, "question": "...", "stream": true}
+    <- {"event": "reasoning", "text": "...", "ts": 1.0}   zero or more
+    <- {"event": "text",      "text": "...", "ts": 1.1}   zero or more
     <- {"ok": true, "answer": "...", "model": "...", "elapsed": 1.2}
     <- {"error": "busy" | "ask not supported" | "question over 8192 bytes"}
+
+The event lines are the answer being written, so the caller can show it as it
+happens; they are told apart from the final reply by carrying `event`. A caller
+that ignores them simply reads until the object without one. The caller caps
+the total streamed, so a chatty or hostile peer cannot stream for ever.
 
 A server without an `ask_handler` refuses every ASK. The handler runs a model,
 so two things differ from WHOIS: the socket timeout is raised before the

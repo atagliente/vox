@@ -13,7 +13,10 @@ replies stay on screen either way.
 from __future__ import annotations
 
 import re
+import textwrap
+import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 OPEN = "[CNS]"
@@ -185,3 +188,82 @@ def render_panel(answers: list[PeerAnswer]) -> str:
             lines.append(answer.error or "silent")
         lines.append("")
     return "\n".join(lines).rstrip()
+
+
+# ------------------------------------------------------------------ live view
+
+
+@dataclass
+class Fragment:
+    """One piece of what an agent was writing, as it arrived."""
+
+    agent: str
+    kind: str          # "text" or "reasoning"
+    text: str
+    ts: float
+
+
+class RoundLog:
+    """What every agent said during a round, in the order it arrived.
+
+    Kept apart from the transcript on purpose: the transcript shows each peer's
+    answer in one block, which loses the interleaving. Here the fragments stay
+    in wall-clock order, so it is visible when two agents were writing at once
+    and which one was still thinking while another had finished.
+    """
+
+    def __init__(self, limit: int = 4000) -> None:
+        self.fragments: list[Fragment] = []
+        self.question: str = ""
+        self.conversation_id: str = ""
+        self.started: float = 0.0
+        self._limit = limit
+
+    def begin(self, question: str, started: float, conversation_id: str = "") -> None:
+        self.fragments = []
+        self.question = question
+        self.conversation_id = conversation_id
+        self.started = started
+
+    def add(self, agent: str, kind: str, text: str, ts: float) -> None:
+        if not text:
+            return
+        last = self.fragments[-1] if self.fragments else None
+        # A model arrives token by token; one line per token is unreadable, so
+        # consecutive fragments from the same agent are joined.
+        if last is not None and last.agent == agent and last.kind == kind:
+            last.text += text
+            return
+        self.fragments.append(Fragment(agent, kind, text, ts or time.time()))
+        if len(self.fragments) > self._limit:
+            del self.fragments[: len(self.fragments) - self._limit]
+
+    def agents(self) -> list[str]:
+        seen: list[str] = []
+        for fragment in self.fragments:
+            if fragment.agent not in seen:
+                seen.append(fragment.agent)
+        return seen
+
+    def lines(self, width: int = 76) -> list[tuple[str, str, str, str]]:
+        """``(timestamp, agent, kind, body)`` rows, wrapped for a screen."""
+        rows: list[tuple[str, str, str, str]] = []
+        for fragment in self.fragments:
+            stamp = datetime.fromtimestamp(fragment.ts).strftime("%H:%M:%S")
+            body = " ".join(fragment.text.split())
+            if not body:
+                continue
+            for index, chunk in enumerate(textwrap.wrap(body, width) or [body]):
+                rows.append(
+                    (stamp if index == 0 else "", fragment.agent, fragment.kind, chunk)
+                )
+        return rows
+
+    def as_text(self, width: int = 76) -> str:
+        """The plain rendering: ``14:32:07 node-b: …``."""
+        out: list[str] = []
+        for stamp, agent, kind, body in self.lines(width):
+            head = f"{stamp} {agent}:" if stamp else " " * 9 + " " * (len(agent) + 1)
+            mark = "· " if kind == "reasoning" else ""
+            out.append(f"{head} {mark}{body}")
+        return "\n".join(out)

@@ -227,6 +227,11 @@ InspectScreen { background: #16150f; }
 .msg-error { color: #c47a5d; }
 .msg-reasoning { color: #6b6349; text-style: italic; }
 .msg-peer { color: #7f9aa8; }
+RoundScreen { background: #16150f; }
+#round-title { padding: 1 1 0 1; color: #c9a15a; }
+#round-question { padding: 0 1 1 1; color: #8b8266; }
+#round-body { height: 1fr; padding: 0 1; }
+#round-keys { height: 1; padding: 0 1; color: #8b8266; background: #24211a; }
 ModalScreen { align: center middle; }
 #modal-box {
     width: 82;
@@ -301,6 +306,11 @@ InspectScreen { background: #101014; }
 .msg-error { color: #d08070; }
 .msg-reasoning { color: #6c6c78; text-style: italic; }
 .msg-peer { color: #7f9aa8; }
+RoundScreen { background: #101014; }
+#round-title { padding: 1 1 0 1; color: #9aa7b8; }
+#round-question { padding: 0 1 1 1; color: #8b8b98; }
+#round-body { height: 1fr; padding: 0 1; }
+#round-keys { height: 1; padding: 0 1; color: #8b8b98; background: #24242c; }
 ModalScreen { align: center middle; }
 #modal-box {
     width: 82; max-width: 96%; height: auto; max-height: 90%;
@@ -358,6 +368,11 @@ InspectScreen { background: #f4f2ec; }
 .msg-error { color: #9c4a2f; }
 .msg-reasoning { color: #7c7768; text-style: italic; }
 .msg-peer { color: #3f6a7d; }
+RoundScreen { background: #f4f2ec; }
+#round-title { padding: 1 1 0 1; color: #7a5c23; }
+#round-question { padding: 0 1 1 1; color: #5c584a; }
+#round-body { height: 1fr; padding: 0 1; }
+#round-keys { height: 1; padding: 0 1; color: #5c584a; background: #dcd7c8; }
 ModalScreen { align: center middle; }
 #modal-box {
     width: 82; max-width: 96%; height: auto; max-height: 90%;

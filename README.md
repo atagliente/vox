@@ -92,7 +92,7 @@ has no authentication — only on a network you trust.
 | `Ctrl+Y` | copy last code block | `Ctrl+G` | stop generating |
 | `↑` / `↓` | input history | `Ctrl+B` | side panel |
 | `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+T` / `Ctrl+E` | inspect / export |
-| `F3` | join / leave the mesh | `F4` | the universe |
+| `F3` | join / leave the mesh | `F4` / `F5` | the universe / the round |
 | | | `Ctrl+Q` | quit |
 
 The bottom row shows this legend at all times.
@@ -110,7 +110,7 @@ The bottom row shows this legend at all times.
 | `/export [html\|json\|md\|toon]` | save the session and its figures (`Ctrl+E`) |
 | `/warm` | preload the model on the server |
 | `/mesh [on\|off\|new-ca\|sample-ca]`, `/universe` | the agent mesh |
-| `/consensus [on\|off]` | ask the other agents, marked with `[CNS] … [/CNS]` |
+| `/consensus [on\|off]`, `/round` | ask the other agents about `[CNS] … [/CNS]`, watch them answer |
 | `/agent on\|off`, `/workspace <path>` | coding-agent mode |
 | `/config`, `/settings`, `/connect`, `/stop` | configuration and connection |
 
@@ -253,11 +253,27 @@ answer and names where the agents differed. Either way every reply stays on
 screen, in the transcript and in the side panel (`/panel consensus`), and in
 the exported report.
 
+**`F5` shows the round as it happens.** Peers stream what they are writing —
+reasoning included — over the same mTLS channel, so a slow agent is visible
+rather than silent:
+
+```text
+14:32:07 node-b: · weighing the reclamation problem
+14:32:09 node-c: Yes, provided readers never stall.
+14:32:11 node-b: No: a stalled reader blocks reclamation indefinitely.
+```
+
+Timestamps are when each fragment arrived, one colour per agent, italics for
+thinking and upright for the answer. It is a separate view from the transcript
+because the transcript shows each answer as one block, which loses who was
+writing at the same time as whom.
+
 `/consensus` shows who would be asked. `/consensus off` stops both asking and
 answering.
 
-Measured on one machine, two nodes, `qwen2.5-coder:3b` answering: discovery to
-first answer in 14.0s, of which 14.0s was the model.
+Measured on one machine, two nodes, `qwen2.5-coder:3b` answering: the first
+fragment arrived 4.1s in and the rest streamed token by token, roughly ten a
+second, until the answer was complete.
 
 **It is aggregation, not agreement.** mTLS proves who a peer is, not that it is
 truthful; there is no Byzantine tolerance, and a member that lies is believed.

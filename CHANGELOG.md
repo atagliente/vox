@@ -29,6 +29,23 @@ machine and version named, not estimated.
   called — the 5s handshake cap would kill every real answer — and a semaphore
   allows one answer at a time, so a peer cannot queue generations on somebody
   else's hardware.
+- **The agents can be watched while they answer.** A peer streams what it is
+  writing — reasoning and answer, tagged apart — as newline-delimited JSON on
+  the same mTLS connection, before the final reply. No websocket: that channel
+  is already an authenticated two-way stream, so adding one would have meant a
+  second listener, a dependency and another handshake for nothing. `F5`
+  (`/round`) shows the fragments in arrival order, timestamped, one colour per
+  agent, italics for thinking — a separate view from the transcript, which
+  groups each answer into a block and so loses who was writing at the same
+  time as whom. The caller caps how much a peer may stream. Measured on one
+  machine with `qwen2.5-coder:3b` answering: the first fragment 4.1s in, then
+  roughly ten tokens a second until the answer completed.
+- **One conversation id ties the round together.** The session already had an
+  id; it now travels with the question, so the asking machine's round view, the
+  answering machine's log line and the exported report all name the same
+  exchange. Reports gained a `conversation_id` field, in the JSON schema and in
+  the HTML and Markdown headers, which is what makes two machines' records of
+  the same round joinable after the fact.
 - **The replies are reconciled, and the reconciliation is shown.** Answers that
   match once normalised form a vote when they reach the quorum *and* a strict
   majority; two out of five agreeing is a coincidence, not a decision.

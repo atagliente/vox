@@ -176,13 +176,21 @@ class FakeMesh:
         self._peers = [StubPeer(name, name) for name in peers]
         self._answers = answers or []
         self.asked: list[str] = []
+        self.conversations: list[str] = []
         self.hook = None
 
     def processors(self, verb="infer", limit=5):
         return self._peers[:limit] if self.online else []
 
-    def ask_peers(self, question, verb="infer", limit=5, timeout=90.0):
+    def ask_peers(self, question, verb="infer", limit=5, timeout=90.0,
+                  on_event=None, conversation=""):
         self.asked.append(question)
+        self.conversations.append(conversation)
+        # A real peer streams what it writes before the answer lands.
+        if on_event is not None:
+            for reply in self._answers:
+                if reply.ok:
+                    on_event(reply.name, "text", reply.answer, 1_000_000.0)
         return self._answers
 
     def set_answer_hook(self, hook):
@@ -205,6 +213,11 @@ def app(workspace: Path) -> VoxApp:
     app = VoxApp(loaded=load_config(workspace), workspace=workspace)
     app.mesh = FakeMesh()
     return app
+
+
+def text_of(screen, selector: str) -> str:
+    content = screen.query_one(selector)._Static__content
+    return content.plain if hasattr(content, "plain") else str(content)
 
 
 def transcript(app: VoxApp) -> str:
@@ -420,3 +433,151 @@ async def test_the_answer_hook_follows_the_setting(app: VoxApp) -> None:
         app.run_command("/consensus off")
         await pilot.pause()
         assert app.mesh.hook is None, "a node that is off answers nobody"
+
+
+# ------------------------------------------------------------- the live round
+
+
+def test_the_log_joins_a_stream_of_tokens_into_readable_lines() -> None:
+    log = cns.RoundLog()
+    log.begin("is it safe?", 1_000_000.0)
+    log.add("node-b", "reasoning", "the question ", 1_000_000.0)
+    log.add("node-b", "reasoning", "is about buffers", 1_000_000.5)
+    log.add("node-c", "text", "Yes", 1_000_001.0)
+    log.add("node-b", "text", "No", 1_000_002.0)
+
+    # Consecutive fragments from one agent join; a different agent starts a row.
+    assert [(f.agent, f.kind, f.text) for f in log.fragments] == [
+        ("node-b", "reasoning", "the question is about buffers"),
+        ("node-c", "text", "Yes"),
+        ("node-b", "text", "No"),
+    ]
+    assert log.agents() == ["node-b", "node-c"]
+
+
+def test_the_log_is_timestamped_per_agent() -> None:
+    log = cns.RoundLog()
+    log.add("node-b", "text", "hello", 1_000_000.0)
+    rows = log.lines(width=60)
+    stamp, agent, kind, body = rows[0]
+    assert len(stamp) == 8 and stamp.count(":") == 2
+    assert agent == "node-b"
+    assert kind == "text" and body == "hello"
+    assert f"{stamp} node-b: hello" == log.as_text(60)
+
+
+def test_the_log_wraps_without_repeating_the_stamp() -> None:
+    log = cns.RoundLog()
+    log.add("node-b", "text", "word " * 40, 1_000_000.0)
+    rows = log.lines(width=40)
+    assert len(rows) > 1
+    assert rows[0][0] and not rows[1][0], "the timestamp belongs to the first row"
+
+
+def test_the_log_forgets_the_oldest_rather_than_growing_for_ever() -> None:
+    log = cns.RoundLog(limit=10)
+    for index in range(50):
+        log.add(f"agent-{index}", "text", str(index), 1_000_000.0 + index)
+    assert len(log.fragments) == 10
+    assert log.fragments[-1].text == "49"
+
+
+def test_an_empty_fragment_is_not_a_line() -> None:
+    log = cns.RoundLog()
+    log.add("node-b", "text", "", 1_000_000.0)
+    log.add("node-b", "text", "   ", 1_000_000.0)
+    assert log.lines() == []
+
+
+async def test_the_round_view_fills_while_the_agents_write(app: VoxApp) -> None:
+    from vox_chat.ui.round_screen import RoundScreen
+
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        app.run_command("/round")
+        await pilot.pause()
+        assert isinstance(app.screen, RoundScreen)
+
+        app.consensus_log.begin("is it safe?", 1_000_000.0)
+        app.consensus_event("node-b", "reasoning", "weighing it up", 1_000_000.0)
+        app.consensus_event("node-c", "text", "Yes, with care.", 1_000_001.0)
+        await pilot.pause()
+
+        rendered = text_of(app.screen, "#round-lines")
+        assert "weighing it up" in rendered
+        assert "Yes, with care." in rendered
+        assert "node-b" in rendered and "node-c" in rendered
+        assert "is it safe?" in text_of(app.screen, "#round-question")
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, RoundScreen)
+
+
+async def test_a_round_starts_a_fresh_log(app: VoxApp) -> None:
+    app.mesh = FakeMesh(answers=[answer("alpha", "Yes"), answer("beta", "Yes")])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.consensus_event("old-agent", "text", "from a previous round", 1.0)
+        assert app.consensus_log.fragments
+
+        app.input_area.insert("[CNS]is it safe?[/CNS]")
+        app.action_send()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert app.consensus_log.question == "is it safe?"
+        assert all(f.agent != "old-agent" for f in app.consensus_log.fragments)
+
+
+# ------------------------------------------------------- the conversation id
+
+
+async def test_the_round_carries_the_conversation_id(app: VoxApp) -> None:
+    """One exchange, two machines, one id to tie them together."""
+    app.mesh = FakeMesh(answers=[answer("alpha", "Yes"), answer("beta", "Yes")])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.input_area.insert("[CNS]is it safe?[/CNS]")
+        app.action_send()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert app.mesh.conversations == [app.session.id]
+        assert app.consensus_log.conversation_id == app.session.id
+        # And the report of that session names it too.
+        assert app.build_report().conversation_id == app.session.id
+
+
+async def test_the_round_view_shows_the_conversation(app: VoxApp) -> None:
+    from vox_chat.ui.round_screen import RoundScreen
+
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause()
+        app.consensus_log.begin("is it safe?", 1_000_000.0, "abc123def456")
+        app.run_command("/round")
+        await pilot.pause()
+        assert isinstance(app.screen, RoundScreen)
+        assert "abc123def456" in text_of(app.screen, "#round-question")
+
+
+async def test_answering_names_the_conversation_it_belongs_to(app: VoxApp) -> None:
+    import asyncio
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        def answer_off_thread() -> None:
+            # The hook runs on a mesh thread, which is what makes its
+            # call_from_thread work. No provider is reachable here, so it fails
+            # after writing the line that matters: the request is recorded
+            # before any model is called.
+            try:
+                app.answer_for_peer("peer-01", "is it safe?", conversation="abc123")
+            except Exception:
+                pass
+
+        await asyncio.to_thread(answer_off_thread)
+        await pilot.pause()
+        assert "ASKED BY peer-01" in transcript(app)
+        assert "conversation abc123" in transcript(app)

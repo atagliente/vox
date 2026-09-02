@@ -52,6 +52,7 @@ from .tools import Workspace
 from .usage import LiveMeter, UsageTracker
 from .ui import branding
 from .ui.inspect_screen import InspectScreen
+from .ui.round_screen import RoundScreen
 from .ui.universe_screen import UniverseScreen
 from .ui.modals import (
     ConfirmModal,
@@ -101,6 +102,7 @@ class VoxApp(App[None]):
         # neither was ctrl+o; a function key travels through every terminal.
         Binding("f3", "toggle_mesh", "Online", priority=True),
         Binding("f4", "open_universe", "Universe", priority=True),
+        Binding("f5", "open_round", "Round", priority=True),
         Binding("ctrl+q", "request_quit", "Quit", priority=True),
         Binding("ctrl+c", "copy_selection", "Copy", priority=True),
         Binding("ctrl+v", "paste_clipboard", "Paste", priority=True),
@@ -153,6 +155,8 @@ class VoxApp(App[None]):
         self._consensus_prompt: str = ""
         self._consensus_answers: list[cns.PeerAnswer] = []
         self._consensus_running = False
+        self.consensus_log = cns.RoundLog()
+        self._round_screen: RoundScreen | None = None
         self.inspection = self._new_inspection()
         self._inspect_screen: InspectScreen | None = None
         self._panel_mode = "code"
@@ -1431,6 +1435,7 @@ class VoxApp(App[None]):
 
         return reporting.Report(
             title=f"VOX session · {self.config.get('active_model', '')}",
+            conversation_id=self.session.id,
             created_at=datetime.now().astimezone().isoformat(timespec="seconds"),
             provider=str(self.config.get("active_provider", "")),
             endpoint=str(provider.get("base_url", "")),
@@ -1526,6 +1531,9 @@ class VoxApp(App[None]):
         )
         self._consensus_answers = []
         self._consensus_running = True
+        self.consensus_log.begin(question, time.time(), self.session.id)
+        if self._round_screen is not None:
+            self._round_screen.refresh_view()
         self.show_thinking(f"ASKING {len(peers)} AGENTS")
         self.refresh_status()
         self.ask_the_mesh(question, settings)
@@ -1533,13 +1541,29 @@ class VoxApp(App[None]):
     @work(thread=True, group="consensus", exclusive=True)
     def ask_the_mesh(self, question: str, settings: dict) -> None:
         """Every peer at once; the round is as slow as the slowest of them."""
+
+        def relay(agent: str, kind: str, text: str, ts: float) -> None:
+            # One hop to the UI thread per fragment: the peers are on a network,
+            # so these arrive far slower than local tokens.
+            self.call_from_thread(self.consensus_event, agent, kind, text, ts)
+
         answers = self.mesh.ask_peers(
             question,
             verb=str(settings.get("verb", "infer")),
             limit=int(settings.get("max_peers", 5)),
             timeout=float(settings.get("ask_timeout_seconds", 90.0)),
+            on_event=relay,
+            conversation=self.session.id,
         )
         self.call_from_thread(self.consensus_answered, question, answers, settings)
+
+    def consensus_event(self, agent: str, kind: str, text: str, ts: float) -> None:
+        """One fragment from one peer, live."""
+        self.consensus_log.add(agent, kind, text, ts)
+        if self._round_screen is not None:
+            self._round_screen.refresh_view()
+        if self._panel_mode == "consensus":
+            self.refresh_panel()
 
     def consensus_answered(self, question: str, answers: list, settings: dict) -> None:
         self._consensus_running = False
@@ -1593,11 +1617,16 @@ class VoxApp(App[None]):
         )
         self.mesh.set_answer_hook(self.answer_for_peer if allowed else None)
 
-    def answer_for_peer(self, caller: str, question: str) -> dict:
+    def answer_for_peer(self, caller: str, question: str, emit=None,
+                        conversation: str = "") -> dict:
         """Run the local model for another agent. Called on a mesh thread.
 
         Nothing from this machine's conversation, role or workspace goes into
         it: a peer's answer must not leak the answerer's context either.
+
+        ``emit(kind, text)`` sends each fragment to the asker as it is
+        produced, reasoning included, so a slow answer is visible rather than
+        silent.
         """
         settings = self.consensus_settings()
         if not settings.get("enabled", True) or not settings.get("answer_requests", True):
@@ -1613,7 +1642,8 @@ class VoxApp(App[None]):
         model = str(self.config.get("active_model", ""))
         self.call_from_thread(
             self.write_system,
-            f"ASKED BY {caller} - {len(question)} characters, answering with {model}",
+            f"ASKED BY {caller} - {len(question)} characters, answering with "
+            f"{model}" + (f" · conversation {conversation}" if conversation else ""),
         )
         started = time.monotonic()
         pieces: list[str] = []
@@ -1630,6 +1660,11 @@ class VoxApp(App[None]):
         ):
             if event.type == "text":
                 pieces.append(event.text)
+                if emit is not None:
+                    emit("text", event.text)
+            elif event.type == "reasoning" and emit is not None:
+                # The asker sees the thinking too, marked as thinking.
+                emit("reasoning", event.text)
         answer = "".join(pieces).strip()
         elapsed = time.monotonic() - started
         self.call_from_thread(
@@ -1775,6 +1810,21 @@ class VoxApp(App[None]):
 
     def cmd_universe(self, argument: str) -> None:
         self.action_open_universe()
+
+    def action_open_round(self) -> None:
+        """F5: what every agent is writing, as it writes it."""
+        if isinstance(self.screen, RoundScreen):
+            self.screen.dismiss(None)
+            return
+        screen = RoundScreen(self.consensus_log)
+        self._round_screen = screen
+        self.push_screen(screen, lambda _result: self._forget_round_screen())
+
+    def _forget_round_screen(self) -> None:
+        self._round_screen = None
+
+    def cmd_round(self, argument: str) -> None:
+        self.action_open_round()
 
     def cmd_stats(self, argument: str) -> None:
         self.write_system(self.usage.report(self.context_window()))
