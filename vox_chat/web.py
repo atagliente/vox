@@ -30,11 +30,11 @@ import re
 import socket
 import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Any
 
+from . import http
 from .logging_setup import get_logger
 
 log = get_logger("web")
@@ -199,41 +199,45 @@ def _open(
     settings: WebSettings,
     headers: dict[str, str] | None = None,
     internal: bool = False,
-):
+    max_bytes: int = 2_000_000,
+) -> http.Reply:
+    """One request to the open web, with this module's errors on the way out.
+
+    The request itself is ``http.request``; what is here is the part that is
+    about the web rather than about HTTP — refusing a private address, and
+    saying something an operator can act on when it fails.
+    """
     check_url(url, settings, internal=internal)
-    request = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": USER_AGENT,
-            "Accept-Encoding": "identity",  # no decompression to write or get wrong
-            **(headers or {}),
-        },
-    )
     try:
-        return urllib.request.urlopen(request, timeout=settings.timeout_seconds)
-    except urllib.error.HTTPError as exc:
+        return http.request(
+            url,
+            headers=headers,
+            timeout=settings.timeout_seconds,
+            max_bytes=max_bytes,
+        )
+    except http.HttpError as exc:
+        raise _explain(exc, url, settings) from exc
+
+
+def _explain(exc: http.HttpError, url: str, settings: WebSettings) -> WebError:
+    """Turn a transport failure into something worth reading."""
+    where = urllib.parse.urlparse(url).netloc
+    if exc.kind == "http":
         # The local server answers a failure with the reason in JSON; passing
         # on "HTTP 502" instead would throw away the only useful part.
-        detail = ""
         try:
-            body = json.loads(exc.read(10_000))
-            detail = str(body.get("error", ""))
-        except (ValueError, OSError):
-            pass
+            detail = str(json.loads(exc.body).get("error", ""))
+        except ValueError:
+            detail = ""
         if detail:
-            raise WebError(detail) from exc
-        raise WebError(f"{url} returned HTTP {exc.code}") from exc
-    except urllib.error.URLError as exc:
-        where = urllib.parse.urlparse(url).netloc
-        if is_local_endpoint(url):
-            raise WebError(
-                f"nothing is listening on {where} - /web start, or F6"
-            ) from exc
-        raise WebError(f"cannot reach {where}: {exc.reason}") from exc
-    except TimeoutError as exc:
-        raise WebError(f"{url} timed out after {settings.timeout_seconds:g}s") from exc
-    except OSError as exc:  # pragma: no cover - platform specific
-        raise WebError(f"cannot reach {url}: {exc}") from exc
+            return WebError(detail)
+        return WebError(f"{url} returned HTTP {exc.status}")
+    if exc.kind == "timeout":
+        return WebError(f"{url} timed out after {settings.timeout_seconds:g}s")
+    if is_local_endpoint(url):
+        return WebError(f"nothing is listening on {where} - /web start, or F6")
+    reason = exc.message.split(": ", 1)[-1]
+    return WebError(f"cannot reach {where}: {reason}")
 
 
 # --------------------------------------------------------------------- search
@@ -272,8 +276,7 @@ def _searxng(
     url = settings.endpoint.rstrip("/") + "/search?" + urllib.parse.urlencode(params)
     # The operator's own instance, usually on localhost: exempt from the
     # private-address rule, which exists for URLs VOX did not choose.
-    with _open(url, settings, internal=True) as response:
-        body = response.read(2_000_000)
+    body = _open(url, settings, internal=True).body
     try:
         payload = json.loads(body)
     except ValueError as exc:
@@ -306,16 +309,17 @@ def _brave(query: str, settings: WebSettings) -> list[Result]:
     if settings.language:
         params["search_lang"] = settings.language
     url = BRAVE_ENDPOINT + "?" + urllib.parse.urlencode(params)
-    with _open(
-        url,
-        settings,
-        headers={
-            "Accept": "application/json",
-            "X-Subscription-Token": settings.api_key,
-        },
-        internal=True,
-    ) as response:
-        payload = json.loads(response.read(2_000_000))
+    payload = json.loads(
+        _open(
+            url,
+            settings,
+            headers={
+                "Accept": "application/json",
+                "X-Subscription-Token": settings.api_key,
+            },
+            internal=True,
+        ).body
+    )
     web = payload.get("web") or {}
     return [
         Result(
@@ -502,17 +506,13 @@ def fetch(url: str, settings: WebSettings) -> Page:
     if not settings.allow_fetch:
         raise WebError("web.allow_fetch is off; only search results are available")
 
-    with _open(url, settings) as response:
-        content_type = (
-            (response.headers.get("Content-Type") or "").split(";")[0].strip()
-        )
-        if content_type and not any(
-            content_type.startswith(kind) for kind in TEXT_TYPES
-        ):
-            raise WebError(f"{url} is {content_type}, which is not text")
-        raw = response.read(settings.fetch_max_bytes + 1)
-        final_url = response.geturl()
-        charset = response.headers.get_content_charset() or "utf-8"
+    reply = _open(url, settings, max_bytes=settings.fetch_max_bytes)
+    content_type = reply.content_type
+    if content_type and not any(content_type.startswith(k) for k in TEXT_TYPES):
+        raise WebError(f"{url} is {content_type}, which is not text")
+    raw = reply.body
+    final_url = reply.url
+    charset = reply.charset
 
     truncated = len(raw) > settings.fetch_max_bytes
     body = raw[: settings.fetch_max_bytes].decode(charset, errors="replace")

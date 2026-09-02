@@ -452,6 +452,10 @@ class LLMClient:
                     return
                 raise LLMError("protocol", f"provider error: {exc}", str(exc)) from exc
             except Exception:
+                # Wide on purpose: tearing the client down mid-request makes
+                # the SDK raise whatever its transport happened to be holding,
+                # and a cancellation the operator asked for is not an error to
+                # report. Anything else is re-raised untouched.
                 if cancel is not None and cancel.is_set():
                     yield StreamEvent("cancelled")
                     return
@@ -488,6 +492,10 @@ class LLMClient:
                     return
                 raise LLMError("protocol", f"stream error: {exc}", str(exc)) from exc
             except Exception:
+                # Wide on purpose: tearing the client down mid-request makes
+                # the SDK raise whatever its transport happened to be holding,
+                # and a cancellation the operator asked for is not an error to
+                # report. Anything else is re-raised untouched.
                 if cancel is not None and cancel.is_set():
                     yield StreamEvent("cancelled")
                     return

@@ -33,11 +33,11 @@ import sys
 import threading
 import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from . import http
 from .logging_setup import get_logger
 
 log = get_logger("searchd")
@@ -238,23 +238,24 @@ _LITE = re.compile(
 
 
 def _post(url: str, query: str) -> str:
-    data = urllib.parse.urlencode({"q": query}).encode()
-    request = urllib.request.Request(
-        url,
-        data=data,
-        headers={
-            "User-Agent": BROWSER_UA,
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Accept-Encoding": "identity",
-        },
-    )
     try:
-        with urllib.request.urlopen(request, timeout=UPSTREAM_TIMEOUT) as response:
-            return response.read(2_000_000).decode("utf-8", "replace")
-    except urllib.error.HTTPError as exc:
-        raise SearchdError(f"the search endpoint returned HTTP {exc.code}") from exc
-    except (urllib.error.URLError, OSError, TimeoutError) as exc:
-        raise SearchdError(f"cannot reach the search endpoint: {exc}") from exc
+        return http.request(
+            url,
+            data=urllib.parse.urlencode({"q": query}).encode(),
+            headers={
+                "User-Agent": BROWSER_UA,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            timeout=UPSTREAM_TIMEOUT,
+            retry=http.OPEN_WEB,
+            max_bytes=2_000_000,
+        ).text()
+    except http.HttpError as exc:
+        if exc.kind == "http":
+            raise SearchdError(
+                f"the search endpoint returned HTTP {exc.status}"
+            ) from exc
+        raise SearchdError(f"cannot reach the search endpoint: {exc.message}") from exc
 
 
 def duckduckgo(query: str, limit: int = 10) -> list[Hit]:
@@ -297,14 +298,19 @@ def duckduckgo(query: str, limit: int = 10) -> list[Hit]:
 
 def _json(url: str) -> dict:
     """A GET that must return JSON, or say why it did not."""
-    request = urllib.request.Request(url, headers={"User-Agent": "vox/0.1"})
     try:
-        with urllib.request.urlopen(request, timeout=UPSTREAM_TIMEOUT) as response:
-            return json.loads(response.read(2_000_000))
-    except urllib.error.HTTPError as exc:
-        raise SearchdError(f"HTTP {exc.code}") from exc
-    except (urllib.error.URLError, OSError, TimeoutError) as exc:
-        raise SearchdError(str(getattr(exc, "reason", exc))) from exc
+        reply = http.request(
+            url,
+            timeout=UPSTREAM_TIMEOUT,
+            retry=http.OPEN_WEB,
+            max_bytes=2_000_000,
+        )
+    except http.HttpError as exc:
+        if exc.kind == "http":
+            raise SearchdError(f"HTTP {exc.status}") from exc
+        raise SearchdError(exc.message) from exc
+    try:
+        return json.loads(reply.body)
     except ValueError as exc:
         raise SearchdError("the answer was not JSON") from exc
 
@@ -499,6 +505,9 @@ def search(query: str, limit: int = 10) -> tuple[list[Hit], list[str], list[str]
             failures.append(f"{name}: {exc}")
             continue
         except Exception as exc:
+            # Wide on purpose: each upstream is a different site's HTML or
+            # JSON, and one of them breaking in a new way is a reason to try
+            # the next rather than to fail the search.
             failures.append(f"{name}: {exc.__class__.__name__}")
             continue
         new = [hit for hit in found if hit.url and hit.url not in seen]
@@ -583,12 +592,10 @@ def answering(endpoint: str, timeout: float = 3.0) -> bool:
         + "/search?"
         + urllib.parse.urlencode({"q": "vox", "format": "json"})
     )
-    request = urllib.request.Request(url, headers={"User-Agent": "vox/0.1"})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            json.loads(response.read(200_000))
+        json.loads(http.request(url, timeout=timeout, max_bytes=200_000).body)
         return True
-    except (urllib.error.URLError, ValueError, OSError, TimeoutError):
+    except (http.HttpError, ValueError):
         return False
 
 

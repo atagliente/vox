@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import io
 import json
+import urllib.request
+from email.message import EmailMessage
 from pathlib import Path
 
 import pytest
@@ -231,7 +233,7 @@ def test_a_derived_model_is_derived_again_from_the_original(monkeypatch) -> None
             "/api/create": {"status": "success"},
         }
     )
-    monkeypatch.setattr(ollama.urllib.request, "urlopen", http)
+    monkeypatch.setattr(urllib.request, "urlopen", http)
     name = ollama.create_with_context(
         "http://localhost:11434/v1", "vox-granite4.2-3b:ctx8192", 16384
     )
@@ -264,6 +266,19 @@ class FakeHTTP:
 
 
 class _closing(io.BytesIO):
+    """What urlopen hands back, near enough: a body, headers and a URL."""
+
+    def __init__(self, body: bytes, url: str = "http://127.0.0.1:11434/") -> None:
+        super().__init__(body)
+        self._url = url
+        headers = EmailMessage()
+        headers["Content-Type"] = "application/json"
+        self.headers = headers
+        self.status = 200
+
+    def geturl(self) -> str:
+        return self._url
+
     def __enter__(self):
         return self
 
@@ -290,7 +305,7 @@ def test_the_model_list_carries_what_tells_two_local_builds_apart(monkeypatch) -
             }
         }
     )
-    monkeypatch.setattr(ollama.urllib.request, "urlopen", http)
+    monkeypatch.setattr(urllib.request, "urlopen", http)
     rows = ollama.list_models("http://localhost:11434/v1")
     assert [row["name"] for row in rows] == ["granite4.2:3b", "qwen2.5:3b"]
     assert rows[0]["parameters"] == "3.7B"
@@ -299,7 +314,7 @@ def test_the_model_list_carries_what_tells_two_local_builds_apart(monkeypatch) -
 
 def test_creating_a_window_sends_from_and_num_ctx(monkeypatch) -> None:
     http = FakeHTTP({"/api/create": {"status": "success"}})
-    monkeypatch.setattr(ollama.urllib.request, "urlopen", http)
+    monkeypatch.setattr(urllib.request, "urlopen", http)
     name = ollama.create_with_context(
         "http://localhost:11434/v1", "granite4.2:3b", 16384
     )
@@ -312,7 +327,7 @@ def test_creating_a_window_sends_from_and_num_ctx(monkeypatch) -> None:
 
 def test_an_unusable_window_is_refused_before_the_server_is_asked(monkeypatch) -> None:
     http = FakeHTTP({})
-    monkeypatch.setattr(ollama.urllib.request, "urlopen", http)
+    monkeypatch.setattr(urllib.request, "urlopen", http)
     with pytest.raises(ollama.OllamaError):
         ollama.create_with_context("http://localhost:11434/v1", "m", 128)
     assert http.calls == []
@@ -328,7 +343,7 @@ def test_the_loaded_window_is_read_from_what_is_resident(monkeypatch) -> None:
             }
         }
     )
-    monkeypatch.setattr(ollama.urllib.request, "urlopen", http)
+    monkeypatch.setattr(urllib.request, "urlopen", http)
     base = "http://localhost:11434/v1"
     assert ollama.loaded_context(base, "granite4.2:3b") == 16384
     assert ollama.loaded_context(base, "not resident") is None
@@ -346,7 +361,7 @@ def test_the_trained_window_comes_from_the_weights(monkeypatch) -> None:
             }
         }
     )
-    monkeypatch.setattr(ollama.urllib.request, "urlopen", http)
+    monkeypatch.setattr(urllib.request, "urlopen", http)
     base = "http://localhost:11434/v1"
     assert ollama.trained_context(base, "granite4.2:3b") == 131072
     assert ollama.configured_context(base, "granite4.2:3b") == 8192
@@ -599,7 +614,7 @@ def test_a_card_that_can_hold_nothing_gives_up_rather_than_looping(monkeypatch) 
 
 def test_the_build_parameters_are_written_beside_the_window(monkeypatch) -> None:
     http = FakeHTTP({"/api/create": {"status": "success"}})
-    monkeypatch.setattr(ollama.urllib.request, "urlopen", http)
+    monkeypatch.setattr(urllib.request, "urlopen", http)
     ollama.create_with_context(
         "http://localhost:11434/v1",
         "granite4.2:3b",
@@ -612,7 +627,7 @@ def test_the_build_parameters_are_written_beside_the_window(monkeypatch) -> None
 
 def test_the_layer_count_is_the_ceiling_for_num_gpu(monkeypatch) -> None:
     http = FakeHTTP({"/api/show": {"model_info": {"granite.block_count": 40}}})
-    monkeypatch.setattr(ollama.urllib.request, "urlopen", http)
+    monkeypatch.setattr(urllib.request, "urlopen", http)
     assert ollama.layer_count("http://localhost:11434/v1", "granite4.2:3b") == 40
 
 
@@ -764,7 +779,7 @@ def test_a_derived_model_is_found_under_its_parents_name(monkeypatch) -> None:
             "/api/show": {"details": {"parent_model": "granite4.2:3b"}},
         }
     )
-    monkeypatch.setattr(ollama.urllib.request, "urlopen", http)
+    monkeypatch.setattr(urllib.request, "urlopen", http)
     monkeypatch.setattr(ollama, "vram_mb", lambda: (2755, 4096))
     base = "http://localhost:11434/v1"
     where = ollama.residency(base, "vox-granite4.2-3b:ctx16384")

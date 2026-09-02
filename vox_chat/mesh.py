@@ -514,6 +514,9 @@ class MeshController:
                     conversation=conversation,
                 )
             except Exception as exc:
+                # Wide on purpose: this runs once per peer, and one peer that
+                # is broken in an unexpected way must come back as that peer's
+                # error rather than sink the whole round.
                 return PeerAnswer(
                     agent_id=peer.agent_id,
                     name=label,

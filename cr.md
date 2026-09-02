@@ -142,27 +142,39 @@ see 1.2.
 
 ## 3. Code architecture
 
-* **3.1 `app.py` is a god object (2,636 lines)**
-  * `[to do]` Extract the `cmd_*` registry (~40 methods) into a `vox_chat/commands/`
-    package with a table-driven dispatcher, leaving only rendering in `VoxApp`
-  * `[to do]` Extract the generation lifecycle (`start_generation`, `generate`,
-    `handle_agent_event`, `finish_generation`) into a `GenerationController`
-  * `[to do]` Extract mesh and consensus handling (`start_consensus`, `answer_for_peer`,
-    `consensus_answered`) into its own controller — those are already the three longest
-    methods in the file
-  * `[to do]` Define a `Protocol` for what a controller may ask of the UI, so tests stop
-    having to mount the whole application
+* **3.1 `app.py` is a god object (2,636 lines)** — `[done]`, now **1,925**
+  * `[done]` The `cmd_*` registry is a `vox_chat/commands/` package: `spec` holds the
+    vocabulary and no application state, `handlers` holds the thirty-eight functions,
+    `dispatch` is the table joining them — built from the command table itself, so a
+    command declared with nothing to run it fails at import rather than when someone
+    types it.
+  * `[done]` `GenerationController` in `generation.py`. The `@work` decorator stays on
+    `VoxApp.generate`, two lines calling into it: putting something on a thread is
+    Textual's business and belongs to the widget.
+  * `[done]` `ConsensusController` in `consensus_flow.py`, same arrangement. Those three
+    methods really were the longest in the file.
+  * `[done]` `commands/ui.py` defines `CommandUI`, the narrow view a handler is allowed
+    to use. Honest limit: several handlers still take the application whole, because
+    opening a modal or starting a worker *is* asking the Textual loop for something and
+    a Protocol that pretended otherwise would be decoration. What it buys is that the
+    boundary is written down, and the handlers inside it need no mounted app.
   * `[done]` No method exceeds ~61 lines: the problem is the count, not the length
   * `[done]` The UI thread never performs blocking HTTP (`call_from_thread`)
 
-* **3.2 Module boundaries**
-  * `[to do]` One HTTP egress point: `urllib.request` currently appears in 17 places
-    across `web.py`, `searchd.py` and `ollama.py`, each with its own handling of
-    timeouts, redirects and decoding
-  * `[to do]` A single retry/backoff policy (today `max_retries=0` is forced in
-    `llm_client.py` and there is no backoff anywhere else)
-  * `[to do]` Reduce the 10 bare `except Exception` handlers to named exceptions, or
-    document in one line why the wide catch is deliberate
+* **3.2 Module boundaries** — `[done]`
+  * `[done]` One HTTP egress point: `vox_chat/http.py`. There is now exactly **one**
+    `urlopen` in the whole project, one `HttpError` with a typed `kind`, and one place
+    that decides about timeouts, byte caps and decoding. `web`, `searchd` and `ollama`
+    still raise their own errors — a bare transport failure tells an operator nothing —
+    but they translate one shape instead of each catching their own set.
+  * `[done]` A single retry/backoff policy, `http.Retry`, with `OPEN_WEB` for the search
+    backends. It deliberately does **not** retry a refused connection: a fixed endpoint
+    that is down will not be up half a second later, there is a second backend to fall
+    through to, and repeating it only makes the operator wait longer to hear the same
+    thing. A test caught that distinction rather than a review.
+  * `[done]` All eight remaining `except Exception` handlers now carry a one-line reason.
+    Each is a boundary where a wide catch is the right answer — a per-peer round, a
+    per-backend search, a server reply, a cancelled stream — and says so.
   * `[done]` `llm_client.py` is already the only place an OpenAI client is constructed
   * `[done]` `LLMError` with a typed `kind`
     (`connection|timeout|http|cancelled|protocol|context`)

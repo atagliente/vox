@@ -18,10 +18,10 @@ import json
 import re
 import shutil
 import subprocess
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from typing import Any
+
+from . import http
 
 TIMEOUT = 120.0
 
@@ -45,19 +45,19 @@ def _post(
     base_url: str, path: str, payload: dict[str, Any], timeout: float = TIMEOUT
 ) -> dict[str, Any]:
     url = f"{native_base(base_url)}{path}"
-    request = urllib.request.Request(
-        url,
-        json.dumps(payload).encode("utf-8"),
-        {"Content-Type": "application/json"},
-    )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            body = response.read().decode("utf-8", "replace")
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", "replace")[:300]
-        raise OllamaError(f"{path} refused: HTTP {exc.code} {detail}") from exc
-    except OSError as exc:
-        raise OllamaError(f"cannot reach {url}: {exc}") from exc
+        body = http.request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            timeout=timeout,
+        ).text()
+    except http.HttpError as exc:
+        if exc.kind == "http":
+            raise OllamaError(
+                f"{path} refused: HTTP {exc.status} {exc.body[:300]}"
+            ) from exc
+        raise OllamaError(f"cannot reach {url}: {exc.message}") from exc
     try:
         data = json.loads(body or "{}")
     except json.JSONDecodeError as exc:
@@ -70,12 +70,11 @@ def _post(
 def _get(base_url: str, path: str, timeout: float = 10.0) -> dict[str, Any]:
     url = f"{native_base(base_url)}{path}"
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:
-            data = json.loads(response.read().decode("utf-8", "replace") or "{}")
-    except urllib.error.HTTPError as exc:
-        raise OllamaError(f"{path} refused: HTTP {exc.code}") from exc
-    except OSError as exc:
-        raise OllamaError(f"cannot reach {url}: {exc}") from exc
+        data = json.loads(http.request(url, timeout=timeout).text() or "{}")
+    except http.HttpError as exc:
+        if exc.kind == "http":
+            raise OllamaError(f"{path} refused: HTTP {exc.status}") from exc
+        raise OllamaError(f"cannot reach {url}: {exc.message}") from exc
     except json.JSONDecodeError as exc:
         raise OllamaError(f"{path} answered with something that is not JSON") from exc
     return data if isinstance(data, dict) else {}
@@ -243,18 +242,18 @@ def create_with_context(
 def delete_model(base_url: str, model: str, timeout: float = 30.0) -> None:
     """Remove a derived model. Only ever called on names VOX itself made."""
     url = f"{native_base(base_url)}/api/delete"
-    request = urllib.request.Request(
-        url,
-        json.dumps({"model": model}).encode("utf-8"),
-        {"Content-Type": "application/json"},
-        method="DELETE",
-    )
     try:
-        urllib.request.urlopen(request, timeout=timeout).read()
-    except urllib.error.HTTPError as exc:
-        raise OllamaError(f"delete refused: HTTP {exc.code}") from exc
-    except OSError as exc:
-        raise OllamaError(f"cannot reach {url}: {exc}") from exc
+        http.request(
+            url,
+            data=json.dumps({"model": model}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="DELETE",
+            timeout=timeout,
+        )
+    except http.HttpError as exc:
+        if exc.kind == "http":
+            raise OllamaError(f"delete refused: HTTP {exc.status}") from exc
+        raise OllamaError(f"cannot reach {url}: {exc.message}") from exc
 
 
 # --------------------------------------------------------------- the GPU
