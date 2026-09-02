@@ -103,6 +103,9 @@ def run_turn(
     top_logprobs: int | None = None,
     web_settings=None,
     mcp_registry=None,
+    sampling: dict[str, Any] | None = None,
+    native: dict[str, Any] | None = None,
+    response_format: dict[str, Any] | None = None,
 ) -> Iterator[AgentEvent]:
     """Drive one user turn, including any tool cycles it triggers.
 
@@ -178,6 +181,9 @@ def run_turn(
                 cancel=cancel,
                 include_usage=include_usage,
                 top_logprobs=top_logprobs,
+                sampling=sampling,
+                native=native,
+                response_format=response_format,
             )
             for event in stream:
                 if event.type == "text":

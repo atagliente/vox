@@ -15,7 +15,7 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
-from . import fitting
+from . import fitting, sampling
 from .agent import AgentEvent, run_turn
 from .llm_client import LLMError, context_overflow
 from .logging_setup import get_logger
@@ -224,6 +224,8 @@ class GenerationController:
         app = self.app
         assert app.client is not None
         agent_config = dict(app.config.get("agent", {}))
+        role = app.role_store.get(str(app.config.get("active_role", "")))
+        parameters = sampling.resolve(app.config, role)
         agent_enabled = bool(agent_config.get("enabled", False))
         if app.web_mode_active():
             # In web mode the operator has already asked for the internet.
@@ -251,6 +253,9 @@ class GenerationController:
                     top_logprobs=app.inspect_top_k(),
                     web_settings=app.web_settings(),
                     mcp_registry=app.mcp if app.mcp.clients else None,
+                    sampling=parameters.request_fields(),
+                    native=parameters.native_fields(),
+                    response_format=app.response_format,
                 ):
                     produced = True
                     app.call_from_thread(self.handle_event, event)

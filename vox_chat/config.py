@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from . import sampling
 from .storage import (
     ReadResult,
     global_config_path,
@@ -45,6 +46,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "preload": True,
         "preload_timeout_seconds": 180,
     },
+    # Per-model sampling: model name -> the parameters that model wants.
+    # Stored beside the model rather than globally, because that is the only
+    # arrangement that survives switching between two of them.
+    "model_presets": {},
     # What goes into every model VOX builds for itself. num_gpu "max" offloads
     # every layer, stepping back when the measurement says it would spill into
     # shared memory - which is slower than leaving those layers on the CPU.
@@ -345,6 +350,14 @@ def validate_config(data: Any) -> list[str]:
             value = agent.get(key, 1)
             if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
                 errors.append(f"agent.{key} must be a positive integer")
+
+    errors.extend(sampling.errors_in(data.get("generation", {}), "generation"))
+    presets = data.get("model_presets", {})
+    if not isinstance(presets, dict):
+        errors.append("model_presets must be an object of model -> parameters")
+    else:
+        for model, block in presets.items():
+            errors.extend(sampling.errors_in(block, f"model_presets.{model}"))
 
     mcp = data.get("mcp", {})
     if not isinstance(mcp, dict):

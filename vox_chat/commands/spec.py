@@ -131,6 +131,12 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("session-delete", "/session-delete <name>", "Delete a saved session"),
     CommandSpec("agent", "/agent on|off", "Toggle coding-agent mode"),
     CommandSpec("workspace", "/workspace <path>", "Set the agent workspace"),
+    CommandSpec(
+        "set", "/set [name value|off]", "Sampling parameters, or a model preset"
+    ),
+    CommandSpec(
+        "format", "/format [json|<schema>|off]", "Make the answer match a JSON Schema"
+    ),
     CommandSpec("stats", "/stats", "Token usage, context and speed", ("usage",)),
     CommandSpec("inspect", "/inspect [on|off]", "Per-token measurements, live"),
     CommandSpec(

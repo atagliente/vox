@@ -371,6 +371,9 @@ class LLMClient:
         cancel: threading.Event | None = None,
         include_usage: bool = True,
         top_logprobs: int | None = None,
+        sampling: dict[str, Any] | None = None,
+        native: dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> Iterator[StreamEvent]:
         """Stream a completion, yielding text deltas then any tool calls.
 
@@ -388,6 +391,15 @@ class LLMClient:
         }
         if max_tokens:
             payload["max_tokens"] = max_tokens
+        # Only what was actually set. top_k and repeat_penalty are not OpenAI
+        # parameters and a strict gateway rejects them, so they go in
+        # extra_body where llama.cpp and Ollama read them; sending a default
+        # for every knob would mean every validating provider refuses every
+        # request VOX makes.
+        if sampling:
+            payload.update(sampling)
+        if response_format:
+            payload["response_format"] = response_format
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
@@ -402,9 +414,12 @@ class LLMClient:
         if top_logprobs:
             payload["logprobs"] = True
             payload["top_logprobs"] = int(top_logprobs)
-        if self.extra_body:
-            # Provider-specific extras, e.g. Ollama keep_alive.
-            payload["extra_body"] = dict(self.extra_body)
+        extra = dict(self.extra_body) if self.extra_body else {}
+        if native:
+            extra.update(native)
+        if extra:
+            # Provider-specific extras, e.g. Ollama keep_alive and think.
+            payload["extra_body"] = extra
 
         stream: Any | None = None
         request_client = self._new_request_client()

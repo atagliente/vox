@@ -218,6 +218,10 @@ class VoxApp(App[None]):
         self.generation = GenerationController(self)
         self.consensus = ConsensusController(self)
         self.mcp = McpRegistry()
+        # Set by /format: a JSON Schema the answer has to match. Held
+        # for the session rather than saved, because a schema belongs
+        # to the question being asked, not to the installation.
+        self.response_format: dict[str, Any] | None = None
         self._inspect_screen: InspectScreen | None = None
         self._panel_mode = "code"
 

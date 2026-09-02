@@ -202,6 +202,9 @@ class FakeClient:
         cancel=None,
         include_usage=True,
         top_logprobs=None,
+        # A stand-in for the client has to tolerate what the real one takes,
+        # or every new parameter breaks every test that uses one.
+        **kwargs,
     ):
         self.calls.append(
             {
@@ -377,6 +380,7 @@ def test_a_provider_without_tool_support_degrades_gracefully(workspace: Path) ->
             cancel=None,
             include_usage=True,
             top_logprobs=None,
+            **kwargs,
         ):
             if tools:
                 raise LLMError(

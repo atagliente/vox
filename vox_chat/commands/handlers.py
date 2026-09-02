@@ -16,10 +16,11 @@ without mounting an application.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 from .. import consensus as cns
-from .. import mcp, ollama, searchd
+from .. import mcp, ollama, sampling, searchd
 from .. import report as reporting
 from . import spec as commands
 
@@ -525,3 +526,99 @@ def _mcp_report(app: VoxApp) -> str:
         "descriptions below reach the model as text written by somebody else.",
     ]
     return "\n".join(lines)
+
+
+def cmd_set(app: VoxApp, argument: str) -> None:
+    """Show, set or clear one sampling parameter.
+
+    `/set` alone lists what is actually being sent, which is not the same as
+    what could be: a parameter VOX has not been told about is not sent at all,
+    so the provider's own default stands.
+    """
+    role = app.role_store.get(str(app.config.get("active_role", "")))
+    parts = argument.split(None, 1)
+    if not parts:
+        current = sampling.resolve(app.config, role)
+        app.write_system(
+            "SAMPLING\n"
+            f"  in force   {current.describe()}\n"
+            f"  settable   {sampling.known()}\n"
+            "  /set <name> <value>   ·   /set <name> off   ·   /set preset"
+        )
+        return
+
+    name = parts[0].strip().lower()
+    if name == "preset":
+        _write_preset(app, role)
+        return
+
+    block = app.config.setdefault("generation", {})
+    if len(parts) == 1 or parts[1].strip().lower() in ("off", "default", "clear"):
+        if block.pop(name, None) is None and name in sampling.SETTABLE:
+            app.write_system(f"SET - {name} was not set; the provider decides")
+        else:
+            app.persist_config()
+            app.write_system(f"SET - {name} cleared; the provider decides again")
+        return
+
+    try:
+        value = sampling.coerce(name, parts[1].strip())
+    except ValueError as exc:
+        app.write_error(f"SET - {exc}")
+        return
+    block[name] = value
+    app.persist_config()
+    app.write_system(f"SET - {name} = {value}")
+
+
+def _write_preset(app: VoxApp, role) -> None:
+    """Store what is in force now as this model's own preset."""
+    model = str(app.config.get("active_model", ""))
+    if not model:
+        app.write_error("SET PRESET - no active model")
+        return
+    current = sampling.resolve(app.config, role)
+    if not current.values:
+        app.write_error("SET PRESET - nothing is set, so there is nothing to store")
+        return
+    app.config.setdefault("model_presets", {})[model] = dict(current.values)
+    app.persist_config()
+    app.write_system(
+        f"SET PRESET - {model} now carries its own settings:\n  {current.describe()}"
+    )
+
+
+def cmd_format(app: VoxApp, argument: str) -> None:
+    """Make the answer match a JSON Schema, or stop making it.
+
+    Held for the session and not saved: a schema belongs to the question being
+    asked, not to the installation.
+    """
+    text = argument.strip()
+    if not text or text.lower() in ("off", "none", "clear"):
+        app.response_format = None
+        app.write_system("FORMAT - off; answers are prose again")
+        return
+    if text.lower() == "json":
+        app.response_format = {"type": "json_object"}
+        app.write_system("FORMAT - the answer will be a JSON object")
+        return
+    try:
+        schema = json.loads(text)
+    except ValueError as exc:
+        app.write_error(
+            f"FORMAT - that is not JSON ({exc}). Usage: /format json, "
+            "/format {a JSON Schema}, or /format off"
+        )
+        return
+    if not isinstance(schema, dict):
+        app.write_error("FORMAT - a schema is a JSON object")
+        return
+    app.response_format = {
+        "type": "json_schema",
+        "json_schema": {"name": "vox_answer", "strict": True, "schema": schema},
+    }
+    app.write_system(
+        "FORMAT - the answer will match that schema.\n"
+        "  A model that does not support structured output will say so."
+    )

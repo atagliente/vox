@@ -246,15 +246,24 @@ decision rather than work: whether to move to an async provider client
     `tools.execute` behind it, and a decision about whether writes are refused outright
     or confirmed by something — there is no operator at a keyboard on that side.
 
-* **4.2 Modern generation parameters**
-  * `[to do]` Expose `reasoning_effort` / `think` for reasoning models (Ollama exposes
-    `think` on `/api/chat`; VOX today only knows how to *read* reasoning, not request it)
-  * `[to do]` Expose `top_p`, `top_k`, `seed`, `repeat_penalty` and `stop` in the
-    configuration and in `/settings` — only `temperature` and `max_tokens` are passed today
-  * `[to do]` `response_format` / structured output with a JSON Schema, plus a
-    `/format <schema>` command to enforce it
-  * `[to do]` Per-model presets: different parameters for different models, stored beside
-    the model rather than globally
+* **4.2 Modern generation parameters** — `[done]`
+  * `[done]` `reasoning_effort` and `think`, in `vox_chat/sampling.py`. VOX could always
+    *read* thinking; asking for it is a different thing and was the gap.
+  * `[done]` `top_p`, `top_k`, `seed`, `repeat_penalty`, `min_p`, `typical_p`, `stop`,
+    and the two penalties, settable in the configuration and with `/set`. The rule the
+    module turns on: **a parameter is only sent when it has been set.** `top_k` and
+    `repeat_penalty` are not OpenAI parameters — they reach Ollama and llama.cpp through
+    `extra_body` and a strict gateway rejects them at the top level — so sending a
+    default for every knob would mean every validating provider refuses every request
+    VOX makes. Unset means the server's own default stands, which is not the same as
+    any value this could pick.
+  * `[done]` `response_format` with `/format json`, `/format <schema>` and `/format off`.
+    Held for the session rather than saved: a schema belongs to the question being
+    asked, not to the installation.
+  * `[done]` Per-model presets in `model_presets`, model name -> parameters, written by
+    `/set preset`. Most specific wins: preset, then role, then the `generation` block.
+    Stored beside the model because that is the only arrangement that survives switching
+    between two of them.
   * `[done]` `stream_options.include_usage` with automatic degradation on providers that
     reject it
   * `[done]` Reasoning read from `reasoning_content`/`reasoning`/`thinking` and from
