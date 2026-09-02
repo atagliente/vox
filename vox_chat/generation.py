@@ -250,6 +250,7 @@ class GenerationController:
                     ),
                     top_logprobs=app.inspect_top_k(),
                     web_settings=app.web_settings(),
+                    mcp_registry=app.mcp if app.mcp.clients else None,
                 ):
                     produced = True
                     app.call_from_thread(self.handle_event, event)

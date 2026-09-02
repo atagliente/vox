@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from .. import consensus as cns
-from .. import ollama, searchd
+from .. import mcp, ollama, searchd
 from .. import report as reporting
 from . import spec as commands
 
@@ -457,3 +457,71 @@ def cmd_stop(app: VoxApp, argument: str) -> None:
 
 def cmd_exit(app: VoxApp, argument: str) -> None:
     app.action_request_quit()
+
+
+def cmd_mcp(app: VoxApp, argument: str) -> None:
+    """Turn MCP on or off, list what is connected, or reconnect.
+
+    Connecting spawns other people's programs and talks to other people's
+    servers, so it happens when asked for and not on startup: `mcp.enabled`
+    in the configuration, or `/mcp on` here.
+    """
+    action = argument.strip().lower() or "list"
+    settings = mcp.settings_from_config(app.config)
+
+    if action in ("on", "off"):
+        app.config.setdefault("mcp", {})["enabled"] = action == "on"
+        app.persist_config()
+        if action == "off":
+            app.mcp.close()
+            app.write_system("MCP OFF - the servers are shut down")
+            return
+        action = "reload"
+
+    if action == "reload":
+        if not settings["servers"]:
+            app.write_error(
+                "MCP - no servers configured. Add them under mcp.servers in "
+                "/config: a name, and either a command to run or a url."
+            )
+            return
+        app.connect_mcp()
+        return
+
+    if action != "list":
+        app.write_error("MCP - usage: /mcp [on|off|list|reload]")
+        return
+
+    if not app.mcp.clients and not app.mcp.status:
+        state = "on" if settings["enabled"] else "off"
+        app.write_system(
+            f"MCP {state.upper()} - nothing connected. "
+            f"{len(settings['servers'])} server(s) configured; /mcp reload"
+        )
+        return
+    app.write_system(_mcp_report(app))
+
+
+def _mcp_report(app: VoxApp) -> str:
+    """One line per server, then one per tool: what the model can actually see."""
+    lines = ["MCP SERVERS", ""]
+    for status in app.mcp.status:
+        mark = "OK  " if status.connected else "FAIL"
+        detail = f"{status.tools} tool(s)" if status.connected else status.error
+        lines.append(f"  [{mark}] {status.name}  ·  {status.where}")
+        lines.append(f"         {detail}")
+    tools = app.mcp.tools()
+    if tools:
+        lines += ["", "TOOLS THE MODEL CAN CALL", ""]
+        width = max(len(tool.qualified) for tool in tools)
+        for tool in sorted(tools, key=lambda t: t.qualified):
+            note = "read-only" if tool.read_only else "confirmed"
+            if tool.destructive:
+                note = "destructive, always confirmed"
+            lines.append(f"  {tool.qualified.ljust(width)}   {note}")
+    lines += [
+        "",
+        "What a server says about itself is data, not instructions: the tool "
+        "descriptions below reach the model as text written by somebody else.",
+    ]
+    return "\n".join(lines)

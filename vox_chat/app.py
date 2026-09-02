@@ -46,6 +46,7 @@ from .inspection import (
 )
 from .llm_client import LLMClient, LLMError
 from .logging_setup import get_logger, setup_logging
+from .mcp import McpRegistry
 from .mesh import MeshController, MeshError, MeshSettings
 from .models import Message, Session
 from .prompts import PromptStore, find_variables, render
@@ -216,6 +217,7 @@ class VoxApp(App[None]):
         self.inspection = self._new_inspection()
         self.generation = GenerationController(self)
         self.consensus = ConsensusController(self)
+        self.mcp = McpRegistry()
         self._inspect_screen: InspectScreen | None = None
         self._panel_mode = "code"
 
@@ -1796,6 +1798,34 @@ class VoxApp(App[None]):
         """The red border is the standing reminder that we are announcing."""
         with contextlib.suppress(IndexError):  # pragma: no cover - no screen yet
             self.screen_stack[0].set_class(online, "mesh-online")
+
+    # ------------------------------------------------------------------- mcp
+
+    @work(thread=True, group="mcp", exclusive=True)
+    def connect_mcp(self) -> None:
+        """Bring up the configured MCP servers, and say what happened.
+
+        On a thread because it spawns processes and opens sockets: a server
+        that takes ten seconds to start must not take the screen with it.
+        """
+        self.call_from_thread(self.write_system, "MCP - connecting...")
+        report = self.mcp.connect_all(self.config)
+        if not report:
+            self.call_from_thread(
+                self.write_error, "MCP - nothing configured under mcp.servers"
+            )
+            return
+        working = sum(1 for status in report if status.connected)
+        tools = sum(status.tools for status in report)
+        self.call_from_thread(
+            self.write_system,
+            f"MCP - {working}/{len(report)} server(s), {tools} tool(s). /mcp list",
+        )
+        for status in report:
+            if not status.connected:
+                self.call_from_thread(
+                    self.write_error, f"MCP {status.name}: {status.error}"
+                )
 
     def action_open_keys(self) -> None:
         """Ctrl+Shift+L: every key combination, without leaving the screen."""

@@ -215,12 +215,36 @@ decision rather than work: whether to move to an async provider client
 ## 4. LLM capabilities — alignment with the state of the art
 
 * **4.1 MCP (Model Context Protocol) — the largest gap**
-  * `[to do]` MCP client: connect to external MCP servers over stdio and streamable HTTP
-  * `[to do]` Map discovered MCP tools onto the tool schema `agent.py` already uses,
-    reusing the same explicit confirmation before any operation that writes
-  * `[to do]` `/mcp add|list|remove` and an `mcp` section in the configuration
-  * `[to do]` Expose VOX *as* an MCP server — the workspace tools are already sandboxed
-    and tested, which makes them the natural candidate
+  * `[done]` MCP client over both transports, in `vox_chat/mcp/`: stdio (a subprocess,
+    one JSON object per line) and streamable HTTP (a POST answered with JSON or SSE,
+    the server's choice per request, so both are read). The stdio reader is **one**
+    persistent thread, not one per call: a reader started for a call that then timed
+    out would still be sitting on the pipe and would eat the next reply — a race that
+    only shows under load, which is the worst kind to leave in. Tested against a real
+    server in a real subprocess, because framing, a notification arriving mid-call and
+    a server that dies are exactly what a fake transport does not exercise.
+  * `[done]` Discovered tools become OpenAI function schemas beside VOX's own, named
+    `mcp__<server>__<tool>` so two servers may both offer `search`. Confirmation is
+    **stricter** than for local tools, deliberately: a local tool is code in this
+    repository with a test behind it, an MCP tool is somebody else's program described
+    by its own author. So every call is confirmed unless the server marks it
+    `readOnlyHint`, and a tool marked `destructiveHint` is confirmed whatever the
+    configuration says — that is the server's own warning, and a setting that overrode
+    it would be a setting for ignoring warnings.
+  * `[done]` `/mcp on|off|list|reload` and an `mcp` block in the configuration,
+    validated per server when it is saved rather than on the turn that first needed
+    the tool. Off and empty by default: starting somebody else's program is not
+    something a default does. Connecting runs on a worker thread, and a server that
+    will not start is reported once and left alone rather than retried every turn.
+  * `[to complete]` Exposing VOX **as** an MCP server. The workspace tools really are
+    the natural candidate — sandboxed, confined, already tested — but publishing them
+    means any MCP client on the machine can drive them, and the confinement was written
+    against a model VOX itself confirms for, not against an arbitrary caller. That is a
+    security decision about what VOX offers the rest of the machine, and it is yours.
+    What it would need, if you want it: a `vox mcp-serve` entry point speaking the same
+    JSON-RPC as `mcp/client.py` reads, `tools.TOOL_SCHEMAS` as the advertised list,
+    `tools.execute` behind it, and a decision about whether writes are refused outright
+    or confirmed by something — there is no operator at a keyboard on that side.
 
 * **4.2 Modern generation parameters**
   * `[to do]` Expose `reasoning_effort` / `think` for reasoning models (Ollama exposes

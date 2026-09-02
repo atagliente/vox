@@ -119,6 +119,20 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "auto_fetch": 2,
         "auto_max_chars": 6000,
     },
+    # Tools from other people's servers. Off by default and empty: an MCP
+    # server is a program somebody else wrote, and VOX does not start one
+    # because a default said so.
+    "mcp": {
+        "enabled": False,
+        # Confirm every call unless the server marks the tool read-only. A
+        # local tool is code in this repository with a test behind it; this
+        # is not, so the answer to "should I ask first" is yes.
+        "confirm": True,
+        "timeout_seconds": 30.0,
+        # name -> {"command": ..., "args": [...], "env": {...}, "cwd": ...}
+        #      or {"url": ..., "headers": {...}}
+        "servers": {},
+    },
     "ui": {
         "theme": "nasa",
         "show_timestamps": True,
@@ -181,6 +195,41 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
         else:
             result[key] = copy.deepcopy(value)
     return result
+
+
+def _mcp_server_errors(name: str, spec: Any) -> list[str]:
+    """What is wrong with one mcp.servers entry, if anything.
+
+    Checked here rather than at connection time so a typo is reported when
+    the configuration is saved, not on the turn that first needed the tool.
+    """
+    where = f"mcp.servers.{name}"
+    if not isinstance(spec, dict):
+        return [f"{where} must be an object"]
+    command = spec.get("command", "")
+    url = spec.get("url", "")
+    errors: list[str] = []
+    if command and url:
+        errors.append(f"{where} takes either a command or a url, not both")
+    elif not command and not url:
+        errors.append(f"{where} needs either a command or a url")
+    if command and not isinstance(command, str):
+        errors.append(f"{where}.command must be a string")
+    if url:
+        if not isinstance(url, str):
+            errors.append(f"{where}.url must be a string")
+        elif not url.startswith(("http://", "https://")):
+            errors.append(f"{where}.url must be an http or https address")
+    args = spec.get("args", [])
+    if not isinstance(args, list) or any(not isinstance(a, str) for a in args):
+        errors.append(f"{where}.args must be a list of strings")
+    for key in ("env", "headers"):
+        block = spec.get(key, {})
+        if not isinstance(block, dict) or any(
+            not isinstance(v, str) for v in block.values()
+        ):
+            errors.append(f"{where}.{key} must be an object of strings")
+    return errors
 
 
 def validate_config(data: Any) -> list[str]:
@@ -296,6 +345,27 @@ def validate_config(data: Any) -> list[str]:
             value = agent.get(key, 1)
             if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
                 errors.append(f"agent.{key} must be a positive integer")
+
+    mcp = data.get("mcp", {})
+    if not isinstance(mcp, dict):
+        errors.append("mcp must be an object")
+    else:
+        for key in ("enabled", "confirm"):
+            if not isinstance(mcp.get(key, False), bool):
+                errors.append(f"mcp.{key} must be a boolean")
+        timeout = mcp.get("timeout_seconds", 1)
+        if (
+            not isinstance(timeout, int | float)
+            or isinstance(timeout, bool)
+            or timeout <= 0
+        ):
+            errors.append("mcp.timeout_seconds must be a positive number")
+        servers = mcp.get("servers", {})
+        if not isinstance(servers, dict):
+            errors.append("mcp.servers must be an object of name -> server")
+        else:
+            for name, spec in servers.items():
+                errors.extend(_mcp_server_errors(str(name), spec))
 
     inspection = data.get("inspect", {})
     if not isinstance(inspection, dict):

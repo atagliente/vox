@@ -145,6 +145,11 @@ COMMANDS: tuple[CommandSpec, ...] = (
         "/mesh [on|off|new-ca|sample-ca]",
         "Join or leave the mesh; swap the certificate authority",
     ),
+    CommandSpec(
+        "mcp",
+        "/mcp [on|off|list|reload]",
+        "Tools from Model Context Protocol servers",
+    ),
     CommandSpec("universe", "/universe", "Agents on the mesh, with their category"),
     CommandSpec(
         "web",

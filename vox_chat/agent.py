@@ -27,6 +27,7 @@ from .tools import (
     Workspace,
     describe_call,
     execute,
+    truncate,
 )
 from .usage import TurnUsage, estimate_tokens
 
@@ -101,6 +102,7 @@ def run_turn(
     include_usage: bool = True,
     top_logprobs: int | None = None,
     web_settings=None,
+    mcp_registry=None,
 ) -> Iterator[AgentEvent]:
     """Drive one user turn, including any tool cycles it triggers.
 
@@ -115,6 +117,10 @@ def run_turn(
     if web_settings is not None and getattr(web_settings, "enabled", False):
         # The model is only told the internet exists when it is switched on.
         schemas += WEB_SCHEMAS
+    if mcp_registry is not None:
+        # Somebody else's tools, named by their server so two of them may
+        # both offer "search" without the model having to guess.
+        schemas += mcp_registry.schemas()
     max_cycles = int(agent_config.get("max_tool_cycles", 8))
     max_output = int(agent_config.get("max_output_bytes", 8192))
     command_timeout = int(agent_config.get("command_timeout_seconds", 60))
@@ -237,6 +243,7 @@ def run_turn(
                 command_timeout,
                 max_output,
                 web_settings,
+                mcp_registry,
             )
             history.append(result_message)
             produced.append(result_message)
@@ -271,6 +278,48 @@ def _relay(
             yield AgentEvent("tool_start", tool_call=call)
 
 
+def _run_mcp_tool(
+    call: ToolCall,
+    registry,
+    confirm: ConfirmCallback,
+    max_output: int,
+) -> Message:
+    """Run one call against an MCP server.
+
+    Confirmed by the same modal as everything else, and by default confirmed
+    even for reads: a local tool is code in this repository that a test
+    covers, and an MCP tool is somebody else's program described by its own
+    author. The registry decides; a tool the server itself marks destructive
+    is confirmed whatever the configuration says.
+    """
+    from .mcp import McpError
+
+    try:
+        arguments = parse_arguments(call.arguments)
+    except ToolError as exc:
+        call.result = str(exc)
+        return _tool_message(call)
+
+    if registry.needs_confirmation(call.name) and not confirm(
+        call.name, registry.describe_call(call.name, arguments)
+    ):
+        call.approved = False
+        call.result = "user denied this operation"
+        return _tool_message(call)
+    call.approved = True
+
+    try:
+        ok, text = registry.call(call.name, arguments)
+    except McpError as exc:
+        call.result = f"error: {exc}"
+        return _tool_message(call)
+    body, cut = truncate(text or "(the tool returned nothing)", max_output)
+    call.result = body + ("\n... truncated" if cut else "")
+    if not ok:
+        call.result = f"the tool reported a failure:\n{call.result}"
+    return _tool_message(call)
+
+
 def _run_tool(
     call: ToolCall,
     workspace: Workspace | None,
@@ -279,8 +328,11 @@ def _run_tool(
     command_timeout: int,
     max_output: int,
     web_settings=None,
+    mcp_registry=None,
 ) -> Message:
     """Execute one tool call, asking for confirmation when required."""
+    if mcp_registry is not None and mcp_registry.owns(call.name):
+        return _run_mcp_tool(call, mcp_registry, confirm, max_output)
     if workspace is None and call.name not in WEB_TOOLS:
         call.result = "no workspace configured"
         call.approved = False
