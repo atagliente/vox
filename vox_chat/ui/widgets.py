@@ -253,6 +253,7 @@ class KeyBar(Static):
         ("F3", "online"),
         ("F4", "universe"),
         ("F5", "round"),
+        ("F6", "web"),
         ("alt+enter", "new line"),
         ("^N", "new"),
         ("^S", "settings"),

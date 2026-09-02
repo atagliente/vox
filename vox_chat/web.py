@@ -5,10 +5,11 @@ off until switched on, it says what it sent and where, and it uses nothing but
 the standard library: a search is a GET and a page is text extracted from HTML,
 neither of which is worth a dependency.
 
-Two backends, because the honest ones differ in what they cost you:
+Three backends, differing in what they cost you:
 
-- ``searxng`` — your own instance, no key, no account. Nothing about the query
-  leaves the machines you run.
+- ``local`` — the little server VOX starts for itself (``searchd.py``). Nothing
+  to install, nothing to register for; it scrapes, so it can break.
+- ``searxng`` — an instance you run. Same JSON, sturdier, needs deploying.
 - ``brave`` — one free key, nothing to host. The query goes to Brave.
 
 Two rules hold whatever the backend:
@@ -39,7 +40,7 @@ from .logging_setup import get_logger
 log = get_logger("web")
 
 USER_AGENT = "vox/0.1 (+https://github.com/atagliente/vox)"
-PROVIDERS = ("searxng", "brave")
+PROVIDERS = ("local", "searxng", "brave")
 BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 
 # What a fetched page is allowed to be, and how much of it is read.
@@ -68,7 +69,7 @@ class WebSettings:
     """The ``web`` block of the configuration, already typed."""
 
     enabled: bool = False
-    provider: str = "searxng"
+    provider: str = "local"
     endpoint: str = "http://localhost:8888"
     api_key: str = ""
     max_results: int = 5
@@ -77,6 +78,10 @@ class WebSettings:
     allow_fetch: bool = True
     allow_private_addresses: bool = False
     language: str = ""
+    auto: bool = False
+    auto_results: int = 5
+    auto_fetch: int = 2
+    auto_max_chars: int = 6000
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> "WebSettings":
@@ -102,6 +107,12 @@ class WebSettings:
                             defaults.allow_private_addresses)
             ),
             language=str(section.get("language", "") or ""),
+            auto=bool(section.get("auto", defaults.auto)),
+            auto_results=int(section.get("auto_results", defaults.auto_results)),
+            auto_fetch=int(section.get("auto_fetch", defaults.auto_fetch)),
+            auto_max_chars=int(
+                section.get("auto_max_chars", defaults.auto_max_chars)
+            ),
         )
 
     def unusable(self) -> str | None:
@@ -112,16 +123,30 @@ class WebSettings:
             return f"unknown web.provider {self.provider!r}; use one of {', '.join(PROVIDERS)}"
         if self.provider == "brave" and not self.api_key:
             return "web.api_key is empty, and Brave needs one"
-        if self.provider == "searxng" and not self.endpoint:
-            return "web.endpoint is empty, and SearXNG needs the address of your instance"
+        if self.provider in ("local", "searxng") and not self.endpoint:
+            return "web.endpoint is empty, and there is nowhere to send the search"
         return None
 
     def describe(self) -> str:
-        where = self.endpoint if self.provider == "searxng" else "api.search.brave.com"
+        where = "api.search.brave.com" if self.provider == "brave" else self.endpoint
         return f"{self.provider} · {where}"
 
 
 # ------------------------------------------------------------------ addresses
+
+
+LOOPBACK_NAMES = {"localhost", "127.0.0.1", "::1", "[::1]"}
+
+
+def is_local_endpoint(endpoint: str) -> bool:
+    """Does this endpoint point at this machine?
+
+    What decides whether VOX serves it itself is where it points, not what the
+    provider is called: a configuration written before the local server existed
+    still says ``searxng`` and still means localhost.
+    """
+    host = urllib.parse.urlparse(endpoint).hostname or ""
+    return host.lower() in LOOPBACK_NAMES
 
 
 def _is_private(host: str) -> bool:
@@ -176,9 +201,24 @@ def _open(url: str, settings: WebSettings, headers: dict[str, str] | None = None
     try:
         return urllib.request.urlopen(request, timeout=settings.timeout_seconds)
     except urllib.error.HTTPError as exc:
+        # The local server answers a failure with the reason in JSON; passing
+        # on "HTTP 502" instead would throw away the only useful part.
+        detail = ""
+        try:
+            body = json.loads(exc.read(10_000))
+            detail = str(body.get("error", ""))
+        except (ValueError, OSError):
+            pass
+        if detail:
+            raise WebError(detail) from exc
         raise WebError(f"{url} returned HTTP {exc.code}") from exc
     except urllib.error.URLError as exc:
-        raise WebError(f"cannot reach {urllib.parse.urlparse(url).netloc}: {exc.reason}") from exc
+        where = urllib.parse.urlparse(url).netloc
+        if is_local_endpoint(url):
+            raise WebError(
+                f"nothing is listening on {where} - /web start, or F6"
+            ) from exc
+        raise WebError(f"cannot reach {where}: {exc.reason}") from exc
     except (TimeoutError, socket.timeout) as exc:
         raise WebError(f"{url} timed out after {settings.timeout_seconds:g}s") from exc
     except OSError as exc:  # pragma: no cover - platform specific
@@ -200,6 +240,7 @@ def search(query: str, settings: WebSettings) -> list[Result]:
     if settings.provider == "brave":
         results = _brave(query, settings)
     else:
+        # local and searxng speak the same JSON, on purpose.
         results = _searxng(query, settings)
     log.info("searched %s for %r: %d results", settings.provider, query, len(results))
     return results[: settings.max_results]
@@ -217,6 +258,8 @@ def _searxng(query: str, settings: WebSettings) -> list[Result]:
     try:
         payload = json.loads(body)
     except ValueError as exc:
+        if settings.provider == "local":
+            raise WebError("the local search server answered with nonsense") from exc
         raise WebError(
             "that SearXNG instance did not answer with JSON; its settings.yml "
             "must list 'json' under search.formats"
@@ -395,3 +438,94 @@ def render_page(page: Page, limit: int = 8000) -> str:
     header = f"{page.title or page.url}\n{page.url}"
     body = f"{UNTRUSTED_NOTE}\n\n{header}\n\n{text}"
     return body + ("\n\n[…truncated]" if cut else "")
+
+
+# ------------------------------------------------------------------ web mode
+
+
+@dataclass
+class Sources:
+    """What one question's research turned up."""
+
+    query: str
+    results: list[Result] = field(default_factory=list)
+    pages: list[Page] = field(default_factory=list)
+    failures: list[str] = field(default_factory=list)
+
+    @property
+    def found(self) -> bool:
+        return bool(self.results)
+
+    def citations(self) -> str:
+        """The short, permanent record: what was consulted."""
+        lines = [f"Searched for: {self.query}"]
+        for index, result in enumerate(self.results, start=1):
+            read = any(page.url == result.url for page in self.pages)
+            lines.append(
+                f"{index}. {result.title or result.url}\n   {result.url}"
+                + ("   [read in full]" if read else "")
+            )
+        for failure in self.failures:
+            lines.append(f"   (not read: {failure})")
+        return "\n".join(lines)
+
+
+def query_for(message: str, limit: int = 300) -> str:
+    """The search a message asks for.
+
+    The message itself, tidied. Asking the model to write a query first would
+    read better and cost a whole round trip before anything is searched; this
+    is the honest cheap version, and the query is always shown.
+    """
+    text = " ".join(message.split())
+    return text[:limit].strip()
+
+
+def gather(question: str, settings: WebSettings) -> Sources:
+    """Search, then read the first few results. Raises only if the search does.
+
+    A page that cannot be read is recorded rather than raised: one dead link
+    should not cost the answer the other four sources.
+    """
+    query = query_for(question)
+    sources = Sources(query=query)
+    sources.results = search(query, settings)[: max(1, settings.auto_results)]
+
+    if not settings.allow_fetch:
+        return sources
+    for result in sources.results[: max(0, settings.auto_fetch)]:
+        try:
+            sources.pages.append(fetch(result.url, settings))
+        except WebError as exc:
+            sources.failures.append(f"{result.url}: {exc}")
+    return sources
+
+
+def research_prompt(sources: Sources, limit: int = 6000) -> str:
+    """The system message that puts the sources in front of the model."""
+    lines = [
+        UNTRUSTED_NOTE,
+        "",
+        f"These sources were retrieved for this question by searching for "
+        f"{sources.query!r}. Use them to answer: prefer them over your own "
+        "recollection where they disagree, cite the URLs you rely on, and say "
+        "plainly when they do not cover what was asked rather than filling the "
+        "gap from memory.",
+        "",
+    ]
+    for index, result in enumerate(sources.results, start=1):
+        lines.append(f"[{index}] {result.title or result.url}")
+        lines.append(f"    {result.url}")
+        if result.snippet:
+            lines.append(f"    {result.snippet}")
+    budget = max(500, limit)
+    for page in sources.pages:
+        share = budget // max(1, len(sources.pages))
+        text = page.text[:share]
+        lines.extend([
+            "",
+            f"--- FULL TEXT: {page.title or page.url} ---",
+            f"{page.url}",
+            text + ("\n[…truncated]" if len(page.text) > share else ""),
+        ])
+    return "\n".join(lines)

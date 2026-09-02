@@ -41,6 +41,8 @@ OFF_MESH = "LOCAL"
 # Shown beside ON-LINE while the mesh trusts the authority shipped with
 # VOX, whose private key is public. It is not a warning to hide.
 DEMO_CERT = "SAMPLE CERT"
+# Shown when every answer is researched before it is written.
+WEB_MODE = "WEB"
 
 
 def header_lines(link: str, mesh: str, provider: str, model: str,

@@ -44,6 +44,28 @@ class FakeResponse(io.BytesIO):
 
 
 @pytest.fixture
+def engine(monkeypatch: pytest.MonkeyPatch):
+    """The local search server, stubbed: no socket, no upstream."""
+    started: list[int] = []
+
+    class FakeServer:
+        port = 8888
+        running = False
+
+        def start(self_inner):
+            started.append(self_inner.port)
+            self_inner.running = True
+            return f"listening on 127.0.0.1:{self_inner.port}"
+
+        def stop(self_inner):
+            self_inner.running = False
+
+    server = FakeServer()
+    server.started = started
+    return server
+
+
+@pytest.fixture
 def wire(monkeypatch: pytest.MonkeyPatch):
     """Records every request, and answers with whatever the test queued."""
     calls: list = []
@@ -164,7 +186,13 @@ def test_more_results_than_asked_for_are_trimmed(wire) -> None:
 def test_a_searxng_without_json_says_what_to_fix(wire) -> None:
     wire.answers.append(FakeResponse(b"<html>a web page</html>"))
     with pytest.raises(web.WebError, match="settings.yml"):
-        web.search("x", web.WebSettings(enabled=True))
+        web.search("x", web.WebSettings(enabled=True, provider="searxng"))
+
+
+def test_the_local_server_answering_nonsense_says_so(wire) -> None:
+    wire.answers.append(FakeResponse(b"<html>not json</html>"))
+    with pytest.raises(web.WebError, match="local search server"):
+        web.search("x", web.WebSettings(enabled=True, provider="local"))
 
 
 def test_searching_while_off_is_refused() -> None:
@@ -225,7 +253,7 @@ def test_fetching_can_be_switched_off_on_its_own() -> None:
 def test_the_default_config_carries_a_web_block() -> None:
     config = default_config()
     assert config["web"]["enabled"] is False, "the internet is opt-in"
-    assert config["web"]["provider"] == "searxng"
+    assert config["web"]["provider"] == "local", "no key and nothing to install"
     assert config["agent"]["confirm_web"] is True
     assert validate_config(config) == []
 
@@ -363,3 +391,254 @@ async def test_a_failed_search_says_why_and_changes_nothing(app: VoxApp, wire) -
 
         assert "SEARCH FAILED" in transcript(app)
         assert not [m for m in app.session.messages if m.name == "web_search"]
+
+
+# --------------------------------------------------------------- web mode (F6)
+
+
+def test_the_query_is_the_message_tidied() -> None:
+    assert web.query_for("  what   is\n a ring buffer? ") == "what is a ring buffer?"
+    assert len(web.query_for("x " * 400)) <= 300
+
+
+def test_gathering_reads_the_first_results_only(wire) -> None:
+    wire.answers.append(FakeResponse(json.dumps({"results": [
+        {"title": f"R{n}", "url": f"https://{n}.example", "content": f"snippet {n}"}
+        for n in range(5)
+    ]}).encode(), "application/json"))
+    for n in range(2):
+        wire.answers.append(FakeResponse(
+            f"<html><body><p>Body of page {n}.</p></body></html>".encode()
+        ))
+
+    settings = web.WebSettings(enabled=True, auto=True, auto_results=4, auto_fetch=2)
+    sources = web.gather("ring buffers", settings)
+
+    assert len(sources.results) == 4, "auto_results caps what is kept"
+    assert len(sources.pages) == 2, "auto_fetch caps what is read"
+    assert sources.failures == []
+    assert "Body of page 0." in sources.pages[0].text
+
+
+def test_one_dead_link_does_not_cost_the_other_sources(wire) -> None:
+    wire.answers.append(FakeResponse(json.dumps({"results": [
+        {"title": "Broken", "url": "https://gone.example", "content": "x"},
+        {"title": "Fine", "url": "https://fine.example", "content": "y"},
+    ]}).encode(), "application/json"))
+    wire.answers.append(FakeResponse(b"\x89PNG", "image/png"))   # refused
+    wire.answers.append(FakeResponse(b"<html><body><p>Good.</p></body></html>"))
+
+    sources = web.gather("x", web.WebSettings(enabled=True, auto=True, auto_fetch=2))
+    assert len(sources.pages) == 1
+    assert sources.failures and "gone.example" in sources.failures[0]
+    assert sources.found is True
+
+
+def test_the_prompt_puts_the_sources_in_front_of_the_model() -> None:
+    sources = web.Sources(
+        query="ring buffers",
+        results=[web.Result("A guide", "https://a.example", "about buffers")],
+        pages=[web.Page("https://a.example", "A guide", "The full text.")],
+    )
+    prompt = web.research_prompt(sources)
+    assert web.UNTRUSTED_NOTE in prompt
+    assert "https://a.example" in prompt
+    assert "The full text." in prompt
+    assert "cite the URLs" in prompt
+    assert "do not cover" in prompt
+
+
+def test_the_prompt_shares_its_budget_between_pages() -> None:
+    sources = web.Sources(
+        query="x",
+        results=[],
+        pages=[web.Page(f"https://{n}.example", "T", "word " * 2000) for n in range(2)],
+    )
+    prompt = web.research_prompt(sources, limit=1000)
+    assert len(prompt) < 2000
+    assert prompt.count("truncated") == 2
+
+
+def test_citations_say_what_was_read() -> None:
+    sources = web.Sources(
+        query="x",
+        results=[web.Result("A", "https://a.example"),
+                 web.Result("B", "https://b.example")],
+        pages=[web.Page("https://a.example", "A", "text")],
+        failures=["https://b.example: HTTP 404"],
+    )
+    text = sources.citations()
+    assert "https://a.example" in text and "[read in full]" in text
+    assert "HTTP 404" in text
+
+
+async def test_f6_needs_a_backend_before_it_turns_on(app: VoxApp, engine) -> None:
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.search_server = engine
+        app.config["web"]["provider"] = "brave"   # and no key
+        app.action_toggle_web_mode()
+        await pilot.pause()
+        assert "WEB MODE NEEDS A BACKEND" in transcript(app)
+        assert app.web_mode_active() is False
+
+
+async def test_f6_turns_the_mode_on_and_shows_it(app: VoxApp, engine) -> None:
+    async with app.run_test(size=(130, 30)) as pilot:
+        await pilot.pause()
+        await pilot.press("f6")
+        await pilot.pause()
+
+        assert app.web_mode_active() is True
+        assert "WEB MODE ON" in transcript(app)
+        assert "WEB" in str(app.query_one("#header").render())
+        saved = json.loads(global_config_path().read_text())["web"]
+        assert saved["enabled"] is True and saved["auto"] is True
+
+        await pilot.press("f6")
+        await pilot.pause()
+        assert app.web_mode_active() is False
+        assert "WEB MODE OFF" in transcript(app)
+
+
+async def test_a_message_in_web_mode_is_answered_from_sources(
+    app: VoxApp, wire, engine
+) -> None:
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("f6")
+        await pilot.pause()
+
+        wire.answers.append(FakeResponse(json.dumps({"results": [
+            {"title": "Ring buffers", "url": "https://a.example", "content": "snip"},
+        ]}).encode(), "application/json"))
+        wire.answers.append(FakeResponse(
+            b"<html><body><p>A stalled reader blocks reclamation.</p></body></html>"
+        ))
+
+        app.input_area.insert("are lock-free ring buffers safe?")
+        app.action_send()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        # It searched for the question, and said what it found.
+        searched = wire.calls[0][0].replace("+", " ").replace("%3F", "?")
+        assert "are lock-free ring buffers safe?" in searched
+        assert "WEB - 1 sources" in transcript(app)
+
+        # The citations stay in the conversation; the page text is for this
+        # turn only, or every later message would carry the whole internet.
+        stored = [m for m in app.session.messages if m.name == "web"]
+        assert stored and "https://a.example" in stored[0].content
+        assert "A stalled reader" not in stored[0].content
+        assert "A stalled reader" in app._web_prompt
+        assert web.UNTRUSTED_NOTE in app._web_prompt
+
+
+async def test_a_failed_search_still_answers(app: VoxApp, wire, engine) -> None:
+    """A search that breaks must not swallow the question."""
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("f6")
+        await pilot.pause()
+
+        wire.answers.append(FakeResponse(b"<html>not json</html>"))
+        app.input_area.insert("a question")
+        app.action_send()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert "answering without sources" in transcript(app)
+        assert app._web_prompt == ""
+        assert [m.content for m in app.session.messages if m.role == "user"] == [
+            "a question"
+        ]
+
+
+async def test_a_message_sent_mid_lookup_is_refused(
+    app: VoxApp, monkeypatch, engine
+) -> None:
+    import time as time_module
+
+    def slow_gather(question, settings):
+        time_module.sleep(0.4)
+        return web.Sources(query=question,
+                           results=[web.Result("A", "https://a.example")])
+
+    monkeypatch.setattr(web, "gather", slow_gather)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("f6")
+        await pilot.pause()
+
+        app.input_area.insert("first")
+        app.action_send()
+        await pilot.pause()
+        assert app._web_running is True
+
+        app.input_area.insert("second, while it looks things up")
+        app.action_send()
+        await pilot.pause()
+        assert "STILL LOOKING THINGS UP" in transcript(app)
+        assert [m.content for m in app.session.messages if m.role == "user"] == ["first"]
+        await app.workers.wait_for_complete()
+
+
+async def test_a_marked_question_goes_to_the_mesh_not_the_web(
+    app: VoxApp, engine
+) -> None:
+    """[CNS] is a mesh round; web mode does not quietly take it over."""
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.search_server = engine
+        await pilot.press("f6")
+        await pilot.pause()
+
+        app.input_area.insert("[CNS]ask the others[/CNS]")
+        app.action_send()
+        await pilot.pause()
+        # There is no mesh here, so it refuses as a round rather than searching.
+        assert "CONSENSUS NEEDS THE MESH" in transcript(app)
+
+
+def test_a_loopback_endpoint_is_recognised_whatever_it_is_called() -> None:
+    """Regression: a config written before the local server existed says
+    provider 'searxng' and endpoint localhost, and got connection refused."""
+    for endpoint in ("http://localhost:8888", "http://127.0.0.1:9999",
+                     "http://[::1]:8888"):
+        assert web.is_local_endpoint(endpoint) is True
+    for endpoint in ("https://search.example", "http://192.168.1.5:8888"):
+        assert web.is_local_endpoint(endpoint) is False
+
+
+def test_nothing_listening_says_how_to_fix_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuse(request, timeout=None):
+        raise web.urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(web.urllib.request, "urlopen", refuse)
+    monkeypatch.setattr(web, "_is_private", lambda host: False)
+
+    with pytest.raises(web.WebError, match="/web start"):
+        web.search("x", web.WebSettings(enabled=True, provider="searxng",
+                                        endpoint="http://localhost:8888"))
+    # A remote endpoint gets the plain reason instead.
+    with pytest.raises(web.WebError, match="cannot reach"):
+        web.search("x", web.WebSettings(enabled=True, provider="searxng",
+                                        endpoint="https://search.example"))
+
+
+async def test_an_old_config_still_gets_a_server(app: VoxApp, engine) -> None:
+    """The provider is named searxng and points at this machine: VOX serves it."""
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.search_server = engine
+        app.config["web"].update(
+            {"enabled": True, "provider": "searxng",
+             "endpoint": "http://localhost:8888"}
+        )
+        assert app.wants_local_server(app.web_settings()) is True
+
+        app.run_command("/search anything")
+        await pilot.pause()
+        assert engine.started, "the server was started for it"
+        assert "SEARCH SERVER" in transcript(app)

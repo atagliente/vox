@@ -93,6 +93,7 @@ has no authentication — only on a network you trust.
 | `↑` / `↓` | input history | `Ctrl+B` | side panel |
 | `Ctrl+N` / `Ctrl+W` | new / save session | `Ctrl+T` / `Ctrl+E` | inspect / export |
 | `F3` | join / leave the mesh | `F4` / `F5` | the universe / the round |
+| `F6` | web mode: answers researched first | | |
 | | | `Ctrl+Q` | quit |
 
 The bottom row shows this legend at all times.
@@ -187,6 +188,25 @@ run under a timeout.
 Off until you switch it on, and the only part of VOX that talks to something
 that is not yours.
 
+**`F6` is web mode.** With it on, you chat as usual and every message is
+researched first: VOX searches for what you asked, reads the first couple of
+results in full, and gives the model those sources to answer from.
+
+```text
+YOU  ▸ what changed in the latest Textual release?
+SYS  ▸ WEB - 5 sources for 'what changed in the latest Textual release?', 2 read in full
+TOOL web ▸ Searched for: what changed in the latest Textual release?
+           1. Textual 8.2.0 — CHANGELOG
+              https://github.com/Textualize/textual/…   [read in full]
+VOX  ▸ …
+```
+
+The header shows `WEB` while it is on. The citations stay in the conversation;
+the page text is used for that answer and then dropped, so a long session does
+not drag the whole internet behind it.
+
+Or do it by hand:
+
 ```text
 /web on
 /search lock-free ring buffer reclamation
@@ -199,18 +219,30 @@ page and turns it into text. In agent mode the model gets two tools of its own,
 the confirmation for a search shows the query, because that query leaves your
 machine.
 
+**VOX runs the search server itself.** Pressing `F6` starts a small HTTP
+server on `127.0.0.1:8888`, inside VOX, in a thread. Nothing to install, no
+container, no key, and it goes away when VOX does. It answers the same JSON as
+SearXNG, so pointing `web.endpoint` at a real instance later changes nothing
+else.
+
+Where its results come from, honestly: DuckDuckGo's HTML endpoint, parsed, plus
+Wikipedia's API. That is scraping — it can break when their markup changes and
+it is rate-limited, and when that happens VOX says so instead of quietly
+returning nothing.
+
 Two backends, chosen in the configuration:
 
 | `web.provider` | needs | the query goes to |
 | --- | --- | --- |
+| `local` (default) | nothing | DuckDuckGo and Wikipedia, from your machine |
 | `searxng` | an instance you run | only machines you run |
 | `brave` | one free API key | Brave |
 
 ```json
 "web": {
   "enabled": false,
-  "provider": "searxng",
-  "endpoint": "http://localhost:8888",
+  "provider": "local",
+  "endpoint": "http://127.0.0.1:8888",
   "api_key": "",
   "max_results": 5,
   "allow_fetch": true

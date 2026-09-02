@@ -22,6 +22,46 @@ machine and version named, not estimated.
   only while the feature is on, and confirmed under `agent.confirm_web` like
   writes and commands — a search's confirmation shows the query, because that
   query is what leaves the machine.
+- **`F6` is web mode: chat normally, and the answer is researched first.**
+  Every message triggers a search for itself, the first `auto_fetch` results
+  are read in full, and the model is given them with an instruction to prefer
+  them over recollection, cite the URLs, and say when they do not cover the
+  question. The query is the message tidied — asking a model to write a better
+  one costs a round trip before anything is searched, and the query is always
+  shown. The citations are kept in the conversation; the page text is used for
+  that answer and dropped, so a long session does not drag the whole internet
+  behind it. The header shows `WEB`, the status bar `LOOKING IT UP`, a message
+  sent mid-lookup is refused rather than answered out of order, `Ctrl+G`
+  abandons it, and a search that fails answers from the model alone instead of
+  losing the question. A `[CNS]` question stays a mesh round.
+- **VOX runs the search server itself, in-process.** Choosing a self-hosted
+  backend used to mean installing something first — a container, a daemon, a
+  deployment guide. `F6` now starts a small HTTP server inside VOX on
+  127.0.0.1:8888: a thread, not a process, gone when VOX exits, bound to
+  loopback so it is this machine's and not the network's. It answers the same
+  JSON as SearXNG, so the client cannot tell the difference and moving to a
+  real instance later is one line of configuration. `/web start|stop|status`
+  control it.
+- **Fixed: "impossibile stabilire una connessione" on an existing config.**
+  Whether VOX serves the endpoint itself was decided by the provider's name,
+  so a configuration written a few minutes earlier — `provider: searxng`,
+  `endpoint: http://localhost:8888` — skipped starting the server and tried to
+  reach one that was not there. It is decided by where the endpoint points
+  now: anything on loopback is VOX's to serve, whatever it is labelled. A
+  connection refused to a local endpoint also says `/web start` instead of
+  repeating the operating system's wording.
+- **Where those results come from, said plainly.** DuckDuckGo's HTML endpoint,
+  parsed, plus Wikipedia's documented API. That is scraping: it can break when
+  their markup changes and it is rate-limited, so a captcha page is reported as
+  a captcha rather than as "no results", and the docs say to run a real SearXNG
+  or use a key for anything load-bearing. Measured working end to end: a search
+  through the server, then a page fetched and read to 11k characters.
+- **Two bugs found while testing it.** A tag between a word and its comma left
+  a space in front of the comma, so snippets read "ring buffers , at length".
+  And on Windows `SO_REUSEADDR` means "bind even if this port is taken", so a
+  second server bound the same port and answered half the requests; the server
+  now refuses there, while keeping the flag on POSIX where it means "reuse a
+  TIME_WAIT socket" and is what makes a restart work.
 - **Two honest backends.** `searxng` is an instance you run: no key, no
   account, and the query reaches only your own machines. `brave` is one free
   key and nothing to host, with the key sent as a header and never in a URL.

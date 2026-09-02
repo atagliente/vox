@@ -150,7 +150,7 @@ restarts. A key legend is always visible on the bottom row.
 | `/agent on\|off`, `/workspace <path>` | control coding-agent mode |
 | `/stats` | token usage, context fill and speed for the session |
 | `/warm` | preload the active model on the server |
-| `/web [on\|off]`, `/search <query>`, `/fetch <url>` | search the internet |
+| `/web [on\|off\|start\|stop\|status]`, `/search`, `/fetch` | search the internet |
 | `/mesh [on\|off\|new-ca\|sample-ca]`, `/universe` | join the mesh, see who is on it, swap the authority |
 | `/consensus [on\|off]`, `/round` | ask the other agents, watch them answer |
 | `/connect`, `/stop`, `/new`, `/clear`, `/exit` | connection and session control |
@@ -673,7 +673,33 @@ yours, so it is switched on deliberately:
 /fetch https://example.com/article
 ```
 
-`/search` puts the titles, URLs and snippets into the conversation, where the
+**`F6` turns on web mode**, which is the point of the feature: you chat
+normally and every message is answered from sources fetched for it. VOX searches
+for what you asked, reads the first `auto_fetch` results in full, and puts them
+in front of the model with an instruction to prefer them over its recollection,
+cite the URLs it uses, and say when they do not cover the question.
+
+```text
+SYS  ▸ WEB - 5 sources for 'what changed in the latest Textual release?', 2 read in full
+TOOL web ▸ Searched for: …
+           1. Textual 8.2.0 — CHANGELOG
+              https://github.com/Textualize/textual/…   [read in full]
+```
+
+The query is your message, tidied — asking the model to write a better one
+first would cost a whole round trip before anything is searched, and the query
+is always shown so you can see what was sent. The citations stay in the
+conversation; the page text is used for that one answer and then dropped, or
+every later message would carry the whole internet with it. `F6` again turns it
+off, and the header shows `WEB` while it is on.
+
+A search that fails does not swallow the question: VOX says so and answers from
+the model alone. While it is looking things up the status bar reads `LOOKING IT
+UP`, another message is refused until it is done, and `Ctrl+G` abandons the
+lookup. A `[CNS]` question is a mesh round and is never quietly turned into a
+search.
+
+By hand, `/search` puts the titles, URLs and snippets into the conversation, where the
 model can use them. `/fetch` reads one page and turns it into plain text.
 `/web` on its own reports the state, the backend and whether pages may be read.
 
@@ -682,19 +708,48 @@ model can use them. `/fetch` reads one page and turns it into plain text.
 ```json
 "web": {
   "enabled": false,
-  "provider": "searxng",
-  "endpoint": "http://localhost:8888",
+  "provider": "local",
+  "endpoint": "http://127.0.0.1:8888",
   "api_key": "",
   "max_results": 5,
   "timeout_seconds": 15.0,
   "fetch_max_bytes": 409600,
   "allow_fetch": true,
   "allow_private_addresses": false,
-  "language": ""
+  "language": "",
+  "auto": false,
+  "auto_results": 5,
+  "auto_fetch": 2,
+  "auto_max_chars": 6000
 }
 ```
 
-- **`searxng`** — your own instance, no key and no account, so the query only
+**The server is VOX's problem, not yours.** With the default `local` provider,
+`F6` starts a small HTTP server inside VOX on `127.0.0.1:8888` — a thread, not a
+process, not a container:
+
+```text
+SYS ▸ SEARCH SERVER - listening on 127.0.0.1:8888
+SYS ▸ WEB MODE ON - every message is answered with sources from local · http://127.0.0.1:8888
+```
+
+It speaks the same JSON as SearXNG (`/search?q=…&format=json`), so the client
+code does not care which is answering and moving to a real instance later is a
+one-line change. What decides whether VOX serves the endpoint itself is where
+it points, not what the provider is called: anything on `localhost` or
+`127.0.0.1` is VOX's to serve, so a configuration that says `searxng` and
+points at this machine works without editing. It binds to loopback only: it is this machine's, not the
+network's. `/web start`, `/web stop` and `/web status` control it, and it stops
+when VOX does.
+
+Its results come from DuckDuckGo's HTML endpoint, parsed, plus Wikipedia's
+documented API. That is scraping, and it is the price of needing neither a key
+nor an install: it can break when their markup changes, and it is rate-limited —
+ask it for too much too quickly and it returns a captcha page, which VOX reports
+as exactly that rather than as "no results".
+
+- **`local`** (default) — the server above. Nothing to set up.
+- **`searxng`** — your own instance, sturdier than scraping, and the query only
   reaches machines you run. Its `settings.yml` must list `json` under
   `search.formats`, or VOX will say so rather than guess.
 - **`brave`** — one free API key in `web.api_key`, nothing to host. The query

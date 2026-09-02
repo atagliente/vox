@@ -200,6 +200,30 @@ def check_consensus(loaded: LoadedConfig) -> Check:
     return Check("OK", "CONSENSUS", detail)
 
 
+def check_web(loaded: LoadedConfig) -> Check:
+    """Whether a search would work, and whether VOX can start what it needs."""
+    from .web import WebSettings
+
+    settings = WebSettings.from_config(loaded.data)
+    if not settings.enabled:
+        return Check("--", "WEB", "off - /web on, or F6 for web mode")
+    reason = settings.unusable()
+    if reason:
+        return Check("WARN", "WEB", reason)
+    if settings.provider != "searxng":
+        return Check("OK", "WEB", settings.describe())
+
+    from . import searxng
+
+    state = searxng.status(settings.endpoint)
+    if state.answering:
+        return Check("OK", "WEB", f"{settings.endpoint} - {state.describe()}")
+    if state.runtime and state.daemon:
+        return Check("WARN", "WEB",
+                     f"{settings.endpoint} not answering - /web start")
+    return Check("WARN", "WEB", f"{settings.endpoint} - {state.describe()}")
+
+
 def run_checks(workspace: Path | None = None, timeout: float = 5.0) -> list[Check]:
     """Run every check in order and return the report lines."""
     checks = [
@@ -217,6 +241,7 @@ def run_checks(workspace: Path | None = None, timeout: float = 5.0) -> list[Chec
     checks.append(check_model(loaded, models))
     checks.append(check_mesh(loaded))
     checks.append(check_consensus(loaded))
+    checks.append(check_web(loaded))
     return checks
 
 

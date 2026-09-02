@@ -93,8 +93,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "web": {
         "enabled": False,
-        "provider": "searxng",
-        "endpoint": "http://localhost:8888",
+        "provider": "local",
+        "endpoint": "http://127.0.0.1:8888",
         "api_key": "",
         "max_results": 5,
         "timeout_seconds": 15.0,
@@ -102,6 +102,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "allow_fetch": True,
         "allow_private_addresses": False,
         "language": "",
+        # Web mode (F6): every message is answered with sources fetched first.
+        "auto": False,
+        "auto_results": 5,
+        "auto_fetch": 2,
+        "auto_max_chars": 6000,
     },
     "ui": {
         "theme": "nasa",
@@ -292,19 +297,23 @@ def validate_config(data: Any) -> list[str]:
     if not isinstance(web, dict):
         errors.append("web must be an object")
     else:
-        for key in ("enabled", "allow_fetch", "allow_private_addresses"):
+        for key in ("enabled", "allow_fetch", "allow_private_addresses", "auto"):
             if not isinstance(web.get(key, False), bool):
                 errors.append(f"web.{key} must be a boolean")
         provider = web.get("provider", "searxng")
-        if provider not in ("searxng", "brave"):
-            errors.append("web.provider must be searxng or brave")
+        if provider not in ("local", "searxng", "brave"):
+            errors.append("web.provider must be local, searxng or brave")
         for key in ("endpoint", "api_key", "language"):
             if not isinstance(web.get(key, ""), str):
                 errors.append(f"web.{key} must be a string")
-        for key, default in (("max_results", 5), ("fetch_max_bytes", 409600)):
+        for key, default in (("max_results", 5), ("fetch_max_bytes", 409600),
+                             ("auto_results", 5), ("auto_max_chars", 6000)):
             value = web.get(key, default)
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
                 errors.append(f"web.{key} must be a positive whole number")
+        fetches = web.get("auto_fetch", 2)
+        if not isinstance(fetches, int) or isinstance(fetches, bool) or fetches < 0:
+            errors.append("web.auto_fetch must be zero or more")
         timeout = web.get("timeout_seconds", 15.0)
         if (not isinstance(timeout, (int, float)) or isinstance(timeout, bool)
                 or timeout <= 0):

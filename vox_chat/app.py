@@ -35,6 +35,7 @@ from .config import (
 from .llm_client import LLMClient, LLMError
 from .logging_setup import get_logger, setup_logging
 from . import consensus as cns
+from . import searchd
 from . import web as web_module
 from .mesh import MeshController, MeshError, MeshSettings
 from .models import Message, Session
@@ -104,6 +105,7 @@ class VoxApp(App[None]):
         Binding("f3", "toggle_mesh", "Online", priority=True),
         Binding("f4", "open_universe", "Universe", priority=True),
         Binding("f5", "open_round", "Round", priority=True),
+        Binding("f6", "toggle_web_mode", "Web", priority=True),
         Binding("ctrl+q", "request_quit", "Quit", priority=True),
         Binding("ctrl+c", "copy_selection", "Copy", priority=True),
         Binding("ctrl+v", "paste_clipboard", "Paste", priority=True),
@@ -154,6 +156,11 @@ class VoxApp(App[None]):
         self._universe_screen: UniverseScreen | None = None
         # Set while a consensus turn is being generated, cleared afterwards.
         self._consensus_prompt: str = ""
+        # Set for one turn when web mode has gathered sources for it.
+        self._web_prompt: str = ""
+        self._web_running = False
+        # The little search server, started when web mode needs one.
+        self.search_server = searchd.LocalSearch()
         self._consensus_answers: list[cns.PeerAnswer] = []
         self._consensus_running = False
         self._consensus_round = 0
@@ -246,10 +253,14 @@ class VoxApp(App[None]):
     def mesh_label(self) -> str:
         """LOCAL, ON-LINE, and whether that is on the sample certificate."""
         if not self.mesh.online:
-            return branding.OFF_MESH
-        if self.mesh.demo_ca:
-            return f"{branding.ON_MESH} ({branding.DEMO_CERT})"
-        return branding.ON_MESH
+            label = branding.OFF_MESH
+        elif self.mesh.demo_ca:
+            label = f"{branding.ON_MESH} ({branding.DEMO_CERT})"
+        else:
+            label = branding.ON_MESH
+        if self.web_mode_active():
+            label = f"{label}  ·  {branding.WEB_MODE}"
+        return label
 
     def refresh_header(self) -> None:
         try:
@@ -304,7 +315,8 @@ class VoxApp(App[None]):
             ),
             busy=(
                 f"PRELOADING {self._preloading}" if self._preloading is not None
-                else ("ASKING THE MESH" if self._consensus_running else "")
+                else ("ASKING THE MESH" if self._consensus_running
+                      else ("LOOKING IT UP" if self._web_running else ""))
             ),
         )
 
@@ -517,6 +529,9 @@ class VoxApp(App[None]):
         if self._consensus_running:
             self.write_error("STILL ASKING THE MESH - CTRL+G TO STOP")
             return
+        if self._web_running:
+            self.write_error("STILL LOOKING THINGS UP - CTRL+G TO STOP")
+            return
         if text.startswith("//"):
             text = text[1:]
         marked = cns.extract(text)
@@ -541,6 +556,11 @@ class VoxApp(App[None]):
         if marked.wanted:
             self.start_consensus(marked.question)
             return
+        if self.web_mode_active():
+            settings = self.web_settings()
+            if not self.wants_local_server(settings) or self.ensure_search_server(settings):
+                self.start_web_turn(message.content)
+                return
         self.start_generation()
 
     # ------------------------------------------------------------ generation
@@ -557,6 +577,8 @@ class VoxApp(App[None]):
         messages.extend(
             m for m in self.session.messages if m.role not in ("error", "peer")
         )
+        if self._web_prompt:
+            messages.append(Message(role="system", content=self._web_prompt))
         if self._consensus_prompt:
             messages.append(Message(role="system", content=self._consensus_prompt))
         return messages
@@ -850,6 +872,7 @@ class VoxApp(App[None]):
 
     def finish_generation(self, error: str | None) -> None:
         self._consensus_prompt = ""
+        self._web_prompt = ""
         self.note_logprob_refusal()
         self.generating = False
         self._assistant_box = None
@@ -894,6 +917,12 @@ class VoxApp(App[None]):
 
     def action_stop(self) -> None:
         if self.cancel_preload():
+            return
+        if self._web_running:
+            self._web_running = False
+            self.clear_thinking()
+            self.write_system("LOOKUP ABANDONED")
+            self.refresh_status()
             return
         if self._consensus_running:
             self._consensus_running = False
@@ -1498,9 +1527,134 @@ class VoxApp(App[None]):
     def web_settings(self) -> web_module.WebSettings:
         return web_module.WebSettings.from_config(self.config)
 
+    def web_mode_active(self) -> bool:
+        """Is every message answered with sources fetched first?"""
+        settings = self.web_settings()
+        return bool(settings.enabled and settings.auto and not settings.unusable())
+
+    def action_toggle_web_mode(self) -> None:
+        """F6: chat as usual, but let the answer be researched first."""
+        section = self.config.setdefault("web", {})
+        settings = self.web_settings()
+        turning_on = not (settings.enabled and settings.auto)
+        if turning_on:
+            section["enabled"] = True
+            section["auto"] = True
+            self.persist_config()
+            settings = self.web_settings()
+            reason = settings.unusable()
+            if reason:
+                section["auto"] = False
+                self.persist_config()
+                self.write_error(f"WEB MODE NEEDS A BACKEND - {reason}")
+                return
+            if self.wants_local_server(settings) and not self.ensure_search_server(settings):
+                section["auto"] = False
+                self.persist_config()
+                self.refresh_header()
+                self.refresh_status()
+                return
+            self.announce_web_mode(settings)
+        else:
+            section["auto"] = False
+            self.persist_config()
+            self.write_system("WEB MODE OFF - answers come from the model alone")
+        self.refresh_header()
+        self.refresh_status()
+
+    def announce_web_mode(self, settings) -> None:
+        self.write_system(
+            f"WEB MODE ON - every message is answered with sources from "
+            f"{settings.describe()}: {settings.auto_results} results, "
+            f"{settings.auto_fetch} of them read in full"
+        )
+        self.refresh_header()
+        self.refresh_status()
+
+    def wants_local_server(self, settings) -> bool:
+        """Is this endpoint one VOX should be serving itself?"""
+        return (settings.provider in ("local", "searxng")
+                and web_module.is_local_endpoint(settings.endpoint))
+
+    def ensure_search_server(self, settings) -> bool:
+        """Start the local search server if it is not already up.
+
+        In this process, in a thread: no container to install, no daemon to
+        run, and it goes away when VOX does.
+        """
+        if self.search_server.running:
+            return True
+        self.search_server.port = searchd.port_of(settings.endpoint)
+        try:
+            detail = self.search_server.start()
+        except searchd.SearchdError as exc:
+            self.write_error(f"SEARCH SERVER - {exc}")
+            return False
+        self.write_system(f"SEARCH SERVER - {detail}")
+        return True
+
+    def start_web_turn(self, question: str) -> None:
+        self._web_running = True
+        self.show_thinking("LOOKING IT UP")
+        self.refresh_status()
+        self.research(question, self.web_settings())
+
+    @work(thread=True, group="web", exclusive=True)
+    def research(self, question: str, settings: web_module.WebSettings) -> None:
+        """Search and read before the model is asked anything."""
+        try:
+            sources = web_module.gather(question, settings)
+        except web_module.WebError as exc:
+            self.call_from_thread(self.research_failed, str(exc))
+            return
+        self.call_from_thread(self.research_finished, sources, settings)
+
+    def research_failed(self, detail: str) -> None:
+        self._web_running = False
+        self.clear_thinking()
+        # The question still deserves an answer, from what the model knows.
+        self.write_error(f"SEARCH FAILED - {detail}; answering without sources")
+        self.start_generation()
+
+    def research_finished(self, sources, settings) -> None:
+        self._web_running = False
+        self.clear_thinking()
+        if not sources.found:
+            self.write_system(f"NOTHING FOUND FOR: {sources.query}")
+            self.start_generation()
+            return
+
+        read = len(sources.pages)
+        self.write_system(
+            f"WEB - {len(sources.results)} sources for {sources.query!r}"
+            + (f", {read} read in full" if read else "")
+        )
+        # The citations stay in the conversation; the page text is only for
+        # this turn, or every later message would carry the whole internet.
+        citation = Message(role="tool", name="web", content=sources.citations())
+        self.session.messages.append(citation)
+        self.write_message(citation)
+        self.dirty = True
+        self._web_prompt = web_module.research_prompt(
+            sources, limit=settings.auto_max_chars
+        )
+        self.start_generation()
+
     def cmd_web(self, argument: str) -> None:
         value = argument.strip().lower()
         settings = self.web_settings()
+        if value == "start":
+            self.ensure_search_server(settings)
+            return
+        if value in ("stop", "kill"):
+            self.search_server.stop()
+            self.write_system("SEARCH SERVER - stopped")
+            return
+        if value == "status":
+            where = f"{searchd.HOST}:{self.search_server.port}"
+            state = "listening" if self.search_server.running else "not running"
+            self.write_system(f"SEARCH SERVER - {state} ({where})")
+            return
         if value in ("on", "off"):
             self.config.setdefault("web", {})["enabled"] = value == "on"
             self.persist_config()
@@ -1511,7 +1665,7 @@ class VoxApp(App[None]):
                 self.write_error(f"NOT USABLE YET - {reason}")
             return
         if value:
-            self.write_error("USAGE: /web [on|off]")
+            self.write_error("USAGE: /web [on|off|start|stop|status]")
             return
         state = "ON" if settings.enabled else "OFF"
         lines = [f"WEB SEARCH IS {state} - {settings.describe()}"]
@@ -1533,6 +1687,8 @@ class VoxApp(App[None]):
         reason = settings.unusable()
         if reason:
             self.write_error(f"CANNOT SEARCH - {reason}")
+            return
+        if self.wants_local_server(settings) and not self.ensure_search_server(settings):
             return
         self.write_system(f"SEARCHING {settings.describe()} FOR: {query}")
         self.run_search(query, settings)
@@ -2054,6 +2210,7 @@ class VoxApp(App[None]):
         self._shutting_down = True
         self._preloading = None
         self.mesh.stop()
+        self.search_server.stop()
         self.cancel_event.set()
         self._stop_status_timer()
         if self.client is not None:

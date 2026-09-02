@@ -445,12 +445,28 @@ Off by default, and the only outbound call VOX makes to a service that is not
 the operator's. `vox_chat/web.py` holds it, using nothing but the standard
 library: a search is a GET, a page is text extracted with `html.parser`.
 
-Two backends, chosen by `web.provider`: `searxng` (an instance the operator
-runs, no key) and `brave` (one API key, sent as a header and never in a URL).
+With the default `local` provider VOX runs the search server itself:
+`vox_chat/searchd.py` is a threaded HTTP server bound to 127.0.0.1, started on
+`F6`, speaking the same JSON as SearXNG so the client is indifferent to which
+answers. Its upstreams are DuckDuckGo's HTML endpoint and Wikipedia's API —
+scraping, declared as such, reporting a captcha or an outage as itself rather
+than as an empty result.
+
+Three backends, chosen by `web.provider`: `local` (the built-in server),
+`searxng` (an instance the operator runs) and `brave` (one API key, sent as a header and never in a URL).
 `/web on|off`, `/search <query>` and `/fetch <url>` are the commands; in agent
 mode the model is additionally offered `web_search` and `fetch_url`, but only
 while the feature is enabled, and both are confirmed under `agent.confirm_web`
 like writes and commands.
+
+`F6` toggles web mode (`web.auto`): every message is then answered from sources
+gathered for it — a search for the message itself, the first `auto_fetch`
+results read in full, and a system message for that turn carrying them with an
+instruction to prefer them, cite them, and admit when they do not cover the
+question. The citations are appended to the conversation; the page text is not,
+so context does not grow without bound. A failed search answers without sources
+rather than losing the question, a lookup in flight refuses new messages and is
+abandoned with `Ctrl+G`, and a `[CNS]` question stays a mesh round.
 
 Two rules hold regardless of backend:
 
