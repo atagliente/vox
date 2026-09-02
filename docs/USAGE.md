@@ -414,7 +414,7 @@ unaffected — inspection never changes the outcome of a chat.
 ### Saving a session
 
 `/export`, or `Ctrl+E`, writes the session **into the directory you started VOX
-in** as `vox-<timestamp>.html`, `.json` and `.md`. Ask for one with
+in** as `vox-<timestamp>.html`, `.json`, `.md` and `.toon`. Ask for one with
 `/export html`.
 
 Saved sessions go to the same place, as `vox-session-<name>.json`, and

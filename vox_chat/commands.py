@@ -41,7 +41,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("workspace", "/workspace <path>", "Set the agent workspace"),
     CommandSpec("stats", "/stats", "Token usage, context and speed", ("usage",)),
     CommandSpec("inspect", "/inspect [on|off]", "Per-token measurements, live"),
-    CommandSpec("export", "/export [html|json|md]", "Save the session and its figures"),
+    CommandSpec("export", "/export [html|json|md|toon]", "Save the session and its figures"),
     CommandSpec("code", "/code [n]", "Show code blocks, copy one by number"),
     CommandSpec("panel", "/panel code|index", "Switch the side panel"),
     CommandSpec("connect", "/connect", "Re-check the provider connection"),

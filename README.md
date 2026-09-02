@@ -111,7 +111,7 @@ The bottom row shows this legend at all times.
 | `/code [n]` | show the answer's code blocks, copy one by number |
 | `/stats` | tokens, context fill, speed |
 | `/inspect [on\|off]` | per-token measurements, live (`Ctrl+T` opens the view) |
-| `/export [html\|json\|md]` | save the session and its figures (`Ctrl+E`) |
+| `/export [html\|json\|md\|toon]` | save the session and its figures (`Ctrl+E`) |
 | `/warm` | preload the model on the server |
 | `/mesh [on\|off]`, `/universe` | join the agent mesh, see who else is there |
 | `/agent on\|off`, `/workspace <path>` | coding-agent mode |
@@ -147,7 +147,7 @@ Entropy is computed over the returned top-k, because the API does not return
 the tail of the vocabulary, and every label says so.
 
 `/export` writes the session **into the directory you started VOX in**, as
-`vox-<timestamp>.html`, `.json` and `.md`: the question, model and the
+`vox-<timestamp>.html`, `.json`, `.md` and `.toon`: the question, model and the
 parameters actually sent at the top, then the exchange, then the statistics and
 the decision points. HTML, JSON and Markdown, all three by default. The HTML is
 one self-contained file with no JavaScript at all.
@@ -166,6 +166,7 @@ so results stay with the work they belong to:
 ├── vox-20260825-143205.html      an export
 ├── vox-20260825-143205.json
 ├── vox-20260825-143205.md
+├── vox-20260825-143205.toon
 ├── vox-session-refactor.json     a saved session
 └── src/
 ```

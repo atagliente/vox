@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from vox_chat import report
 from vox_chat.agent import AgentEvent
 from vox_chat.app import VoxApp
 from vox_chat.config import default_config, load_config
@@ -213,7 +214,7 @@ async def test_a_new_turn_starts_a_new_run(app: VoxApp) -> None:
         assert len(app.inspection) == 0, "each turn is measured on its own"
 
 
-async def test_export_writes_all_three_formats(app: VoxApp) -> None:
+async def test_export_writes_every_format(app: VoxApp) -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
         app.session.messages.append(
@@ -227,9 +228,8 @@ async def test_export_writes_all_three_formats(app: VoxApp) -> None:
         await pilot.press("ctrl+e")
         await pilot.pause()
 
-        assert sorted(path.suffix for path in app.workspace_path.glob("vox-*")) == [
-            ".html", ".json", ".md"
-        ]
+        written = sorted(path.suffix for path in app.workspace_path.glob("vox-*"))
+        assert written == sorted(f".{name}" for name in report.FORMATS)
         assert "SAVED" in messages(app)[-1].message.content
 
         html = next(app.workspace_path.glob("*.html")).read_text(encoding="utf-8")
