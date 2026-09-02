@@ -20,11 +20,11 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.widgets import Static
 
-from . import __version__, clipboard, code_blocks, commands, fitting, ollama, searchd
+from . import __version__, clipboard, code_blocks, commands, ollama, searchd
 from . import consensus as cns
 from . import report as reporting
 from . import web as web_module
-from .agent import AgentEvent, run_turn
+from .agent import AgentEvent
 from .commands import dispatch
 from .config import (
     ConfigError,
@@ -37,13 +37,14 @@ from .config import (
     save_global_config,
     validate_config,
 )
+from .generation import GenerationController
 from .history import InputHistory
 from .inspection import (
     Alternative,
     InspectionRun,
     criteria_from_config,
 )
-from .llm_client import LLMClient, LLMError, context_overflow
+from .llm_client import LLMClient, LLMError
 from .logging_setup import get_logger, setup_logging
 from .mesh import MeshController, MeshError, MeshSettings
 from .models import Message, Session
@@ -213,6 +214,7 @@ class VoxApp(App[None]):
         self.consensus_log = cns.RoundLog()
         self._round_screen: RoundScreen | None = None
         self.inspection = self._new_inspection()
+        self.generation = GenerationController(self)
         self._inspect_screen: InspectScreen | None = None
         self._panel_mode = "code"
 
@@ -614,214 +616,31 @@ class VoxApp(App[None]):
 
     # ------------------------------------------------------------ generation
 
-    def build_request_messages(self) -> list[Message]:
-        """Prepend the active role system prompt to the conversation."""
-        role = self.role_store.get(str(self.config.get("active_role", "")))
-        messages: list[Message] = []
-        if role is not None and role.system_prompt:
-            messages.append(Message(role="system", content=role.system_prompt))
-        # "peer" and "error" are ours, not roles any provider accepts. The peer
-        # answers are folded into one system message just before the question
-        # they belong to, by start_consensus.
-        history: list[Message] = []
-        for message in self.session.messages:
-            if message.role in ("error", "peer"):
-                continue
-            if message.role == "web":
-                # What a search found is context, and "web" is not a role any
-                # provider knows.
-                history.append(Message(role="system", content=message.content))
-                continue
-            history.append(message)
+    # ------------------------------------------------------------ generation
+    #
+    # The turn itself lives in generation.py. What stays here is the @work
+    # decorator, which is Textual's way of putting something on a thread, and
+    # the handful of names the rest of the application and its tests already
+    # call by.
 
-        research = [
-            Message(role="system", content=prompt)
-            for prompt in (self._web_prompt, self._consensus_prompt)
-            if prompt
-        ]
-        # Everything gathered for this turn belongs in front of the question it
-        # was gathered for. The citations are appended to the session after the
-        # question, so without this they — and the sources — arrive after it,
-        # and a model reads that as "answer, then here is some reading".
-        last_user = max(
-            (index for index, message in enumerate(history) if message.role == "user"),
-            default=None,
-        )
-        if last_user is not None:
-            trailing = history[last_user + 1 :]
-            del history[last_user + 1 :]
-            history[last_user:last_user] = research + trailing
-        else:
-            history.extend(research)
-        messages.extend(history)
-        return messages
+    def build_request_messages(self) -> list[Message]:
+        return self.generation.build_request_messages()
 
     def start_generation(self) -> None:
-        if self.client is None:
-            self.write_error("NO PROVIDER CONFIGURED")
-            return
-        role = self.role_store.get(str(self.config.get("active_role", "")))
-        generation = self.config.get("generation", {})
-        temperature = float(
-            role.temperature if role is not None else generation.get("temperature", 0.2)
-        )
-        self.cancel_event = threading.Event()
-        self.inspection = self._new_inspection()
-        if self._inspect_screen is not None:
-            self._inspect_screen.run = self.inspection
-            self._inspect_screen.refresh_view()
-        self.generating = True
-        self._assistant_box = None
-        self.live_meter = LiveMeter()
-        self.show_thinking("WAITING FOR MODEL")
-        self._usage_timer = self.set_interval(0.1, self._tick_status)
-        self.refresh_status()
-        self.generate(
-            temperature=temperature,
-            max_tokens=generation.get("max_tokens"),
-            model=str(self.config.get("active_model", "")),
-        )
+        self.generation.start()
 
     @work(thread=True, group="generation", exclusive=True)
     def generate(self, temperature: float, max_tokens: int | None, model: str) -> None:
-        assert self.client is not None
-        agent_config = dict(self.config.get("agent", {}))
-        agent_enabled = bool(agent_config.get("enabled", False))
-        if self.web_mode_active():
-            # In web mode the operator has already asked for the internet.
-            agent_config["confirm_web"] = False
-        messages = self.build_request_messages()
-        # Two shrinks at most: each one is a real request, and a window that
-        # small is a problem to report rather than to keep working around.
-        for _ in range(3):
-            produced = False
-            try:
-                for event in run_turn(
-                    client=self.client,
-                    messages=messages,
-                    model=model,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    workspace=self.workspace,
-                    agent_config=agent_config,
-                    confirm=self._confirm_from_thread,
-                    cancel=self.cancel_event,
-                    agent_enabled=agent_enabled,
-                    include_usage=bool(
-                        self.config.get("generation", {}).get("include_usage", True)
-                    ),
-                    top_logprobs=self.inspect_top_k(),
-                    web_settings=self.web_settings(),
-                ):
-                    produced = True
-                    self.call_from_thread(self.handle_agent_event, event)
-            except LLMError as exc:
-                if self._shutting_down:
-                    return
-                smaller = self._fit_to_window(exc, messages, produced)
-                if smaller is not None:
-                    self.call_from_thread(
-                        self.write_system, fitting.describe(messages, smaller)
-                    )
-                    messages = smaller
-                    continue
-                log.warning("generation failed: %s", exc.kind)
-                self.call_from_thread(self.finish_generation, f"{exc.message}")
-                return
-            self.call_from_thread(self.finish_generation, None)
-            return
-        self.call_from_thread(
-            self.finish_generation, "the prompt does not fit this model's window"
-        )
-
-    def _fit_to_window(
-        self, exc: LLMError, messages: list[Message], produced: bool
-    ) -> list[Message] | None:
-        """A smaller request when the refusal was lack of room, else None.
-
-        Only before anything has been produced: retrying halfway through a
-        turn would repeat text the operator has already read.
-        """
-        if exc.kind != "context" or produced:
-            return None
-        room = context_overflow(exc.detail) or context_overflow(exc.message)
-        if room is None:
-            return None
-        used, window = room
-        return fitting.shrink(messages, used, window)
-
-    def _confirm_from_thread(self, name: str, description: str) -> bool:
-        """Blocking confirmation request from the worker thread."""
-        result = self.call_from_thread(
-            self.push_screen_wait,
-            ConfirmModal(f"AUTHORIZE {name.upper()}?", description),
-        )
-        return bool(result)
+        self.generation.run(temperature, max_tokens, model)
 
     def handle_agent_event(self, event: AgentEvent) -> None:
-        if event.type == "text":
-            self.clear_thinking()
-            if self.live_meter is not None:
-                self.live_meter.add_text(event.text)
-            if self._assistant_box is None:
-                self._assistant_box = self.write_message(
-                    Message(role="assistant", content="")
-                )
-            self._assistant_box.append_text(event.text)
-            self.transcript.scroll_end(animate=False)
-            # Re-parsing on every token would be wasteful; a fence or a line
-            # break is the only thing that can change the blocks.
-            if any(marker in event.text for marker in ("`", "~", "\n")):
-                self.refresh_code_blocks(self._assistant_box.message.content)
-        elif event.type == "token":
-            self.record_token(event.token, event.phase)
-        elif event.type == "reasoning":
-            self.show_reasoning(event.text)
-        elif event.type == "tool_start" and event.tool_call is not None:
-            self.show_thinking(f"RUNNING {event.tool_call.name}")
-            self.write_message(
-                Message(
-                    role="tool",
-                    name=event.tool_call.name,
-                    content=f"REQUESTED {event.tool_call.name}",
-                )
-            )
-        elif (
-            event.type in ("tool_result", "tool_denied") and event.tool_call is not None
-        ):
-            self.show_thinking("WAITING FOR MODEL")
-            self.write_message(
-                Message(
-                    role="tool" if event.type == "tool_result" else "error",
-                    name=event.tool_call.name,
-                    content=event.text,
-                )
-            )
-        elif event.type in ("notice", "limit"):
-            self.write_system(event.text)
-            if event.type == "notice":
-                self.config.setdefault("agent", {})["enabled"] = False
-                self.refresh_status()
-        elif event.type == "usage" and event.usage is not None:
-            self.usage.add(event.usage)
-            self.refresh_status()
-        elif event.type == "cancelled":
-            self.write_system("GENERATION STOPPED BY OPERATOR")
-            self._commit(event.messages)
-        elif event.type == "assistant_done":
-            self._commit(event.messages)
+        self.generation.handle_event(event)
+
+    def finish_generation(self, error: str | None) -> None:
+        self.generation.finish(error)
 
     def show_reasoning(self, chunk: str) -> None:
-        """Stream the model's thinking into its own block above the answer."""
-        if not self.config.get("ui", {}).get("show_reasoning", True):
-            return
-        self.clear_thinking()
-        if self._reasoning_box is None:
-            self._reasoning_box = self.write_message(
-                Message(role="reasoning", content="")
-            )
-        self._reasoning_box.append_text(chunk)
-        self.transcript.scroll_end(animate=False)
+        self.generation.show_reasoning(chunk)
 
     # --------------------------------------------------------------- inspect
 
@@ -973,22 +792,6 @@ class VoxApp(App[None]):
             "return logprobs, so Ctrl+T has nothing to show for it. The answers "
             "are unaffected, and this is said once per model."
         )
-
-    def finish_generation(self, error: str | None) -> None:
-        self._consensus_prompt = ""
-        self._web_prompt = ""
-        self.note_logprob_refusal()
-        self.generating = False
-        self._assistant_box = None
-        self.live_meter = None
-        self._reasoning_box = None
-        self.clear_thinking()
-        self._stop_status_timer()
-        if error:
-            self.write_error(error)
-            self.connected = False
-            self.refresh_header()
-        self.refresh_status()
 
     def show_thinking(self, label: str) -> None:
         """Mount, or relabel, the spinner that says the model is working."""
