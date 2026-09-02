@@ -8,16 +8,14 @@ A terminal chat client for coding, for any OpenAI-compatible endpoint: Ollama,
 llama.cpp server, vLLM, LM Studio, a remote gateway. Linux, macOS, Windows,
 Termux.
 
-![VOX: the conversation on the left, the answer's code blocks on the right ready to copy, token usage and the key legend along the bottom](docs/screenshot.png)
+![VOX: the conversation on the left, the answer's code blocks on the right, token usage and the key legend along the bottom](docs/screenshot.png)
 
 ## Requirements
 
-- Python 3.11 or newer — the installer offers to fetch it if it is missing
+- Python 3.11 or newer
 - A running OpenAI-compatible server — for Ollama: `ollama serve`
 
-## Quick start
-
-**1. Install.** No administrator rights needed, safe to re-run.
+## Install
 
 ```bash
 git clone https://github.com/atagliente/vox && cd vox && sh install.sh
@@ -29,15 +27,12 @@ Windows, in PowerShell:
 git clone https://github.com/atagliente/vox; cd vox; powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-It checks Python, installs through `pipx` (or a private virtual environment in
-`~/.vox/venv`), puts a `vox` launcher on your user `PATH`, then runs the check
-below.
+No administrator rights needed, safe to re-run. The installer checks Python,
+installs through `pipx` or a private virtual environment in `~/.vox/venv`, puts
+a `vox` launcher on your user `PATH`, and offers to fetch missing system
+packages.
 
-On Linux it also offers to install what is missing — on Debian and Ubuntu that
-is usually `python3-venv`, which ships separately from `python3` — showing the
-exact command and asking before it runs anything with `sudo`.
-
-**2. Check.**
+## Check
 
 ```bash
 vox doctor
@@ -51,9 +46,9 @@ vox doctor
 ```
 
 Exit code `0` ready, `1` installed but the server is unreachable, `2` something
-blocking. If `LINK` fails, fix the endpoint — see the next section.
+blocking.
 
-**3. Run.**
+## Run
 
 ```bash
 vox
@@ -61,9 +56,9 @@ vox
 
 Type, press `Enter` to send. `/help` lists every command.
 
-## Point it at your server
+## Configuration
 
-`~/.vox/config.json` is written on first run. The parts that matter:
+`~/.vox/config.json` is written on first run:
 
 ```json
 {
@@ -79,12 +74,13 @@ Type, press `Enter` to send. `/help` lists every command.
 }
 ```
 
-Edit it with `/settings` in the app, or `/config` to open it in `$EDITOR`; a
-broken edit is rejected and the previous configuration kept.
+Edit it with `/settings`, or `/config` to open it in `$EDITOR`. A broken edit is
+rejected and the previous configuration kept. A project can override any setting
+in its own `.vox/config.json`.
 
-For a server on another machine set `base_url` to `http://<address>:11434/v1`
-and start Ollama there with `OLLAMA_HOST=0.0.0.0:11434 ollama serve`. That
-server has **no authentication** — only do this on a network you trust.
+For a server on another machine, set `base_url` to `http://<address>:11434/v1`
+and start Ollama there with `OLLAMA_HOST=0.0.0.0:11434 ollama serve`. That server
+has no authentication — only on a network you trust.
 
 ## Keys
 
@@ -113,25 +109,23 @@ The bottom row shows this legend at all times.
 | `/inspect [on\|off]` | per-token measurements, live (`Ctrl+T` opens the view) |
 | `/export [html\|json\|md\|toon]` | save the session and its figures (`Ctrl+E`) |
 | `/warm` | preload the model on the server |
-| `/mesh [on\|off\|new-ca]`, `/universe` | join the mesh, see who else is there, replace the sample certificate |
+| `/mesh [on\|off\|new-ca\|sample-ca]`, `/universe` | the agent mesh |
 | `/agent on\|off`, `/workspace <path>` | coding-agent mode |
 | `/config`, `/settings`, `/connect`, `/stop` | configuration and connection |
 
-## Code on the right
+## Code panel
 
-When an answer contains fenced code, the right-hand panel opens with the blocks
-laid out flush left, without the fences, updating as the answer streams — drag over them with `Shift` held and
-your terminal copies exactly the code. `Ctrl+Y` copies the last block to the
-system clipboard, `/code` lists them, `/code 2` copies the second, `/panel
-index` switches the panel back to sessions, prompts and roles.
+Fenced code in an answer opens the right-hand panel, blocks laid out flush left
+without the fences, updating as the answer streams. `Ctrl+Y` copies the last
+block, `/code` lists them, `/code 2` copies the second, `/panel index` switches
+the panel back to sessions, prompts and roles.
 
-## Looking at the numbers
+## Token inspection
 
-`Ctrl+T` turns the measurement on and opens a full-screen table that fills
-while the answer streams: the probability the model gave each token, how spread
-the returned top-k was, the gap to the runner-up, and the alternatives it
-passed over. Press `Esc`, ask a question, and press `Ctrl+T` again to watch. Positions that were
-flat and close are marked as decision points.
+`Ctrl+T` turns the measurement on and opens a table that fills while the answer
+streams: the probability of each token, the entropy of the returned top-k, the
+gap to the runner-up, and the alternatives passed over. Flat, close positions
+are marked as decision points.
 
 ```text
 INSPECT · qwen2.5:3b · top-k 5 · 40 tokens · 5 decision points
@@ -141,25 +135,19 @@ mean p 0.80   mean top-k entropy 0.72 bit
   29  ' simplified'   0.46   1.72    0.23   ' well' 0.22  ' fundamental' 0.12  ◄ DECISION
 ```
 
-These are measurements of the output distribution, nothing more: a flat
-distribution is a flat distribution, not evidence of the model "hesitating".
-Entropy is computed over the returned top-k, because the API does not return
-the tail of the vocabulary, and every label says so.
+Entropy is computed over the returned top-k, not the full vocabulary, because
+the API does not return the tail.
 
-`/export` writes the session **into the directory you started VOX in**, as
-`vox-<timestamp>.html`, `.json`, `.md` and `.toon`: the question, model and the
-parameters actually sent at the top, then the exchange, then the statistics and
-the decision points. HTML, JSON and Markdown, all three by default. The HTML is
-one self-contained file with no JavaScript at all.
+Off until asked for: logprobs make each response several times heavier and not
+every provider supports them. A provider that refuses is retried without them.
 
-Off until you ask for it, because logprobs make each response several times
-heavier and not every provider supports them; `/inspect off` stops it again. One that refuses is retried without them and
-says so once; the chat is unaffected.
+`/export` writes the session as `vox-<timestamp>.html`, `.json`, `.md` and
+`.toon`: parameters at the top, the exchange, then the statistics and decision
+points. The HTML is one self-contained file with no JavaScript.
 
 ## Where your files go
 
-Anything produced by a conversation lands in the directory you launched from,
-so results stay with the work they belong to:
+Everything a conversation produces lands in the directory you launched from:
 
 ```text
 ~/code/project/
@@ -171,175 +159,79 @@ so results stay with the work they belong to:
 └── src/
 ```
 
-Everything is prefixed `vox-`, so one line ignores the lot:
+One line ignores the lot:
 
 ```bash
 echo 'vox-*' >> .gitignore
 ```
 
-What stays in `~/.vox` is what belongs to you rather than to a project:
-configuration, roles, saved prompts, input history and logs. A project can
-still override any setting in its own `.vox/config.json`.
-
-## Leaving
-
-`Ctrl+Q` quits, asking first if the session has unsaved messages. If a request
-to a slow provider is still in flight, VOX gives it a moment and then leaves
-anyway rather than holding your shell hostage until the server answers.
-
-## If the first token takes forever
-
-A local model that is not in memory has to be loaded first, and on modest
-hardware that can take minutes. VOX preloads it in the background right after
-connecting — with a spinner naming the model and the endpoint, a time limit,
-and `Ctrl+G` to stop waiting — so the wait happens while you type; `keep_alive` in `extra_body`
-stops the server unloading it between messages; the spinner shows the elapsed
-seconds, and `/stats` separates waiting from generating.
+`~/.vox` keeps what belongs to you rather than to a project: configuration,
+roles, saved prompts, input history, logs.
 
 ## Coding-agent mode
 
 Off by default. `/agent on` lets the model list, read and search files and —
-only after you approve each operation — write files, apply patches and run
-commands. Before a write or a patch you see the unified diff of exactly what
-would change.
+after you approve each operation — write files, apply patches and run commands.
+A write or a patch shows the unified diff first.
 
 Name the file and say it should be written — *"create hello.py with a main()
 that prints hello, world; write it to disk"* — and pick a model that supports
-tool calling; the smallest ones tend to answer with code instead of using the
-tools. [More in the guide](docs/USAGE.md). Everything is confined to the workspace (`/workspace <path>`): `..`,
-symlinks pointing outside and shell operators are refused, and commands run
-under a timeout.
+tool calling. Everything is confined to the workspace (`/workspace <path>`):
+`..`, symlinks pointing outside and shell operators are refused, and commands
+run under a timeout.
 
 ## The mesh
 
-`F3` puts VOX on the local agent mesh. The border turns red for as long as it
-is announcing, the header reads `Universe: ON-LINE`, and the status bar counts
-the agents it can see. `F4` opens the universe: everyone seen, with their
-category and state. `F3` again takes it back offline.
+`F3` puts VOX on the local agent mesh: the border turns red, the header reads
+`Universe: ON-LINE`, the status bar counts the agents it can see. `F4` opens the
+universe. `F3` again goes offline. `/mesh on|off` and `/universe` do the same.
 
 ![The universe screen](docs/universe.svg)
 
-Function keys, and nothing else: `Ctrl+Shift+<letter>` was tried and never
-arrived, and neither did `Ctrl+O`. A function key travels through every
-terminal. `/mesh on`, `/mesh off` and `/universe` run the same code if you
-prefer typing. The header says which side of the fence you are on —
-`Universe: LOCAL` when VOX talks only to its own provider, `Universe: ON-LINE`
-while it is announcing itself to other agents.
+![How VOX agents find each other: announce over signed multicast, verify the certificate, WHOIS over mTLS, classify by declared verbs, then heartbeat](docs/mesh.svg)
 
-### How agents find each other
+`caps_digest` is how a peer says its capabilities changed: a different digest
+sends it back to PROBATION and a fresh WHOIS follows. `incarnation` is the
+process's life, so a restart discards everything cached about that peer.
 
-```text
-   ┌─────────────────────┐                          ┌─────────────────────┐
-   │  VOX  (PROCESSOR)   │                          │ ingestor-01 (SOURCE)│
-   │  verbs: infer       │                          │ verbs: ingest       │
-   └──────────┬──────────┘                          └──────────┬──────────┘
-              │                                                │
-              │  1. ANNOUNCE — UDP multicast 239.17.42.1:45177, TTL 1
-              │     {agent_id, incarnation, whois_port, caps_digest, ts, nonce}
-              │     signed Ed25519 with the agent's OWN key, carrying its
-              │     certificate so a receiver can check it against the CA
-              ▼                                                ▼
-         ╔══════════════════ the local network segment ══════════════════╗
-         ║   every member hears every announcement; TTL 1 means it       ║
-         ║   never leaves this segment — no router, no cloud VPC         ║
-         ╚═══════════════════════════════════════════════════════════════╝
-              │                                                │
-              │  2. the listener checks, in order: the certificate against the
-              │     CA, that the announced id is one of its SANs, the Ed25519
-              │     signature, then the timestamp and nonce. Only then does it
-              │     ask the registry: new? restarted? just a heartbeat?
-              │
-              │  3. WHOIS — unicast, mTLS, only when the answer is
-              │     "new" or "restarted"
-              │     ┌────────────────────────────────────────────┐
-              ├────▶│ client checks: peer cert SAN == announced   │
-              │     │                agent_id  (impersonation)   │
-              │     │ server checks: cert signed by our CA        │
-              │     │                (a stranger cannot ask)      │
-              │     │ server checks: authorizer(agent_id)         │
-              │     │                (a member is not everyone)  │
-              │     └────────────────────────────────────────────┘
-              │     answer: {name, capabilities: {verbs: [...]}, ...}
-              ▼
-   4. CLASSIFY — the category comes from the declared verbs, so every node
-      reaches the same answer:
-        ingest, publish            → SOURCE
-        transform, enrich, infer   → PROCESSOR
-        store, index, notify       → SINK
-        schedule, dispatch         → ORCHESTRATOR
-        observe, audit             → OBSERVER  (visible, never routed work)
-
-   5. the announcement keeps arriving; it is the heartbeat. The WHOIS is what
-      is skipped for a peer already known:
-
-        PROBATION ──whois ok──▶ ACTIVE ──3 intervals silent──▶ SUSPECT
-             │                    ▲                                │
-             │                    └────── an announcement ─────────┘
-             └──whois refused──▶ dropped, and not asked again
-                                                 5 intervals ──▶ DEAD
-```
-
-The `caps_digest` in the announcement is how a peer says its capabilities
-changed: a different digest sends it back to PROBATION and a fresh WHOIS
-follows. `incarnation` is the process's life; a restart is not a heartbeat,
-so everything cached about that peer is thrown away.
-
-### Talking to what you find
-
-Discovery answers *who is out there and what can they do*. The WHOIS channel
+Discovery answers who is out there and what they can do. The WHOIS channel
 carries descriptors, not work: `agent.peers_for("transform")` gives the active,
-non-passive agents that declared that verb, and the endpoint to reach each of
-them. The work protocol on top of that is yours to choose — the categories are
-there so a router never sends a job to an OBSERVER.
+non-passive agents that declared that verb, and the endpoint for each. The work
+protocol on top is yours to choose.
 
-### Names that cannot collide
+### Names
 
 An agent's name ends in a fingerprint of the machine: the first 12 hex
-characters of the SHA-256 of its MAC address, so `vox-b6ffa342e0d3`, or
+characters of the SHA-256 of its MAC address — `vox-b6ffa342e0d3`, or
 `workstation-b6ffa342e0d3` when `mesh.agent_id` names a label. The address is
 hashed, never announced.
 
-The fingerprint is appended even when you set `agent_id` yourself, because the
-identity must not come from the configuration file: copy one `config.json`
-across a fleet and every machine still gets its own name, its own certificate
-and its own SAN. Two agents announcing the same id would break each other's
-mTLS handshake.
+The fingerprint is appended even when `agent_id` is set, so one `config.json`
+copied across a fleet still gives every machine its own name, certificate and
+SAN.
 
-### What a second machine needs
+### Certificates
 
-**Out of the box, nothing.** VOX ships with a sample certificate authority, so
-two fresh installations on the same segment already trust each other: install,
-press `F3` on both, and they appear in each other's universe.
+VOX ships a sample certificate authority, so two fresh installations on the same
+segment already trust each other: install, press `F3` on both, and they appear
+in each other's universe.
 
-That convenience has a price, and VOX says so rather than hiding it. The sample
-authority's private key is in this repository, so **anyone holding VOX can mint
-an identity for it** — a sample mesh is open to whoever is on your network.
-While that authority is in use the header reads `Universe: ON-LINE (SAMPLE
+Its private key is in this repository, so anyone holding VOX can mint an
+identity for it. While it is in use the header reads `Universe: ON-LINE (SAMPLE
 CERT)`, the status bar appends `DEMO CERT`, and `vox doctor` reports a warning.
-
-To make the mesh yours, replace it:
 
 ```text
 /mesh new-ca
 ```
 
-That sets `mesh.demo_ca` to `false`, generates an authority that exists only on
-your machine, moves the sample files aside, and reissues this agent against the
-new one. `/mesh sample-ca` returns to the shipped authority when you want to
-meet a fresh installation. Every other machine
-then needs a certificate from *that* authority: either copy the whole
-`~/.vox/pki` directory (`ca.crt` **and** `ca.key`) to machines you trust and let
-each issue itself one, or keep `ca.key` on one machine and hand out only a leaf
-certificate plus `ca.crt`.
+generates an authority that exists only on your machine, moves the sample files
+aside and reissues this agent. `/mesh sample-ca` returns to the shipped one.
+Every other machine then needs a certificate from your authority: copy the whole
+`~/.vox/pki` directory to machines you trust, or keep `ca.key` on one machine and
+hand out only a leaf certificate plus `ca.crt`.
 
-There is no shared secret in either case. Every agent signs with its own private
-key, which never leaves its machine, and carries its certificate in each
-announcement; a receiver checks that certificate against the authority it
-trusts.
-
-Everything is on by request only — VOX announces nothing until you press the
-key. `vox doctor` shows the group, the port, the agent id, the certificate
-expiry and where the key comes from.
+There is no shared secret either way. Every agent signs with its own private key,
+which never leaves its machine.
 
 ## Development
 
@@ -348,17 +240,17 @@ pip install -e ".[dev]"
 pytest
 ```
 
-No test needs a running inference server.
+No test needs a running inference server. `docs/make_mesh_diagram.py` regenerates
+the diagram above.
 
 ## More
 
 - [docs/USAGE.md](docs/USAGE.md) — full guide: every option, roles and prompts,
   usage figures, themes, reasoning, agent details
 - [vox_chat/discovery/README.md](vox_chat/discovery/README.md) — the mesh
-  protocol, its security model and what is still open
+  protocol and its security model
 - [spec.md](spec.md) — the specification the implementation follows
-- [CHANGELOG.md](CHANGELOG.md) — what changed, when, and what was measured to
-  justify it
+- [CHANGELOG.md](CHANGELOG.md) — what changed and when
 
 ## License
 
