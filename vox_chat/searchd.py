@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from . import http
+from . import http, threads
 from .logging_setup import get_logger
 
 log = get_logger("searchd")
@@ -621,10 +621,7 @@ class LocalSearch:
                 f"cannot listen on {HOST}:{self.port}: {exc}. Something else may "
                 "be using that port; change web.endpoint"
             ) from exc
-        self._thread = threading.Thread(
-            target=self._server.serve_forever, name="vox-searchd", daemon=True
-        )
-        self._thread.start()
+        self._thread = threads.serve(self._server, "vox-searchd")
         log.info("search server listening on %s:%d", HOST, self.port)
         return f"listening on {HOST}:{self.port}"
 

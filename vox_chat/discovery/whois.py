@@ -35,6 +35,7 @@ import threading
 import time
 from collections.abc import Callable
 
+from .. import threads
 from .identity import (
     Identity,
     IdentityError,
@@ -276,10 +277,7 @@ class WhoisServer:
         return self._server.server_address[1]
 
     def start(self) -> None:
-        self._thread = threading.Thread(
-            target=self._server.serve_forever, name="whois-server", daemon=True
-        )
-        self._thread.start()
+        self._thread = threads.serve(self._server, "whois-server")
 
     def reload_identity(self, identity: Identity) -> None:
         """Swap the TLS context in after a certificate renewal.

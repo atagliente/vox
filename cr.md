@@ -140,7 +140,11 @@ see 1.2.
 
 ---
 
-## 3. Code architecture
+## 3. Code architecture — `[to complete]`
+
+`app.py` is 1,925 lines, down from 2,636. The one thing left is a
+decision rather than work: whether to move to an async provider client
+(3.3), which is argued out below with a recommendation.
 
 * **3.1 `app.py` is a god object (2,636 lines)** — `[done]`, now **1,925**
   * `[done]` The `cmd_*` registry is a `vox_chat/commands/` package: `spec` holds the
@@ -179,13 +183,31 @@ see 1.2.
   * `[done]` `LLMError` with a typed `kind`
     (`connection|timeout|http|cancelled|protocol|context`)
 
-* **3.3 Concurrency model**
-  * `[to do]` Evaluate `AsyncOpenAI` in place of the synchronous client on a worker
-    thread: Textual is already an asyncio application, and threads force
-    `call_from_thread` on every update
-  * `[to do]` If threads stay, centralise their creation: `threading.Thread` is
-    instantiated in four independent places today (`discovery/agent.py`,
-    `discovery/whois.py`, `searchd.py`, plus the Textual workers)
+* **3.3 Concurrency model** — `[to complete]`
+  * `[to complete]` **`AsyncOpenAI` in place of the synchronous client.** Evaluated, and
+    the answer is a decision rather than a fix, so it is yours. What the measurement
+    shows:
+    * The cost is real but small and it is *not* the dominant one. `call_from_thread`
+      is used 52 times across the app, but on the generation path exactly one of them
+      runs per streamed event (`generation.py`, `handle_event`). The expensive part of
+      a token is the transcript refresh at the other end, which §11.1 is about, and
+      which an async client would not change.
+    * The gain is real too: `stop` would become a task cancellation instead of the
+      current arrangement, where cancelling means closing the transport out from under
+      the SDK and catching whatever it raises — the one wide catch in `llm_client` that
+      is hardest to defend.
+    * The cost of the change is the whole of `llm_client.py`, the twenty-five `@work`
+      call sites in `app.py`, and the fake clients every streaming test is built on.
+    * **Recommendation: not now.** The suite is fast and the boundary is tidy, but this
+      touches the one thing that is working. It becomes worth doing when §11.1 has
+      measured the UI cost, because that is where the number that would justify it
+      lives.
+  * `[done]` Thread creation is in one place, `vox_chat/threads.py`. The three
+    independent sites — the discovery agent, the whois server, the search server — all
+    go through it, so the two questions that matter are answered once: everything VOX
+    starts for itself is a daemon, because `__main__` already decides how long to wait
+    on the way out, and every thread is named, because `_stuck_threads` reports those
+    names to whoever is wondering why the shell has not come back.
   * `[done]` Clean shutdown with detection of stuck threads (`__main__.py`)
 
 ---

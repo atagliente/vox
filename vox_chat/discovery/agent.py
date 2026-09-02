@@ -18,6 +18,7 @@ import time
 
 from cryptography.hazmat.primitives import serialization
 
+from .. import threads
 from . import protocol, transport, whois
 from .identity import Identity
 from .registry import Observation, PeerState, Registry
@@ -95,9 +96,7 @@ class DiscoveryAgent:
             (self._reap_loop, "reaper"),
             (self._cert_watch_loop, "cert-watch"),
         ):
-            thread = threading.Thread(target=target, name=label, daemon=True)
-            thread.start()
-            self._threads.append(thread)
+            self._threads.append(threads.start(target, label))
 
     def stop(self) -> None:
         self._stop.set()
