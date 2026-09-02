@@ -269,23 +269,47 @@ decision rather than work: whether to move to an async provider client
   * `[done]` Reasoning read from `reasoning_content`/`reasoning`/`thinking` and from
     inline `<think>` tags, including tags split across chunks
 
-* **4.3 Multimodality**
-  * `[to do]` Image input: `/image <path>` attaching a base64 `image_url` content part —
-    useful with local vision models (qwen2.5-vl, llava, gemma3)
-  * `[to do]` Detect the model's vision capability automatically, with a clear message
-    when it is absent
-  * `[to do]` Inline image preview where the terminal protocol allows it (Kitty, iTerm2),
-    with a textual fallback elsewhere
+* **4.3 Multimodality** — `[done]`
+  * `[done]` `/image <path>` attaches; the picture goes with the question it belongs to
+    and the box is empty again afterwards. The format is decided by the file's first
+    bytes, not its extension — a `.png` that is really a JPEG is an everyday thing and
+    a provider rejects the mismatch, not the file. Capped at 4 MB, with the reason
+    given: a data URI is a third larger than the file and is counted as prompt tokens,
+    so past that it is a refused request rather than a question. A message carrying an
+    image becomes a list of content parts; one without stays a plain string, so every
+    existing request is unchanged.
+  * `[done]` Vision capability read from Ollama's `capabilities`, falling back to the
+    family name on older servers, and asked once per model rather than once per image.
+    Guessing yes costs a rejected turn, so the fallback errs towards no, and the
+    message names three models that would work.
+  * `[done]` Inline preview on Kitty and iTerm2, **detected rather than attempted**:
+    writing a Kitty escape to a terminal that does not know it prints the payload
+    across the screen, so there is no polite degradation to lean on. Elsewhere the
+    fallback is the line of text naming what was attached.
 
-* **4.4 Context and memory**
-  * `[to do]` Automatic conversation compaction when the window fills (summarise old
-    turns instead of truncating), with a configurable threshold
-  * `[to do]` Index the workspace with local embeddings (Ollama `/api/embed`) and pull in
-    the relevant files ahead of the question
-  * `[to do]` Read a project `VOX.md`/`AGENTS.md` automatically as context, following
-    what has become the convention among coding clients
-  * `[to do]` Prompt caching where the provider supports it, with the tokens saved shown
-    in the status bar
+* **4.4 Context and memory** — `[done]`
+  * `[done]` Compaction in `vox_chat/compaction.py`, run **before** the request rather
+    than after a refusal — `fitting.py` remains the emergency, this is what stops the
+    emergency happening. The last six turns are never summarised (the current question
+    is about those), the split falls on a user message (otherwise what is kept is an
+    answer to a question that was summarised away), and the summary arrives marked as
+    one so a model does not read it as something the operator wrote. Off by default and
+    threshold-configurable: it costs a real request, and that is asked for.
+  * `[done]` `vox_chat/indexing.py` and `/index`: chunked overlapping spans, embedded by
+    Ollama's own `/api/embed` so nothing leaves the machine, ranked by cosine similarity,
+    one chunk per file so five hits are five files rather than one file five times. No
+    vector database — a workspace is thousands of chunks and a dot product answers in
+    milliseconds. The index knows what changed from each file's size and mtime, so a
+    rebuild touches what moved. It lives under VOX's home, not in the repository,
+    because it is a cache. A missing embedding server costs the context, never the turn.
+  * `[done]` `AGENTS.md`, `CLAUDE.md`, `VOX.md` and `.vox.md` read as context, in that
+    order — a repository that already wrote one should not have to write another. Capped
+    and labelled as the project's own notes rather than instructions, because the file
+    is checked into a repository that may not be yours.
+  * `[done]` Prompt caching: `prompt_tokens_details.cached_tokens` is read where the
+    provider reports it, totalled per session, and shown on the status bar and in
+    `/stats` as a share of the prompt — **only when there is something to report**, since
+    a zero would look like a feature failing rather than one that is absent.
   * `[done]` Fitting the prompt to the window, and saying so when it no longer fits
     (`vox_chat/app.py`, `fitting`)
   * `[done]` `/model ctx` to read and rewrite a model's window

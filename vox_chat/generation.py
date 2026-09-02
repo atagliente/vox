@@ -15,7 +15,7 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
-from . import fitting, sampling
+from . import compaction, fitting, indexing, sampling
 from .agent import AgentEvent, run_turn
 from .llm_client import LLMError, context_overflow
 from .logging_setup import get_logger
@@ -42,6 +42,16 @@ class GenerationController:
         messages: list[Message] = []
         if role is not None and role.system_prompt:
             messages.append(Message(role="system", content=role.system_prompt))
+        relevant = self.workspace_context()
+        if relevant:
+            messages.append(Message(role="system", content=relevant))
+        if app.project_notes is not None:
+            # The project's own notes, after the role and before the
+            # conversation: they describe the codebase, and the role decides
+            # how to behave.
+            messages.append(
+                Message(role="system", content=app.project_notes.as_prompt())
+            )
         # "peer" and "error" are ours, not roles any provider accepts. The peer
         # answers are folded into one system message just before the question
         # they belong to, by start_consensus.
@@ -214,6 +224,93 @@ class GenerationController:
         app._reasoning_box.append_text(chunk)
         app.transcript.scroll_end(animate=False)
 
+    def workspace_context(self) -> str:
+        """The indexed files that look relevant to the question being asked.
+
+        Only when the index is switched on, and never at the cost of the
+        turn: if the embedding server is not there the question goes out on
+        its own, which is what it did before the index existed.
+        """
+        app = self.app
+        settings = app.index_settings()
+        if not settings.get("enabled"):
+            return ""
+        question = next(
+            (
+                message.content
+                for message in reversed(app.session.messages)
+                if message.role == "user" and message.content
+            ),
+            "",
+        )
+        hits = app.relevant_chunks(question)
+        if not hits:
+            return ""
+        block = indexing.render(hits)
+        limit = int(settings.get("max_chars", 6000))
+        if len(block) > limit:
+            block = block[:limit] + "\n[trimmed to fit]"
+        return block
+
+    def compact_if_needed(self) -> None:
+        """Summarise the older turns before the window fills, not after.
+
+        Runs on the worker thread, before the turn's own request: it is a
+        real call to the model, and doing it here means the operator watches
+        it happen rather than discovering an unexplained pause.
+        """
+        app = self.app
+        generation = app.config.get("generation", {})
+        messages = app.session.messages
+        if not compaction.should_compact(
+            messages,
+            app.context_window(),
+            float(generation.get("compact_at", 0.75)),
+            bool(generation.get("compact", False)),
+        ):
+            return
+        proposed = compaction.plan(messages)
+        if not proposed.worth_doing:
+            return
+        app.call_from_thread(
+            app.write_system, "COMPACTING - summarising the earlier turns..."
+        )
+        assert app.client is not None
+        try:
+            parts = [
+                event.text
+                for event in app.client.stream_chat(
+                    compaction.request_for(proposed.older),
+                    model=str(app.config.get("active_model", "")),
+                    temperature=0.0,
+                    max_tokens=800,
+                    include_usage=False,
+                )
+                if event.type == "text"
+            ]
+        except LLMError as exc:
+            # A summary that could not be written is not a reason to lose the
+            # turn: the request goes out full-size, and fitting.py is still
+            # there if the provider refuses it.
+            app.call_from_thread(
+                app.write_error, f"COMPACTION FAILED - {exc.message}; carrying on"
+            )
+            return
+        summary = "".join(parts).strip()
+        if not summary:
+            return
+        after = compaction.apply(summary, proposed)
+        app.call_from_thread(self._replace_conversation, after, proposed)
+
+    def _replace_conversation(
+        self, after: list[Message], proposed: compaction.Plan
+    ) -> None:
+        """Swap the conversation for its compacted form, on the UI thread."""
+        app = self.app
+        app.session.messages[:] = after
+        app.dirty = True
+        app.write_system(compaction.describe(proposed, after))
+
     def run(self, temperature: float, max_tokens: int | None, model: str) -> None:
         """The turn itself, on the worker thread.
 
@@ -223,6 +320,9 @@ class GenerationController:
         """
         app = self.app
         assert app.client is not None
+        # Before the request, not after a refusal: summarising the older
+        # turns is what keeps the window from filling in the first place.
+        self.compact_if_needed()
         agent_config = dict(app.config.get("agent", {}))
         role = app.role_store.get(str(app.config.get("active_role", "")))
         parameters = sampling.resolve(app.config, role)

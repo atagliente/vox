@@ -45,6 +45,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "include_usage": True,
         "preload": True,
         "preload_timeout_seconds": 180,
+        # Summarise the older turns when the window is this full, instead of
+        # waiting for the provider to refuse and cutting blindly. Off by
+        # default because it costs a request, and that should be asked for.
+        "compact": False,
+        "compact_at": 0.75,
     },
     # Per-model sampling: model name -> the parameters that model wants.
     # Stored beside the model rather than globally, because that is the only
@@ -123,6 +128,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "auto_results": 5,
         "auto_fetch": 2,
         "auto_max_chars": 6000,
+    },
+    # The workspace index: embeddings computed locally by Ollama, so the
+    # relevant files can be put in front of a question instead of the model
+    # having to go and look for them. Off by default: building it reads the
+    # whole workspace and costs an embedding request per chunk.
+    "index": {
+        "enabled": False,
+        "model": "nomic-embed-text",
+        "results": 4,
+        "max_chars": 6000,
     },
     # Tools from other people's servers. Off by default and empty: an MCP
     # server is a program somebody else wrote, and VOX does not start one
@@ -351,13 +366,33 @@ def validate_config(data: Any) -> list[str]:
             if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
                 errors.append(f"agent.{key} must be a positive integer")
 
-    errors.extend(sampling.errors_in(data.get("generation", {}), "generation"))
+    generation_block = data.get("generation", {})
+    if isinstance(generation_block, dict):
+        if not isinstance(generation_block.get("compact", False), bool):
+            errors.append("generation.compact must be a boolean")
+        at = generation_block.get("compact_at", 0.5)
+        if not isinstance(at, int | float) or isinstance(at, bool) or not 0 < at < 1:
+            errors.append("generation.compact_at must be between 0 and 1")
+    errors.extend(sampling.errors_in(generation_block, "generation"))
     presets = data.get("model_presets", {})
     if not isinstance(presets, dict):
         errors.append("model_presets must be an object of model -> parameters")
     else:
         for model, block in presets.items():
             errors.extend(sampling.errors_in(block, f"model_presets.{model}"))
+
+    index_block = data.get("index", {})
+    if not isinstance(index_block, dict):
+        errors.append("index must be an object")
+    else:
+        if not isinstance(index_block.get("enabled", False), bool):
+            errors.append("index.enabled must be a boolean")
+        if not isinstance(index_block.get("model", ""), str):
+            errors.append("index.model must be a string")
+        for key in ("results", "max_chars"):
+            value = index_block.get(key, 1)
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                errors.append(f"index.{key} must be a positive integer")
 
     mcp = data.get("mcp", {})
     if not isinstance(mcp, dict):

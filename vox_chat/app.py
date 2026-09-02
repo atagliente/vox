@@ -19,7 +19,17 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.widgets import Static
 
-from . import __version__, clipboard, code_blocks, commands, ollama, searchd
+from . import (
+    __version__,
+    clipboard,
+    code_blocks,
+    commands,
+    images,
+    indexing,
+    ollama,
+    project,
+    searchd,
+)
 from . import consensus as cns
 from . import report as reporting
 from . import web as web_module
@@ -52,7 +62,7 @@ from .models import Message, Session
 from .prompts import PromptStore, find_variables, render
 from .roles import RoleStore
 from .sessions import SessionStore
-from .storage import global_config_path
+from .storage import global_config_path, vox_home
 from .tools import Workspace
 from .ui import branding
 from .ui.inspect_screen import InspectScreen
@@ -222,6 +232,13 @@ class VoxApp(App[None]):
         # for the session rather than saved, because a schema belongs
         # to the question being asked, not to the installation.
         self.response_format: dict[str, Any] | None = None
+        # Images attached with /image, waiting for the message they belong to.
+        self.pending_images: list[images.Attachment] = []
+        self._vision_checked: str = ""
+        # The project's AGENTS.md / VOX.md, read once when the workspace is
+        # set rather than on every turn.
+        self.project_notes = project.find(self.workspace_path)
+        self._index: indexing.Index | None = None
         self._inspect_screen: InspectScreen | None = None
         self._panel_mode = "code"
 
@@ -605,9 +622,19 @@ class VoxApp(App[None]):
 
         self.input_area.clear()
         self.history.add(text)
-        message = Message(role="user", content=marked.text if marked.wanted else text)
+        message = Message(
+            role="user",
+            content=marked.text if marked.wanted else text,
+            # Whatever /image attached goes with the question it belongs to,
+            # and the box is empty again afterwards.
+            images=[item.data_uri for item in self.pending_images],
+        )
+        attached = [item.describe() for item in self.pending_images]
+        self.pending_images.clear()
         self.session.messages.append(message)
         self.write_message(message)
+        if attached:
+            self.write_system("SENT WITH: " + "  ·  ".join(attached))
         self.dirty = True
         if marked.wanted:
             self.start_consensus(marked.question)
@@ -1086,8 +1113,15 @@ class VoxApp(App[None]):
         self.workspace_path = candidate.resolve()
         self.workspace = Workspace(self.workspace_path)
         self.session_store = SessionStore(self.workspace_path)
+        self.project_notes = project.find(self.workspace_path)
+        self._index = None
         if announce:
             self.write_system(f"WORKSPACE SET - {self.workspace_path}")
+            if self.project_notes is not None:
+                self.write_system(
+                    f"PROJECT NOTES - {self.project_notes.describe()}, read as "
+                    "context for this codebase"
+                )
         self.refresh_status()
 
     # ----------------------------------------------------------- side panel
@@ -1802,6 +1836,187 @@ class VoxApp(App[None]):
         """The red border is the standing reminder that we are announcing."""
         with contextlib.suppress(IndexError):  # pragma: no cover - no screen yet
             self.screen_stack[0].set_class(online, "mesh-online")
+
+    # ----------------------------------------------------------------- index
+
+    def index_settings(self) -> dict[str, Any]:
+        block = self.config.get("index")
+        return block if isinstance(block, dict) else {}
+
+    def index_file(self) -> Path:
+        return indexing.index_path(self.workspace_path, vox_home())
+
+    def load_index(self) -> indexing.Index | None:
+        if self._index is None:
+            self._index = indexing.load(self.index_file())
+        return self._index
+
+    def index_report(self) -> str:
+        """What is indexed, how stale it is, and how to change that."""
+        settings = self.index_settings()
+        state = "on" if settings.get("enabled") else "off"
+        index = self.load_index()
+        if index is None:
+            return (
+                f"INDEX {state.upper()} - nothing built for "
+                f"{self.workspace_path}\n"
+                "  /index build   ·   needs Ollama and an embedding model\n"
+                f"  ollama pull {settings.get('model', indexing.DEFAULT_MODEL)}"
+            )
+        changed, gone = index.stale(self.workspace_path)
+        lines = [
+            f"INDEX {state.upper()} - {self.workspace_path}",
+            f"  {len(index.chunks)} chunk(s) from {len(index.stamps)} file(s)",
+            f"  model {index.model}",
+        ]
+        if changed or gone:
+            lines.append(
+                f"  {len(changed)} file(s) changed, {len(gone)} removed - /index build"
+            )
+        else:
+            lines.append("  up to date")
+        return "\n".join(lines)
+
+    def drop_index(self) -> None:
+        self._index = None
+        try:
+            self.index_file().unlink(missing_ok=True)
+        except OSError as exc:
+            self.write_error(f"INDEX - could not remove it: {exc}")
+            return
+        self.config.setdefault("index", {})["enabled"] = False
+        self.persist_config()
+        self.write_system("INDEX OFF - dropped; questions go out on their own again")
+
+    @work(thread=True, group="index", exclusive=True)
+    def build_index(self) -> None:
+        """Embed what has changed, on a thread, saying how far it has got."""
+        settings = self.index_settings()
+        model = str(settings.get("model", indexing.DEFAULT_MODEL))
+        base_url = str((self.provider_block() or {}).get("base_url", ""))
+        root = self.workspace_path
+        index = self.load_index() or indexing.Index(root=str(root), model=model)
+        if index.model != model:
+            # A different embedding model produces vectors that cannot be
+            # compared with the old ones, so the index starts again.
+            index = indexing.Index(root=str(root), model=model)
+        changed, gone = index.stale(root)
+        index.drop(gone | {p.relative_to(root).as_posix() for p in changed})
+        if not changed:
+            self.call_from_thread(
+                self.write_system, f"INDEX - already up to date ({len(gone)} removed)"
+            )
+            self._index = index
+            indexing.save(index, self.index_file())
+            return
+        self.call_from_thread(
+            self.write_system,
+            f"INDEX - embedding {len(changed)} file(s) with {model}...",
+        )
+        done = 0
+        for path in changed:
+            name = path.relative_to(root).as_posix()
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+                chunks = indexing.split(text, name)
+                if chunks:
+                    vectors = indexing.embed(
+                        [chunk.text for chunk in chunks], base_url, model
+                    )
+                    for chunk, vector in zip(chunks, vectors, strict=True):
+                        chunk.vector = vector
+                    index.chunks.extend(chunks)
+                index.stamps[name] = indexing.FileStamp.of(path)
+            except indexing.IndexError_ as exc:
+                self.call_from_thread(self.write_error, f"INDEX - {exc}")
+                return
+            except OSError:
+                continue  # a file that vanished mid-build is not a failure
+            done += 1
+        indexing.save(index, self.index_file())
+        self._index = index
+        self.config.setdefault("index", {})["enabled"] = True
+        self.call_from_thread(self.persist_config)
+        self.call_from_thread(
+            self.write_system,
+            f"INDEX BUILT - {done} file(s), {len(index.chunks)} chunk(s). "
+            "Questions now carry the files that look relevant.",
+        )
+
+    @work(thread=True, group="index")
+    def search_index(self, query: str) -> None:
+        """Show what the index thinks this question is about."""
+        hits = self.relevant_chunks(query)
+        if not hits:
+            self.call_from_thread(
+                self.write_system, "INDEX - nothing close enough; /index build?"
+            )
+            return
+        lines = [f"INDEX - closest to {query!r}", ""]
+        lines += [
+            f"  {score:.2f}  {chunk.path}:{chunk.start_line}" for score, chunk in hits
+        ]
+        self.call_from_thread(self.write_system, "\n".join(lines))
+
+    def relevant_chunks(self, query: str) -> list[tuple[float, indexing.Chunk]]:
+        """The workspace chunks closest to this question. Never raises."""
+        index = self.load_index()
+        if index is None or not index.chunks or not query.strip():
+            return []
+        settings = self.index_settings()
+        base_url = str((self.provider_block() or {}).get("base_url", ""))
+        try:
+            vector = indexing.embed([query], base_url, index.model)[0]
+        except (indexing.IndexError_, IndexError):
+            # Searching is a convenience. A question still deserves an answer
+            # when the embedding server is not there.
+            return []
+        return index.search(vector, int(settings.get("results", 4)))
+
+    # ---------------------------------------------------------------- images
+
+    def show_image(self, attachment: images.Attachment) -> None:
+        """Draw the image in the scrollback, where the terminal can do that.
+
+        Detected rather than attempted: writing a Kitty escape to a terminal
+        that does not know it prints the payload across the screen instead of
+        failing quietly.
+        """
+        protocol = images.preview_protocol()
+        if protocol == "none":
+            return
+        sequence = images.inline_preview(attachment, protocol)
+        if sequence:
+            self.write_system(sequence)
+
+    @work(thread=True, group="vision", exclusive=True)
+    def check_vision_support(self) -> None:
+        """Say plainly when the active model cannot read a picture.
+
+        Asked once per model rather than per image: the answer does not
+        change, and a /api/show for every attachment is a request nobody
+        wanted.
+        """
+        model = str(self.config.get("active_model", ""))
+        if not model or self._vision_checked == model:
+            return
+        base_url = str((self.provider_block() or {}).get("base_url", ""))
+        if not ollama.looks_like_ollama(base_url):
+            # Only Ollama says; elsewhere the provider's own refusal is the
+            # honest answer, and it arrives on the next turn.
+            return
+        self._vision_checked = model
+        try:
+            if ollama.reads_images(base_url, model):
+                return
+        except ollama.OllamaError:
+            return  # the connection has its own error path
+        self.call_from_thread(
+            self.write_error,
+            f"{model} does not read images. The attachment will be sent and "
+            "refused; /model to pick one that does - qwen2.5-vl, gemma3, "
+            "llava and moondream all can.",
+        )
 
     # ------------------------------------------------------------------- mcp
 

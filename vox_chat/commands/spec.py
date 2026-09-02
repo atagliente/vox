@@ -132,6 +132,12 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("agent", "/agent on|off", "Toggle coding-agent mode"),
     CommandSpec("workspace", "/workspace <path>", "Set the agent workspace"),
     CommandSpec(
+        "index",
+        "/index [build|on|off|<query>]",
+        "Index the workspace locally, and pull the relevant files in",
+    ),
+    CommandSpec("image", "/image <path>", "Attach an image to the next message"),
+    CommandSpec(
         "set", "/set [name value|off]", "Sampling parameters, or a model preset"
     ),
     CommandSpec(

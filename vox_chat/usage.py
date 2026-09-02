@@ -36,6 +36,12 @@ class TokenUsage:
 
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    cached_tokens: int = 0
+    """Prompt tokens the provider served from its cache, where it says so.
+
+    Last, and only ever last: these are built positionally in a dozen places,
+    and a field inserted in the middle silently reassigns every one of them.
+    """
 
     @property
     def total_tokens(self) -> int:
@@ -51,6 +57,9 @@ class TurnUsage:
     elapsed: float = 0.0
     estimated: bool = False
     first_token_latency: float | None = None
+    # Appended rather than inserted: TurnUsage is built positionally in the
+    # tests and in agent.py, and a field in the middle reassigns them all.
+    cached_tokens: int = 0
 
     @property
     def total_tokens(self) -> int:
@@ -131,6 +140,7 @@ class UsageTracker:
     completion_tokens: int = 0
     elapsed: float = 0.0
     generation_elapsed: float = 0.0
+    cached_tokens: int = 0
     estimated_turns: int = 0
     last: TurnUsage | None = None
     history: list[TurnUsage] = field(default_factory=list)
@@ -139,6 +149,7 @@ class UsageTracker:
         self.turns += 1
         self.prompt_tokens += turn.prompt_tokens
         self.completion_tokens += turn.completion_tokens
+        self.cached_tokens += turn.cached_tokens
         self.elapsed += turn.elapsed
         self.generation_elapsed += turn.generation_time
         if turn.estimated:
@@ -198,6 +209,11 @@ class UsageTracker:
                 f"{format_tokens(self.last.total_tokens)} tok"
                 f"  {self.last.tokens_per_second:.1f} tok/s"
             )
+        if self.cached_tokens:
+            # Only when there is something to report: a provider that does
+            # not cache says nothing, and a zero on the bar would look like a
+            # feature that is failing rather than one that is absent.
+            parts.append(f"cached {format_tokens(self.cached_tokens)}")
         if self.turns:
             parts.append(f"avg {self.average_tokens_per_second:.1f} tok/s")
         if self.estimated_turns:
@@ -215,6 +231,14 @@ class UsageTracker:
             "",
             f"  turns              {self.turns}",
             f"  prompt tokens      {self.prompt_tokens}",
+            *(
+                [
+                    f"  served from cache  {self.cached_tokens}"
+                    f"  ({self.cached_tokens * 100 // max(1, self.prompt_tokens)}% of the prompt)"
+                ]
+                if self.cached_tokens
+                else []
+            ),
             f"  completion tokens  {self.completion_tokens}",
             f"  total tokens       {self.total_tokens}",
             f"  tokens / turn      {self.average_tokens_per_turn:.0f}",

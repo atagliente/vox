@@ -158,6 +158,24 @@ every provider supports them. A provider that refuses is retried without them.
 `.toon`: parameters at the top, the exchange, then the statistics and decision
 points. The HTML is one self-contained file with no JavaScript.
 
+## Working with what is around
+
+Four things VOX can put in front of a model besides the conversation, each
+switched on rather than assumed:
+
+| | What it does |
+| --- | --- |
+| `/mcp on` | tools from Model Context Protocol servers you configure — stdio or HTTP. Every call is confirmed unless the server marks the tool read-only |
+| `/index build` | embeds the workspace with Ollama and puts the files that look relevant in front of each question. Nothing leaves the machine |
+| `AGENTS.md` | read automatically from the working directory, as the project's own notes. `CLAUDE.md`, `VOX.md` and `.vox.md` too |
+| `/image <path>` | attaches a picture for a vision model. Drawn inline on Kitty and iTerm2 |
+
+`/set` shows and changes the sampling parameters actually being sent -
+`top_p`, `top_k`, `seed`, `stop`, `reasoning_effort`, `think` and the rest.
+Anything unset is not sent at all, so the provider's own default stands.
+`/set preset` stores what is in force as this model's own, and `/format` makes
+the answer match a JSON Schema.
+
 ## Where your files go
 
 Everything a conversation produces lands in the directory you launched from:

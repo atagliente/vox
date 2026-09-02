@@ -20,7 +20,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from .. import consensus as cns
-from .. import mcp, ollama, sampling, searchd
+from .. import images, mcp, ollama, sampling, searchd
 from .. import report as reporting
 from . import spec as commands
 
@@ -622,3 +622,56 @@ def cmd_format(app: VoxApp, argument: str) -> None:
         "FORMAT - the answer will match that schema.\n"
         "  A model that does not support structured output will say so."
     )
+
+
+def cmd_image(app: VoxApp, argument: str) -> None:
+    """Attach an image to the next message, for a model that can read one.
+
+    Attached rather than sent: the picture is half the question and the words
+    are the other half, so it waits in the prompt box until there is something
+    to ask about it.
+    """
+    path = argument.strip().strip('"').strip("'")
+    if not path or path.lower() in ("off", "clear", "none"):
+        count = len(app.pending_images)
+        app.pending_images.clear()
+        app.write_system(
+            f"IMAGE - {count} attachment(s) dropped"
+            if count
+            else "IMAGE - usage: /image <path>, or /image off"
+        )
+        return
+    try:
+        attachment = images.load(path)
+    except images.ImageError as exc:
+        app.write_error(f"IMAGE - {exc}")
+        return
+    app.pending_images.append(attachment)
+    app.write_system(f"IMAGE ATTACHED - {attachment.describe()}")
+    app.show_image(attachment)
+    app.check_vision_support()
+
+
+def cmd_index(app: VoxApp, argument: str) -> None:
+    """Build, refresh, drop or query the workspace index.
+
+    Building reads every file in the workspace and asks the embedding model
+    for a vector per chunk. That is a real cost on somebody's laptop, so it
+    happens when asked for and never on its own.
+    """
+    action = argument.strip().lower() or "status"
+    if action in ("build", "refresh", "update"):
+        app.build_index()
+        return
+    if action in ("off", "drop", "clear"):
+        app.drop_index()
+        return
+    if action in ("on", "use"):
+        app.config.setdefault("index", {})["enabled"] = True
+        app.persist_config()
+        app.write_system("INDEX ON - relevant files go in front of each question")
+        return
+    if action == "status":
+        app.write_system(app.index_report())
+        return
+    app.search_index(argument.strip())

@@ -126,7 +126,15 @@ def _usage_of(chunk: Any) -> TokenUsage | None:
     completion = getattr(counted, "completion_tokens", None)
     if prompt is None and completion is None:
         return None
-    return TokenUsage(int(prompt or 0), int(completion or 0))
+    # Prompt caching: the part of the prompt the provider did not have to
+    # process again. Reported under prompt_tokens_details by OpenAI and the
+    # gateways that follow it, and simply absent everywhere else — which is
+    # why it is read defensively rather than assumed.
+    details = getattr(counted, "prompt_tokens_details", None)
+    cached = getattr(details, "cached_tokens", None) if details is not None else None
+    if cached is None and isinstance(details, dict):
+        cached = details.get("cached_tokens")
+    return TokenUsage(int(prompt or 0), int(completion or 0), int(cached or 0))
 
 
 def consume_stream(

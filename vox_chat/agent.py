@@ -132,6 +132,7 @@ def run_turn(
     first_token_at: float | None = None
     reported_prompt = 0
     reported_completion = 0
+    reported_cached = 0
     any_reported = False
     produced_text: list[str] = []
 
@@ -145,6 +146,7 @@ def run_turn(
                 usage=TurnUsage(
                     prompt_tokens=reported_prompt,
                     completion_tokens=reported_completion,
+                    cached_tokens=reported_cached,
                     elapsed=elapsed,
                     estimated=False,
                     first_token_latency=latency,
@@ -194,6 +196,7 @@ def run_turn(
                     any_reported = True
                     reported_prompt += event.usage.prompt_tokens
                     reported_completion += event.usage.completion_tokens
+                    reported_cached += event.usage.cached_tokens
                 yield from _relay(event, text_parts, reasoning_parts, tool_calls)
                 if event.type == "cancelled":
                     yield usage_event()

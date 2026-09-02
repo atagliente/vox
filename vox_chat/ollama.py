@@ -150,6 +150,44 @@ def trained_context(base_url: str, model: str, timeout: float = 10.0) -> int | N
     return None
 
 
+# Families that read images, for servers old enough not to say so themselves.
+# A list, not a guess: each of these is a vision model whose name says so.
+VISION_FAMILIES = (
+    "llava",
+    "bakllava",
+    "moondream",
+    "minicpm-v",
+    "llama3.2-vision",
+    "qwen2-vl",
+    "qwen2.5-vl",
+    "qwen3-vl",
+    "gemma3",
+    "mistral-small3",
+    "granite3.2-vision",
+    "internvl",
+    "pixtral",
+)
+
+
+def reads_images(base_url: str, model: str, timeout: float = 10.0) -> bool:
+    """Can this model be shown a picture?
+
+    Ollama says so directly in `capabilities` on newer servers. Where it does
+    not, the family name is the answer — and getting this wrong the optimistic
+    way costs a rejected request, so the fallback errs towards no.
+    """
+    data = _post(base_url, "/api/show", {"model": model}, timeout)
+    capabilities = data.get("capabilities")
+    if isinstance(capabilities, list):
+        return "vision" in [str(item).lower() for item in capabilities]
+    families = data.get("details", {}).get("families")
+    names = (
+        [str(item).lower() for item in families] if isinstance(families, list) else []
+    )
+    names.append(model.lower())
+    return any(family in name for name in names for family in VISION_FAMILIES)
+
+
 def configured_context(base_url: str, model: str, timeout: float = 10.0) -> int | None:
     """``num_ctx`` if the model carries one of its own, else None."""
     data = _post(base_url, "/api/show", {"model": model}, timeout)

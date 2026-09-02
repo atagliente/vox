@@ -69,6 +69,8 @@ class Message:
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_call_id: str | None = None
     name: str | None = None
+    images: list[str] = field(default_factory=list)
+    """``data:`` URIs attached to this message, for a vision model."""
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -76,6 +78,8 @@ class Message:
             "content": self.content,
             "timestamp": self.timestamp,
         }
+        if self.images:
+            data["images"] = list(self.images)
         if self.reasoning:
             data["reasoning"] = self.reasoning
         if self.tool_calls:
@@ -96,6 +100,7 @@ class Message:
             tool_calls=[ToolCall.from_dict(c) for c in data.get("tool_calls", [])],
             tool_call_id=data.get("tool_call_id"),
             name=data.get("name"),
+            images=list(data.get("images") or []),
         )
 
     def to_api(self) -> dict[str, Any] | None:
@@ -118,7 +123,20 @@ class Message:
                 "content": self.content,
                 "tool_call_id": self.tool_call_id,
             }
-        payload: dict[str, Any] = {"role": self.role, "content": self.content}
+        if self.images:
+            # A message with an image is a list of parts rather than a
+            # string. Only this shape carries both, and a provider without
+            # vision answers that it cannot read the image rather than
+            # silently ignoring it — which is the honest failure.
+            parts: list[dict[str, Any]] = []
+            if self.content:
+                parts.append({"type": "text", "text": self.content})
+            parts += [
+                {"type": "image_url", "image_url": {"url": uri}} for uri in self.images
+            ]
+            payload: dict[str, Any] = {"role": self.role, "content": parts}
+        else:
+            payload = {"role": self.role, "content": self.content}
         if self.tool_calls:
             payload["tool_calls"] = [call.to_api() for call in self.tool_calls]
         return payload
