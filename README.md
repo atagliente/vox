@@ -413,6 +413,23 @@ is what widens, one module at a time, as the rest of the tree is cleared.
 CI covers Linux, macOS and Windows across Python 3.11, 3.12 and 3.13, and
 exercises `install.sh` and `install.ps1` on clean runners.
 
+### How it is laid out
+
+`app.py` draws the screen and owns the widgets. What is not drawing lives
+beside it:
+
+| Module | What it holds |
+| --- | --- |
+| `commands/` | the slash commands: `spec` the vocabulary, `handlers` what each one does, `dispatch` the table joining them |
+| `generation.py` | one turn, from the send key to the last token |
+| `consensus_flow.py` | a mesh round, and answering when another agent asks |
+| `http.py` | the only place VOX makes an HTTP request |
+| `threads.py` | the only place VOX starts a thread of its own |
+
+The controllers hold the application rather than inheriting from it. Textual's
+`@work` decorators stay on `VoxApp`, because putting something on a thread is
+the framework's business and belongs with the widget.
+
 ## More
 
 - [docs/USAGE.md](docs/USAGE.md) — full guide: every option, roles and prompts,
