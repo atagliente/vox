@@ -164,8 +164,15 @@ class HeaderBar(Static):
             "style": "frame",
         }
 
-    def update_state(self, link: str, mesh: str, provider: str = "",
-                     model: str = "", role: str = "", style: str = "frame") -> None:
+    def update_state(
+        self,
+        link: str,
+        mesh: str,
+        provider: str = "",
+        model: str = "",
+        role: str = "",
+        style: str = "frame",
+    ) -> None:
         self._state.update(
             link=link,
             mesh=mesh,
@@ -229,8 +236,9 @@ class ThinkingBox(Static):
         rendered.append(f"{spinner_frame(self._tick)} ", style="bold")
         rendered.append(f"{self.label}… {elapsed:.1f}s")
         if elapsed >= self.SLOW_AFTER:
-            rendered.append("  (the server may still be loading the model)",
-                            style="dim")
+            rendered.append(
+                "  (the server may still be loading the model)", style="dim"
+            )
         self.update(rendered)
 
 
@@ -280,9 +288,16 @@ class StatusBar(Static):
     def __init__(self) -> None:
         super().__init__(id="status")
 
-    def update_state(self, connected: bool, generating: bool, agent: bool,
-                     workspace: str, extra: str = "", spinner: str = "",
-                     busy: str = "") -> None:
+    def update_state(
+        self,
+        connected: bool,
+        generating: bool,
+        agent: bool,
+        workspace: str,
+        extra: str = "",
+        spinner: str = "",
+        busy: str = "",
+    ) -> None:
         text = branding.status_line(
             connected, generating, agent, workspace, spinner, busy
         )

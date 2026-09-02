@@ -15,16 +15,18 @@ or a registry.
 
 from __future__ import annotations
 
+import contextlib
 import socket
 import struct
 import sys
 
-DEFAULT_GROUP = "239.17.42.1"   # the administratively-scoped range
+DEFAULT_GROUP = "239.17.42.1"  # the administratively-scoped range
 DEFAULT_PORT = 45177
 
 
-def make_sender(group: str = DEFAULT_GROUP, ttl: int = 1,
-                interface: str | None = None) -> socket.socket:
+def make_sender(
+    group: str = DEFAULT_GROUP, ttl: int = 1, interface: str | None = None
+) -> socket.socket:
     """The sending socket.
 
     ttl=1 confines announcements to the local segment, which is the careful
@@ -35,22 +37,22 @@ def make_sender(group: str = DEFAULT_GROUP, ttl: int = 1,
     # Needed so other processes on this same host see our own packets.
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
     if interface:
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
-                        socket.inet_aton(interface))
+        sock.setsockopt(
+            socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(interface)
+        )
     return sock
 
 
-def make_receiver(group: str = DEFAULT_GROUP, port: int = DEFAULT_PORT,
-                  interface: str = "0.0.0.0") -> socket.socket:
+def make_receiver(
+    group: str = DEFAULT_GROUP, port: int = DEFAULT_PORT, interface: str = "0.0.0.0"
+) -> socket.socket:
     """The receiving socket, joined to the multicast group."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     if hasattr(socket, "SO_REUSEPORT") and sys.platform != "win32":
         # Lets several agents on one host listen on the same port.
-        try:
+        with contextlib.suppress(OSError):
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-        except OSError:
-            pass
     sock.bind(("", port))
     mreq = struct.pack("4s4s", socket.inet_aton(group), socket.inet_aton(interface))
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)

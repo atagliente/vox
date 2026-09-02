@@ -3,4 +3,4 @@
 __version__ = "0.1.0"
 APP_NAME = "VOX"
 
-__all__ = ["__version__", "APP_NAME"]
+__all__ = ["APP_NAME", "__version__"]

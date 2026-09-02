@@ -61,7 +61,10 @@ class DiscoveryAgent:
         self._replay = protocol.ReplayGuard()
 
         self._whois = whois.WhoisServer(
-            self._descriptor(), identity=identity, port=whois_port, authorizer=authorizer
+            self._descriptor(),
+            identity=identity,
+            port=whois_port,
+            authorizer=authorizer,
         )
         # Peers whose certificate did not check out. They are not interrogated
         # again on every announcement, or one misconfigured node would produce
@@ -108,7 +111,9 @@ class DiscoveryAgent:
         """Jitter: without it, after a mass restart everyone announces in the same
         instant and N simultaneous WHOIS handshakes go off at once."""
         spread = self._interval * self._jitter
-        return max(0.5, random.uniform(self._interval - spread, self._interval + spread))
+        return max(
+            0.5, random.uniform(self._interval - spread, self._interval + spread)
+        )
 
     def _announce_loop(self) -> None:
         sock = transport.make_sender(self._group)
@@ -126,7 +131,9 @@ class DiscoveryAgent:
                     )
                     sock.sendto(packet, (self._group, self._port))
                 except OSError as exc:
-                    log.warning("[%s] sending the announcement failed: %s", self.name, exc)
+                    log.warning(
+                        "[%s] sending the announcement failed: %s", self.name, exc
+                    )
                 self._stop.wait(self._next_delay())
         finally:
             sock.close()
@@ -171,7 +178,9 @@ class DiscoveryAgent:
         if observation is Observation.HEARTBEAT or observation is Observation.STALE:
             return
 
-        log.info("[%s] %s -> %s (%s)", self.name, peer.agent_id, observation.value, address)
+        log.info(
+            "[%s] %s -> %s (%s)", self.name, peer.agent_id, observation.value, address
+        )
         self._whois_queue.put(peer.agent_id)
 
     # ---------------------------------------------------------------- whois worker
@@ -183,7 +192,9 @@ class DiscoveryAgent:
             except queue.Empty:
                 continue
 
-            peer = next((p for p in self.registry.snapshot() if p.agent_id == agent_id), None)
+            peer = next(
+                (p for p in self.registry.snapshot() if p.agent_id == agent_id), None
+            )
             if peer is None or peer.state is not PeerState.PROBATION:
                 continue
 
@@ -199,8 +210,14 @@ class DiscoveryAgent:
                 # The identity cannot be verified: either the peer is not who
                 # it says it is, or it sits outside our CA. Neither is a
                 # transient condition, so: no retry, and a loud log line.
-                log.error("[%s] the identity of %s was NOT verified (%s@%s): %s",
-                          self.name, agent_id, peer.whois_port, peer.address, exc)
+                log.error(
+                    "[%s] the identity of %s was NOT verified (%s@%s): %s",
+                    self.name,
+                    agent_id,
+                    peer.whois_port,
+                    peer.address,
+                    exc,
+                )
                 self._rejected.add(agent_id)
                 self.registry.forget(agent_id)
                 continue
@@ -208,7 +225,11 @@ class DiscoveryAgent:
                 log.warning("[%s] the whois to %s failed: %s", self.name, agent_id, exc)
                 # It stays in PROBATION: the next announcement will not retry
                 # on its own, so it goes back on the queue with a backoff.
-                threading.Timer(5.0, lambda: self._whois_queue.put(agent_id)).start()
+                # Bound now, not when the timer fires: by then the loop has
+                # moved on and it would requeue a different peer.
+                threading.Timer(
+                    5.0, lambda peer_id=agent_id: self._whois_queue.put(peer_id)
+                ).start()
                 continue
 
             capabilities = descriptor.get("capabilities", {})
@@ -220,18 +241,28 @@ class DiscoveryAgent:
                 category=category,
                 taxonomy_version=whois.TAXONOMY_VERSION,
             )
-            log.info("[%s] %s classified as %s%s", self.name,
-                     descriptor.get("name", agent_id), category,
-                     " (passive, kept out of routing)"
-                     if category in whois.PASSIVE_CATEGORIES else "")
+            log.info(
+                "[%s] %s classified as %s%s",
+                self.name,
+                descriptor.get("name", agent_id),
+                category,
+                " (passive, kept out of routing)"
+                if category in whois.PASSIVE_CATEGORIES
+                else "",
+            )
 
     # ---------------------------------------------------------------- reaper
 
     def _reap_loop(self) -> None:
         while not self._stop.is_set():
             for peer, previous in self.registry.reap():
-                log.info("[%s] %s: %s -> %s", self.name, peer.agent_id,
-                         previous.value, peer.state.value)
+                log.info(
+                    "[%s] %s: %s -> %s",
+                    self.name,
+                    peer.agent_id,
+                    previous.value,
+                    peer.state.value,
+                )
             self._stop.wait(max(1.0, self._interval / 3))
 
     # -------------------------------------------------------------- certificates
@@ -247,8 +278,11 @@ class DiscoveryAgent:
         while not self._stop.is_set():
             try:
                 if self.identity.needs_renewal():
-                    log.warning("[%s] certificate past half life (expires %s): renew it",
-                                self.name, self.identity.expires_at().isoformat())
+                    log.warning(
+                        "[%s] certificate past half life (expires %s): renew it",
+                        self.name,
+                        self.identity.expires_at().isoformat(),
+                    )
             except OSError as exc:
                 log.error("[%s] the certificate cannot be read: %s", self.name, exc)
             self._stop.wait(300.0)
@@ -264,8 +298,11 @@ class DiscoveryAgent:
         self.identity = identity
         self._load_signing_material(identity)
         self._whois.reload_identity(identity)
-        log.info("[%s] certificate renewed, valid until %s",
-                 self.name, identity.expires_at().isoformat())
+        log.info(
+            "[%s] certificate renewed, valid until %s",
+            self.name,
+            identity.expires_at().isoformat(),
+        )
 
     def _load_signing_material(self, identity: Identity) -> None:
         """The key we sign with, the certificate we show, the CA we trust."""
@@ -280,9 +317,8 @@ class DiscoveryAgent:
     def peers_for(self, verb: str) -> list:
         """Active, non-passive peers that declare they can do `verb`."""
         return [
-            p for p in self.registry.routable()
+            p
+            for p in self.registry.routable()
             if p.category not in whois.PASSIVE_CATEGORIES
             and verb in (p.capabilities.get("verbs") or [])
         ]
-
-

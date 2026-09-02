@@ -20,24 +20,32 @@ from vox_chat.discovery.identity import Identity
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--name", required=True)
-    parser.add_argument("--agent-id", required=True,
-                        help="must match the SAN of the certificate")
-    parser.add_argument("--pki", default="./pki",
-                        help="the directory holding <agent-id>.crt/.key and ca.crt")
-    parser.add_argument("--verbs", default="transform",
-                        help="the verbs declared, comma separated")
+    parser.add_argument(
+        "--agent-id", required=True, help="must match the SAN of the certificate"
+    )
+    parser.add_argument(
+        "--pki",
+        default="./pki",
+        help="the directory holding <agent-id>.crt/.key and ca.crt",
+    )
+    parser.add_argument(
+        "--verbs", default="transform", help="the verbs declared, comma separated"
+    )
     parser.add_argument("--interval", type=float, default=60.0)
-    parser.add_argument("--run-for", type=float, default=0.0,
-                        help="0 means for ever")
+    parser.add_argument("--run-for", type=float, default=0.0, help="0 means for ever")
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO,
-                        format="%(asctime)s %(levelname)-7s %(message)s",
-                        datefmt="%H:%M:%S")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)-7s %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
     identity = Identity.load(args.agent_id, Path(args.pki))
-    logging.info("identity loaded, the certificate expires on %s",
-                 identity.expires_at().isoformat())
+    logging.info(
+        "identity loaded, the certificate expires on %s",
+        identity.expires_at().isoformat(),
+    )
 
     agent = DiscoveryAgent(
         identity=identity,
@@ -56,8 +64,11 @@ def main() -> None:
         while deadline is None or time.time() < deadline:
             time.sleep(args.interval)
             peers = agent.registry.snapshot()
-            logging.info("[%s] registry: %s", args.name,
-                         [(p.name or p.agent_id, p.state.value, p.category) for p in peers])
+            logging.info(
+                "[%s] registry: %s",
+                args.name,
+                [(p.name or p.agent_id, p.state.value, p.category) for p in peers],
+            )
     except KeyboardInterrupt:
         pass
     finally:

@@ -8,7 +8,8 @@ split across streaming chunks.
 
 from __future__ import annotations
 
-from typing import Iterator, Literal
+from collections.abc import Iterator
+from typing import Literal
 
 Kind = Literal["text", "reasoning"]
 

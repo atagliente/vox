@@ -13,15 +13,22 @@ from vox_chat.storage import sessions_dir
 
 
 def make_session() -> Session:
-    session = Session(title="my session", provider="local-ollama",
-                      model="qwen2.5-coder:3b", role="python-developer",
-                      workspace="/tmp/project", agent_enabled=True)
+    session = Session(
+        title="my session",
+        provider="local-ollama",
+        model="qwen2.5-coder:3b",
+        role="python-developer",
+        workspace="/tmp/project",
+        agent_enabled=True,
+    )
     session.messages = [
         Message(role="user", content="hello, unicode: àèìòù ✓"),
         Message(
             role="assistant",
             content="line one\nline two",
-            tool_calls=[ToolCall(id="c1", name="read_file", arguments='{"path": "a.py"}')],
+            tool_calls=[
+                ToolCall(id="c1", name="read_file", arguments='{"path": "a.py"}')
+            ],
         ),
         Message(role="tool", content="file body", tool_call_id="c1", name="read_file"),
     ]
@@ -38,7 +45,9 @@ def test_save_and_load_round_trip() -> None:
     assert loaded.title == "my session"
     assert loaded.agent_enabled is True
     assert loaded.workspace == "/tmp/project"
-    assert [m.content for m in loaded.messages] == [m.content for m in original.messages]
+    assert [m.content for m in loaded.messages] == [
+        m.content for m in original.messages
+    ]
     assert loaded.messages[1].tool_calls[0].name == "read_file"
     assert loaded.messages[2].tool_call_id == "c1"
 

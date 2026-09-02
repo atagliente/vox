@@ -45,7 +45,12 @@ class Check:
         line = f"{mark} {self.label.ljust(8)} {self.detail}".rstrip()
         if plain:
             return line
-        colors = {"OK": "\033[32m", "FAIL": "\033[31m", "WARN": "\033[33m", "--": "\033[90m"}
+        colors = {
+            "OK": "\033[32m",
+            "FAIL": "\033[31m",
+            "WARN": "\033[33m",
+            "--": "\033[90m",
+        }
         return f"{colors.get(self.status, '')}{line}\033[0m"
 
 
@@ -87,8 +92,10 @@ def check_home() -> Check:
 
 def check_editor() -> Check:
     command = editor_command()
-    source = "VISUAL" if os.environ.get("VISUAL") else (
-        "EDITOR" if os.environ.get("EDITOR") else "fallback"
+    source = (
+        "VISUAL"
+        if os.environ.get("VISUAL")
+        else ("EDITOR" if os.environ.get("EDITOR") else "fallback")
     )
     if command is None:
         return Check("WARN", "EDITOR", "none found - /config will not work")
@@ -118,7 +125,9 @@ def check_link(loaded: LoadedConfig, timeout: float = 5.0) -> tuple[Check, list[
         models = client.list_models(timeout=timeout)
     except LLMError as exc:
         # Connection and timeout messages already name the endpoint.
-        detail = exc.message if base_url in exc.message else f"{base_url} - {exc.message}"
+        detail = (
+            exc.message if base_url in exc.message else f"{base_url} - {exc.message}"
+        )
         return Check("FAIL", "LINK", detail), []
     except (OSError, ValueError) as exc:
         return Check("FAIL", "LINK", f"{base_url} - {exc}"), []
@@ -190,10 +199,12 @@ def check_consensus(loaded: LoadedConfig) -> Check:
     detail = f"{verb} - {answers}"
     if using_demo_ca(pki_dir(MeshSettings.from_config(loaded.data))):
         if not section.get("allow_sample_ca", True):
-            return Check("--", "CONSENSUS",
-                         f"{detail} - refused while on the sample CA")
+            return Check(
+                "--", "CONSENSUS", f"{detail} - refused while on the sample CA"
+            )
         return Check(
-            "WARN", "CONSENSUS",
+            "WARN",
+            "CONSENSUS",
             f"{detail} - ON THE SAMPLE CA: what you distribute is readable by "
             "anyone on this segment running VOX; /mesh new-ca",
         )
@@ -221,7 +232,8 @@ def check_web(loaded: LoadedConfig) -> Check:
         return Check("OK", "WEB", f"{settings.endpoint} answering - {mode}")
     # Not running is the normal state: VOX starts it when it is needed.
     return Check(
-        "OK", "WEB",
+        "OK",
+        "WEB",
         f"{settings.endpoint} - the search server starts on first use - {mode}",
     )
 
@@ -254,8 +266,9 @@ def report(checks: list[Check], plain: bool = False) -> str:
     return "\n".join(lines)
 
 
-def main(workspace: Path | None = None, plain: bool = False,
-         timeout: float = 5.0) -> int:
+def main(
+    workspace: Path | None = None, plain: bool = False, timeout: float = 5.0
+) -> int:
     """Print the report; return 0 unless a blocking check failed."""
     checks = run_checks(workspace=workspace, timeout=timeout)
     print(report(checks, plain=plain or not sys.stdout.isatty()))

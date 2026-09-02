@@ -45,8 +45,9 @@ DEMO_CERT = "SAMPLE CERT"
 WEB_MODE = "WEB"
 
 
-def header_lines(link: str, mesh: str, provider: str, model: str,
-                 role: str) -> list[str]:
+def header_lines(
+    link: str, mesh: str, provider: str, model: str, role: str
+) -> list[str]:
     """The two information rows shown at the top of the screen.
 
     ``mesh`` says whether this machine is announcing itself to other agents —
@@ -66,9 +67,15 @@ def header_lines(link: str, mesh: str, provider: str, model: str,
     ]
 
 
-def logo(link: str = "OFFLINE", mesh: str = OFF_MESH, provider: str = "",
-         model: str = "", role: str = "", style: str = "frame",
-         width: int | None = None) -> str:
+def logo(
+    link: str = "OFFLINE",
+    mesh: str = OFF_MESH,
+    provider: str = "",
+    model: str = "",
+    role: str = "",
+    style: str = "frame",
+    width: int | None = None,
+) -> str:
     """Render the header in the requested style, fitted to ``width`` columns.
 
     ``frame`` draws a thin box, ``bar`` drops the box and relies on the CSS
@@ -107,8 +114,14 @@ def splash(model: str, role: str, workspace: str = "") -> str:
     return "\n".join(lines)
 
 
-def status_line(connected: bool, generating: bool, agent: bool,
-                workspace: str, spinner: str = "", busy: str = "") -> str:
+def status_line(
+    connected: bool,
+    generating: bool,
+    agent: bool,
+    workspace: str,
+    spinner: str = "",
+    busy: str = "",
+) -> str:
     """The bottom status bar text, in terminal-report style.
 
     ``busy`` names work that is not a generation, such as a preload, so the

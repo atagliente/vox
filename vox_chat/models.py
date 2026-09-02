@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 MessageRole = Literal[
@@ -17,7 +17,7 @@ MessageRole = Literal[
 
 def utc_now() -> str:
     """ISO-8601 timestamp in UTC, used for every persisted date."""
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def new_id() -> str:
@@ -38,7 +38,7 @@ class ToolCall:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ToolCall":
+    def from_dict(cls, data: dict[str, Any]) -> ToolCall:
         return cls(
             id=str(data.get("id", new_id())),
             name=str(data.get("name", "")),
@@ -87,7 +87,7 @@ class Message:
         return data
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Message":
+    def from_dict(cls, data: dict[str, Any]) -> Message:
         return cls(
             role=data.get("role", "user"),
             content=data.get("content") or "",
@@ -138,7 +138,7 @@ class Role:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Role":
+    def from_dict(cls, data: dict[str, Any]) -> Role:
         return cls(
             name=str(data["name"]),
             description=str(data.get("description", "")),
@@ -162,7 +162,7 @@ class Prompt:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Prompt":
+    def from_dict(cls, data: dict[str, Any]) -> Prompt:
         return cls(
             name=str(data["name"]),
             content=str(data.get("content", "")),
@@ -205,7 +205,7 @@ class Session:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Session":
+    def from_dict(cls, data: dict[str, Any]) -> Session:
         return cls(
             id=str(data.get("id") or new_id()),
             title=str(data.get("title") or "untitled"),

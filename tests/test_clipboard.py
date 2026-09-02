@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
 
 import pytest
 
@@ -61,15 +60,19 @@ def test_copy_falls_through_to_the_next_helper(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(
         clipboard,
         "copy_helpers",
-        lambda: [clipboard.Helper(["broken"], "broken"),
-                 clipboard.Helper(["working"], "working")],
+        lambda: [
+            clipboard.Helper(["broken"], "broken"),
+            clipboard.Helper(["working"], "working"),
+        ],
     )
     ok, detail = clipboard.copy("text")
     assert ok and detail == "working"
     assert calls == ["broken", "working"]
 
 
-def test_missing_helpers_are_reported_not_raised(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_missing_helpers_are_reported_not_raised(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(clipboard.shutil, "which", lambda name: None)
     ok, detail = clipboard.copy("text")
     assert not ok and "no clipboard helper" in detail
@@ -95,7 +98,8 @@ def test_paste_strips_the_trailing_newline_helpers_add(
 ) -> None:
     monkeypatch.setattr(clipboard.shutil, "which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(
-        clipboard.subprocess, "run",
+        clipboard.subprocess,
+        "run",
         lambda argv, **kwargs: FakeCompleted(stdout="pasted text\r\n"),
     )
     text, detail = clipboard.paste()

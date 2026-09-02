@@ -21,7 +21,9 @@ def _stuck_threads() -> list[threading.Thread]:
     return [
         thread
         for thread in threading.enumerate()
-        if thread is not threading.main_thread() and not thread.daemon and thread.is_alive()
+        if thread is not threading.main_thread()
+        and not thread.daemon
+        and thread.is_alive()
     ]
 
 
@@ -53,32 +55,39 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"vox {__version__}")
     parser.add_argument(
-        "-w", "--workspace", metavar="PATH",
+        "-w",
+        "--workspace",
+        metavar="PATH",
         help="Workspace directory for the coding-agent tools (default: cwd).",
     )
     parser.add_argument(
-        "-p", "--provider", metavar="NAME",
+        "-p",
+        "--provider",
+        metavar="NAME",
         help="Use this provider for this run.",
     )
     parser.add_argument(
-        "-m", "--model", metavar="NAME",
+        "-m",
+        "--model",
+        metavar="NAME",
         help="Use this model for this run.",
     )
     parser.add_argument(
         "--no-splash", action="store_true", help="Skip the boot banner."
     )
     parser.add_argument(
-        "--save", action="store_true",
+        "--save",
+        action="store_true",
         help="Persist --provider / --model to the global config.",
     )
 
     subparsers = parser.add_subparsers(dest="command")
-    doctor = subparsers.add_parser(
-        "doctor", help="Run the VOX system check and exit."
-    )
+    doctor = subparsers.add_parser("doctor", help="Run the VOX system check and exit.")
     doctor.add_argument("--plain", action="store_true", help="Disable ANSI colours.")
     doctor.add_argument(
-        "--timeout", type=float, default=5.0,
+        "--timeout",
+        type=float,
+        default=5.0,
         help="Seconds to wait for the provider probe (default: 5).",
     )
     doctor.add_argument("-w", "--workspace", metavar="PATH", default=None)
@@ -95,9 +104,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "doctor":
         from .doctor import main as doctor_main
 
-        return doctor_main(
-            workspace=workspace, plain=args.plain, timeout=args.timeout
-        )
+        return doctor_main(workspace=workspace, plain=args.plain, timeout=args.timeout)
 
     if args.command == "config-path":
         from .storage import global_config_path
@@ -126,9 +133,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from .app import VoxApp
 
-    app = VoxApp(
-        loaded=loaded, workspace=workspace, show_splash=not args.no_splash
-    )
+    app = VoxApp(loaded=loaded, workspace=workspace, show_splash=not args.no_splash)
     app.run()
     return leave(0)
 

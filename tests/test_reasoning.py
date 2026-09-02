@@ -10,7 +10,7 @@ from vox_chat.models import Message, Session
 from vox_chat.reasoning import ThinkSplitter
 from vox_chat.tools import Workspace
 
-from .test_streaming import AGENT_CONFIG, FakeChunk, FakeClient, FakeDelta, FakeChoice
+from .test_streaming import AGENT_CONFIG, FakeChoice, FakeChunk, FakeClient, FakeDelta
 
 
 class ReasoningChunk(FakeChunk):
@@ -63,8 +63,11 @@ def test_a_lone_angle_bracket_is_not_held_back_forever() -> None:
 
 
 def test_the_dedicated_reasoning_field_becomes_an_event() -> None:
-    chunks = [ReasoningChunk("thinking hard"), FakeChunk(content="answer"),
-              FakeChunk(finish_reason="stop")]
+    chunks = [
+        ReasoningChunk("thinking hard"),
+        FakeChunk(content="answer"),
+        FakeChunk(finish_reason="stop"),
+    ]
     events = list(consume_stream(chunks))
     kinds = [(event.type, event.text) for event in events if event.text]
     assert ("reasoning", "thinking hard") in kinds
@@ -75,8 +78,12 @@ def test_reasoning_is_kept_on_the_message_but_never_sent_upstream(
     workspace: Path,
 ) -> None:
     client = FakeClient(
-        [[FakeChunk(content="<think>let me see</think>the answer"),
-          FakeChunk(finish_reason="stop")]]
+        [
+            [
+                FakeChunk(content="<think>let me see</think>the answer"),
+                FakeChunk(finish_reason="stop"),
+            ]
+        ]
     )
     events = list(
         run_turn(

@@ -138,8 +138,9 @@ _THEMES = {"nasa", "dark", "light", "wopr"}
 class ConfigError(Exception):
     """Raised for malformed configuration text or structure."""
 
-    def __init__(self, message: str, line: int | None = None,
-                 column: int | None = None) -> None:
+    def __init__(
+        self, message: str, line: int | None = None, column: int | None = None
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.line = line
@@ -197,12 +198,18 @@ def validate_config(data: Any) -> list[str]:
             errors.append(f"provider {name}: must be an object")
             continue
         base_url = provider.get("base_url")
-        if not isinstance(base_url, str) or not base_url.startswith(("http://", "https://")):
+        if not isinstance(base_url, str) or not base_url.startswith(
+            ("http://", "https://")
+        ):
             errors.append(f"provider {name}: base_url must be an http(s) URL")
         if not isinstance(provider.get("api_key", ""), str):
             errors.append(f"provider {name}: api_key must be a string")
         timeout = provider.get("timeout_seconds", 600)
-        if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or timeout <= 0:
+        if (
+            not isinstance(timeout, (int, float))
+            or isinstance(timeout, bool)
+            or timeout <= 0
+        ):
             errors.append(f"provider {name}: timeout_seconds must be a positive number")
         if not isinstance(provider.get("extra_body", {}), dict):
             errors.append(f"provider {name}: extra_body must be an object")
@@ -223,13 +230,21 @@ def validate_config(data: Any) -> list[str]:
         errors.append("model_build must be an object")
     else:
         num_gpu = build.get("num_gpu", "max")
-        if num_gpu is not None and num_gpu != "max":
-            if not isinstance(num_gpu, int) or isinstance(num_gpu, bool) or num_gpu < 0:
-                errors.append('model_build.num_gpu must be "max", null, or a layer count')
+        if (
+            num_gpu is not None
+            and num_gpu != "max"
+            and (
+                not isinstance(num_gpu, int) or isinstance(num_gpu, bool) or num_gpu < 0
+            )
+        ):
+            errors.append('model_build.num_gpu must be "max", null, or a layer count')
         num_batch = build.get("num_batch")
-        if num_batch is not None:
-            if not isinstance(num_batch, int) or isinstance(num_batch, bool) or num_batch <= 0:
-                errors.append("model_build.num_batch must be null or a positive integer")
+        if num_batch is not None and (
+            not isinstance(num_batch, int)
+            or isinstance(num_batch, bool)
+            or num_batch <= 0
+        ):
+            errors.append("model_build.num_batch must be null or a positive integer")
         reserve = build.get("vram_reserve_mb", 384)
         if not isinstance(reserve, int) or isinstance(reserve, bool) or reserve < 0:
             errors.append("model_build.vram_reserve_mb must be a non-negative integer")
@@ -241,9 +256,11 @@ def validate_config(data: Any) -> list[str]:
         errors.append("generation must be an object")
     else:
         temperature = generation.get("temperature", 0.2)
-        if not isinstance(temperature, (int, float)) or isinstance(temperature, bool):
-            errors.append("generation.temperature must be a number between 0 and 2")
-        elif not 0 <= temperature <= 2:
+        if (
+            not isinstance(temperature, (int, float))
+            or isinstance(temperature, bool)
+            or not 0 <= temperature <= 2
+        ):
             errors.append("generation.temperature must be a number between 0 and 2")
         window = generation.get("context_window", 8192)
         if not isinstance(window, int) or isinstance(window, bool) or window <= 0:
@@ -252,13 +269,21 @@ def validate_config(data: Any) -> list[str]:
             if not isinstance(generation.get(key, True), bool):
                 errors.append(f"generation.{key} must be a boolean")
         preload_timeout = generation.get("preload_timeout_seconds", 180)
-        if (not isinstance(preload_timeout, int) or isinstance(preload_timeout, bool)
-                or preload_timeout <= 0):
-            errors.append("generation.preload_timeout_seconds must be a positive integer")
+        if (
+            not isinstance(preload_timeout, int)
+            or isinstance(preload_timeout, bool)
+            or preload_timeout <= 0
+        ):
+            errors.append(
+                "generation.preload_timeout_seconds must be a positive integer"
+            )
         max_tokens = generation.get("max_tokens", 1800)
-        if max_tokens is not None:
-            if not isinstance(max_tokens, int) or isinstance(max_tokens, bool) or max_tokens <= 0:
-                errors.append("generation.max_tokens must be a positive integer or null")
+        if max_tokens is not None and (
+            not isinstance(max_tokens, int)
+            or isinstance(max_tokens, bool)
+            or max_tokens <= 0
+        ):
+            errors.append("generation.max_tokens must be a positive integer or null")
 
     agent = data.get("agent", {})
     if not isinstance(agent, dict):
@@ -280,12 +305,20 @@ def validate_config(data: Any) -> list[str]:
             if not isinstance(inspection.get(key, False), bool):
                 errors.append(f"inspect.{key} must be a boolean")
         top_k = inspection.get("top_k", 5)
-        if not isinstance(top_k, int) or isinstance(top_k, bool) or not 1 <= top_k <= 20:
+        if (
+            not isinstance(top_k, int)
+            or isinstance(top_k, bool)
+            or not 1 <= top_k <= 20
+        ):
             # The endpoint refuses anything above 20 with HTTP 400.
             errors.append("inspect.top_k must be an integer between 1 and 20")
         for key in ("entropy_threshold", "margin_threshold"):
             value = inspection.get(key, 1.0)
-            if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or value < 0
+            ):
                 errors.append(f"inspect.{key} must be a non-negative number")
         distance = inspection.get("min_distance", 3)
         if not isinstance(distance, int) or isinstance(distance, bool) or distance < 0:
@@ -309,11 +342,18 @@ def validate_config(data: Any) -> list[str]:
         elif not verbs:
             errors.append("mesh.verbs must name at least one verb")
         interval = mesh.get("announce_interval", 60.0)
-        if (not isinstance(interval, (int, float)) or isinstance(interval, bool)
-                or interval <= 0):
+        if (
+            not isinstance(interval, (int, float))
+            or isinstance(interval, bool)
+            or interval <= 0
+        ):
             errors.append("mesh.announce_interval must be a positive number")
         port = mesh.get("port", 45177)
-        if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+        if (
+            not isinstance(port, int)
+            or isinstance(port, bool)
+            or not 1 <= port <= 65535
+        ):
             errors.append("mesh.port must be a port number")
         # The announce group has to be multicast, or nobody hears it.
         group = mesh.get("group", "239.17.42.1")
@@ -335,8 +375,12 @@ def validate_config(data: Any) -> list[str]:
         for key in ("endpoint", "api_key", "language"):
             if not isinstance(web.get(key, ""), str):
                 errors.append(f"web.{key} must be a string")
-        for key, default in (("max_results", 5), ("fetch_max_bytes", 409600),
-                             ("auto_results", 5), ("auto_max_chars", 6000)):
+        for key, default in (
+            ("max_results", 5),
+            ("fetch_max_bytes", 409600),
+            ("auto_results", 5),
+            ("auto_max_chars", 6000),
+        ):
             value = web.get(key, default)
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
                 errors.append(f"web.{key} must be a positive whole number")
@@ -344,8 +388,11 @@ def validate_config(data: Any) -> list[str]:
         if not isinstance(fetches, int) or isinstance(fetches, bool) or fetches < 0:
             errors.append("web.auto_fetch must be zero or more")
         timeout = web.get("timeout_seconds", 15.0)
-        if (not isinstance(timeout, (int, float)) or isinstance(timeout, bool)
-                or timeout <= 0):
+        if (
+            not isinstance(timeout, (int, float))
+            or isinstance(timeout, bool)
+            or timeout <= 0
+        ):
             errors.append("web.timeout_seconds must be a positive number")
 
     consensus = data.get("consensus", {})
@@ -368,8 +415,11 @@ def validate_config(data: Any) -> list[str]:
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
                 errors.append(f"consensus.{key} must be a positive whole number")
         timeout = consensus.get("ask_timeout_seconds", 90.0)
-        if (not isinstance(timeout, (int, float)) or isinstance(timeout, bool)
-                or timeout <= 0):
+        if (
+            not isinstance(timeout, (int, float))
+            or isinstance(timeout, bool)
+            or timeout <= 0
+        ):
             errors.append("consensus.ask_timeout_seconds must be a positive number")
 
     ui = data.get("ui", {})
@@ -381,7 +431,10 @@ def validate_config(data: Any) -> list[str]:
         if ui.get("logo", "frame") not in _LOGOS:
             errors.append(f"ui.logo must be one of {sorted(_LOGOS)}")
         for key in (
-            "show_timestamps", "splash", "show_usage", "show_reasoning",
+            "show_timestamps",
+            "splash",
+            "show_usage",
+            "show_reasoning",
             "code_panel",
         ):
             if not isinstance(ui.get(key, True), bool):

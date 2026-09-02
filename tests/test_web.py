@@ -19,13 +19,16 @@ from vox_chat.config import default_config, load_config, validate_config
 from vox_chat.storage import global_config_path
 from vox_chat.ui.widgets import MessageBox
 
-
 # ------------------------------------------------------------------ a fake wire
 
 
 class FakeResponse(io.BytesIO):
-    def __init__(self, body: bytes, content_type: str = "text/html",
-                 url: str = "https://example.com/page") -> None:
+    def __init__(
+        self,
+        body: bytes,
+        content_type: str = "text/html",
+        url: str = "https://example.com/page",
+    ) -> None:
         super().__init__(body)
         self._url = url
         headers = EmailMessage()
@@ -113,11 +116,14 @@ def test_entities_and_odd_markup_survive() -> None:
 # --------------------------------------------------------------- the guards
 
 
-@pytest.mark.parametrize("url", [
-    "ftp://example.com/file",
-    "file:///etc/passwd",
-    "javascript:alert(1)",
-])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "ftp://example.com/file",
+        "file:///etc/passwd",
+        "javascript:alert(1)",
+    ],
+)
 def test_only_http_is_fetched(url: str) -> None:
     with pytest.raises(web.WebError, match="http"):
         web.check_url(url, web.WebSettings(enabled=True))
@@ -147,16 +153,33 @@ def test_the_configured_endpoint_is_exempt(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_searxng_asks_for_json_and_flattens_the_answer(wire) -> None:
-    wire.answers.append(FakeResponse(json.dumps({"results": [
-        {"title": "First", "url": "https://a.example", "content": "  spaced   out "},
-        {"title": "Second", "url": "https://b.example", "content": "second"},
-        {"title": "No URL", "content": "dropped"},
-    ]}).encode(), "application/json"))
+    wire.answers.append(
+        FakeResponse(
+            json.dumps(
+                {
+                    "results": [
+                        {
+                            "title": "First",
+                            "url": "https://a.example",
+                            "content": "  spaced   out ",
+                        },
+                        {
+                            "title": "Second",
+                            "url": "https://b.example",
+                            "content": "second",
+                        },
+                        {"title": "No URL", "content": "dropped"},
+                    ]
+                }
+            ).encode(),
+            "application/json",
+        )
+    )
 
     settings = web.WebSettings(enabled=True, endpoint="http://localhost:8888/")
     results = web.search("ring buffers", settings)
 
-    url, headers, timeout = wire.calls[0]
+    url, _headers, timeout = wire.calls[0]
     assert url.startswith("http://localhost:8888/search?")
     assert "q=ring+buffers" in url and "format=json" in url
     assert timeout == settings.timeout_seconds
@@ -165,9 +188,24 @@ def test_searxng_asks_for_json_and_flattens_the_answer(wire) -> None:
 
 
 def test_brave_sends_the_key_in_the_header(wire) -> None:
-    wire.answers.append(FakeResponse(json.dumps({"web": {"results": [
-        {"title": "First", "url": "https://a.example", "description": "one"},
-    ]}}).encode(), "application/json"))
+    wire.answers.append(
+        FakeResponse(
+            json.dumps(
+                {
+                    "web": {
+                        "results": [
+                            {
+                                "title": "First",
+                                "url": "https://a.example",
+                                "description": "one",
+                            },
+                        ]
+                    }
+                }
+            ).encode(),
+            "application/json",
+        )
+    )
 
     settings = web.WebSettings(enabled=True, provider="brave", api_key="secret-key")
     results = web.search("ring buffers", settings)
@@ -180,16 +218,26 @@ def test_brave_sends_the_key_in_the_header(wire) -> None:
 
 
 def test_more_results_than_asked_for_are_trimmed(wire) -> None:
-    wire.answers.append(FakeResponse(json.dumps({"results": [
-        {"title": str(n), "url": f"https://{n}.example"} for n in range(10)
-    ]}).encode(), "application/json"))
+    wire.answers.append(
+        FakeResponse(
+            json.dumps(
+                {
+                    "results": [
+                        {"title": str(n), "url": f"https://{n}.example"}
+                        for n in range(10)
+                    ]
+                }
+            ).encode(),
+            "application/json",
+        )
+    )
     results = web.search("x", web.WebSettings(enabled=True, max_results=3))
     assert len(results) == 3
 
 
 def test_a_searxng_without_json_says_what_to_fix(wire) -> None:
     wire.answers.append(FakeResponse(b"<html>a web page</html>"))
-    with pytest.raises(web.WebError, match="settings.yml"):
+    with pytest.raises(web.WebError, match=r"settings\.yml"):
         web.search("x", web.WebSettings(enabled=True, provider="searxng"))
 
 
@@ -215,9 +263,11 @@ def test_brave_without_a_key_is_refused() -> None:
 
 
 def test_a_page_is_read_and_labelled(wire) -> None:
-    wire.answers.append(FakeResponse(
-        b"<html><head><title>Guide</title></head><body><p>Content here.</p></body></html>"
-    ))
+    wire.answers.append(
+        FakeResponse(
+            b"<html><head><title>Guide</title></head><body><p>Content here.</p></body></html>"
+        )
+    )
     page = web.fetch("https://example.com/page", web.WebSettings(enabled=True))
     assert page.title == "Guide"
     assert "Content here." in page.text
@@ -262,13 +312,16 @@ def test_the_default_config_carries_a_web_block() -> None:
     assert validate_config(config) == []
 
 
-@pytest.mark.parametrize("change, fragment", [
-    ({"enabled": "yes"}, "web.enabled"),
-    ({"provider": "google"}, "web.provider"),
-    ({"max_results": 0}, "web.max_results"),
-    ({"timeout_seconds": 0}, "web.timeout_seconds"),
-    ({"endpoint": 8888}, "web.endpoint"),
-])
+@pytest.mark.parametrize(
+    "change, fragment",
+    [
+        ({"enabled": "yes"}, "web.enabled"),
+        ({"provider": "google"}, "web.provider"),
+        ({"max_results": 0}, "web.max_results"),
+        ({"timeout_seconds": 0}, "web.timeout_seconds"),
+        ({"endpoint": 8888}, "web.endpoint"),
+    ],
+)
 def test_a_broken_web_block_is_reported(change: dict, fragment: str) -> None:
     config = default_config()
     config["web"].update(change)
@@ -304,11 +357,26 @@ def test_the_tool_refuses_when_the_web_is_not_configured(tmp_path: Path) -> None
 def test_the_tool_returns_what_the_search_found(tmp_path: Path, wire) -> None:
     from vox_chat.tools import Workspace, execute
 
-    wire.answers.append(FakeResponse(json.dumps({"results": [
-        {"title": "First", "url": "https://a.example", "content": "one"},
-    ]}).encode(), "application/json"))
+    wire.answers.append(
+        FakeResponse(
+            json.dumps(
+                {
+                    "results": [
+                        {
+                            "title": "First",
+                            "url": "https://a.example",
+                            "content": "one",
+                        },
+                    ]
+                }
+            ).encode(),
+            "application/json",
+        )
+    )
     result = execute(
-        "web_search", {"query": "ring buffers"}, Workspace(tmp_path),
+        "web_search",
+        {"query": "ring buffers"},
+        Workspace(tmp_path),
         web_settings=web.WebSettings(enabled=True),
     )
     assert "https://a.example" in result.as_text()
@@ -372,9 +440,22 @@ async def test_a_search_lands_in_the_conversation_labelled(
         app.run_command("/web on")
         await pilot.pause()
 
-        wire.answers.append(FakeResponse(json.dumps({"results": [
-            {"title": "Ring buffers", "url": "https://a.example", "content": "one"},
-        ]}).encode(), "application/json"))
+        wire.answers.append(
+            FakeResponse(
+                json.dumps(
+                    {
+                        "results": [
+                            {
+                                "title": "Ring buffers",
+                                "url": "https://a.example",
+                                "content": "one",
+                            },
+                        ]
+                    }
+                ).encode(),
+                "application/json",
+            )
+        )
         app.run_command("/search ring buffers")
         await app.workers.wait_for_complete()
         await pilot.pause()
@@ -414,14 +495,27 @@ def test_the_query_is_the_message_tidied() -> None:
 
 
 def test_gathering_reads_the_first_results_only(wire) -> None:
-    wire.answers.append(FakeResponse(json.dumps({"results": [
-        {"title": f"R{n}", "url": f"https://{n}.example", "content": f"snippet {n}"}
-        for n in range(5)
-    ]}).encode(), "application/json"))
+    wire.answers.append(
+        FakeResponse(
+            json.dumps(
+                {
+                    "results": [
+                        {
+                            "title": f"R{n}",
+                            "url": f"https://{n}.example",
+                            "content": f"snippet {n}",
+                        }
+                        for n in range(5)
+                    ]
+                }
+            ).encode(),
+            "application/json",
+        )
+    )
     for n in range(2):
-        wire.answers.append(FakeResponse(
-            f"<html><body><p>Body of page {n}.</p></body></html>".encode()
-        ))
+        wire.answers.append(
+            FakeResponse(f"<html><body><p>Body of page {n}.</p></body></html>".encode())
+        )
 
     settings = web.WebSettings(enabled=True, auto=True, auto_results=4, auto_fetch=2)
     sources = web.gather("ring buffers", settings)
@@ -433,11 +527,28 @@ def test_gathering_reads_the_first_results_only(wire) -> None:
 
 
 def test_one_dead_link_does_not_cost_the_other_sources(wire) -> None:
-    wire.answers.append(FakeResponse(json.dumps({"results": [
-        {"title": "Broken", "url": "https://gone.example", "content": "x"},
-        {"title": "Fine", "url": "https://fine.example", "content": "y"},
-    ]}).encode(), "application/json"))
-    wire.answers.append(FakeResponse(b"\x89PNG", "image/png"))   # refused
+    wire.answers.append(
+        FakeResponse(
+            json.dumps(
+                {
+                    "results": [
+                        {
+                            "title": "Broken",
+                            "url": "https://gone.example",
+                            "content": "x",
+                        },
+                        {
+                            "title": "Fine",
+                            "url": "https://fine.example",
+                            "content": "y",
+                        },
+                    ]
+                }
+            ).encode(),
+            "application/json",
+        )
+    )
+    wire.answers.append(FakeResponse(b"\x89PNG", "image/png"))  # refused
     wire.answers.append(FakeResponse(b"<html><body><p>Good.</p></body></html>"))
 
     sources = web.gather("x", web.WebSettings(enabled=True, auto=True, auto_fetch=2))
@@ -493,8 +604,10 @@ def test_a_short_page_is_sent_whole() -> None:
 def test_citations_say_what_was_read() -> None:
     sources = web.Sources(
         query="x",
-        results=[web.Result("A", "https://a.example"),
-                 web.Result("B", "https://b.example")],
+        results=[
+            web.Result("A", "https://a.example"),
+            web.Result("B", "https://b.example"),
+        ],
         pages=[web.Page("https://a.example", "A", "text")],
         failures=["https://b.example: HTTP 404"],
     )
@@ -508,7 +621,7 @@ async def test_f6_needs_a_backend_before_it_turns_on(app: VoxApp, engine) -> Non
         await pilot.pause()
         app.search_server = engine
         app.search_server = engine
-        app.config["web"]["provider"] = "brave"   # and no key
+        app.config["web"]["provider"] = "brave"  # and no key
         app.action_toggle_web_mode()
         await pilot.pause()
         assert "WEB MODE NEEDS A BACKEND" in transcript(app)
@@ -544,12 +657,27 @@ async def test_a_message_in_web_mode_is_answered_from_sources(
         await pilot.press("f6")
         await pilot.pause()
 
-        wire.answers.append(FakeResponse(json.dumps({"results": [
-            {"title": "Ring buffers", "url": "https://a.example", "content": "snip"},
-        ]}).encode(), "application/json"))
-        wire.answers.append(FakeResponse(
-            b"<html><body><p>A stalled reader blocks reclamation.</p></body></html>"
-        ))
+        wire.answers.append(
+            FakeResponse(
+                json.dumps(
+                    {
+                        "results": [
+                            {
+                                "title": "Ring buffers",
+                                "url": "https://a.example",
+                                "content": "snip",
+                            },
+                        ]
+                    }
+                ).encode(),
+                "application/json",
+            )
+        )
+        wire.answers.append(
+            FakeResponse(
+                b"<html><body><p>A stalled reader blocks reclamation.</p></body></html>"
+            )
+        )
 
         app.input_area.insert("are lock-free ring buffers safe?")
         app.action_send()
@@ -599,8 +727,9 @@ async def test_a_message_sent_mid_lookup_is_refused(
 
     def slow_gather(question, settings):
         time_module.sleep(0.4)
-        return web.Sources(query=question,
-                           results=[web.Result("A", "https://a.example")])
+        return web.Sources(
+            query=question, results=[web.Result("A", "https://a.example")]
+        )
 
     monkeypatch.setattr(web, "gather", slow_gather)
     async with app.run_test() as pilot:
@@ -618,7 +747,9 @@ async def test_a_message_sent_mid_lookup_is_refused(
         app.action_send()
         await pilot.pause()
         assert "STILL LOOKING THINGS UP" in transcript(app)
-        assert [m.content for m in app.session.messages if m.role == "user"] == ["first"]
+        assert [m.content for m in app.session.messages if m.role == "user"] == [
+            "first"
+        ]
         await app.workers.wait_for_complete()
 
 
@@ -642,8 +773,11 @@ async def test_a_marked_question_goes_to_the_mesh_not_the_web(
 def test_a_loopback_endpoint_is_recognised_whatever_it_is_called() -> None:
     """Regression: a config written before the local server existed says
     provider 'searxng' and endpoint localhost, and got connection refused."""
-    for endpoint in ("http://localhost:8888", "http://127.0.0.1:9999",
-                     "http://[::1]:8888"):
+    for endpoint in (
+        "http://localhost:8888",
+        "http://127.0.0.1:9999",
+        "http://[::1]:8888",
+    ):
         assert web.is_local_endpoint(endpoint) is True
     for endpoint in ("https://search.example", "http://192.168.1.5:8888"):
         assert web.is_local_endpoint(endpoint) is False
@@ -657,12 +791,20 @@ def test_nothing_listening_says_how_to_fix_it(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(web, "_is_private", lambda host: False)
 
     with pytest.raises(web.WebError, match="/web start"):
-        web.search("x", web.WebSettings(enabled=True, provider="searxng",
-                                        endpoint="http://localhost:8888"))
+        web.search(
+            "x",
+            web.WebSettings(
+                enabled=True, provider="searxng", endpoint="http://localhost:8888"
+            ),
+        )
     # A remote endpoint gets the plain reason instead.
     with pytest.raises(web.WebError, match="cannot reach"):
-        web.search("x", web.WebSettings(enabled=True, provider="searxng",
-                                        endpoint="https://search.example"))
+        web.search(
+            "x",
+            web.WebSettings(
+                enabled=True, provider="searxng", endpoint="https://search.example"
+            ),
+        )
 
 
 async def test_an_old_config_still_gets_a_server(app: VoxApp, engine) -> None:
@@ -672,8 +814,11 @@ async def test_an_old_config_still_gets_a_server(app: VoxApp, engine) -> None:
         app.search_server = engine
         app.search_server = engine
         app.config["web"].update(
-            {"enabled": True, "provider": "searxng",
-             "endpoint": "http://localhost:8888"}
+            {
+                "enabled": True,
+                "provider": "searxng",
+                "endpoint": "http://localhost:8888",
+            }
         )
         assert app.wants_local_server(app.web_settings()) is True
 
@@ -701,9 +846,11 @@ def test_the_sources_sit_in_front_of_the_question(app: VoxApp) -> None:
 
 def test_the_prompt_says_the_searching_is_already_done() -> None:
     """Small models otherwise reply that they are unable to search."""
-    prompt = web.research_prompt(web.Sources(
-        query="cap latiano",
-        results=[web.Result("Latiano", "https://it.wikipedia.org/wiki/Latiano")],
-    ))
+    prompt = web.research_prompt(
+        web.Sources(
+            query="cap latiano",
+            results=[web.Result("Latiano", "https://it.wikipedia.org/wiki/Latiano")],
+        )
+    )
     assert "already been searched" in prompt
     assert "must not say that you are unable to" in prompt

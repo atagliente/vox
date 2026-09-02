@@ -15,8 +15,9 @@ import math
 import re
 import statistics
 import string
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Literal
+from typing import Any, Literal
 
 Phase = Literal["thinking", "answer", "unattributed"]
 
@@ -35,17 +36,49 @@ RETHINK_MARKERS = (
 sentence. Listed here once so the report can show exactly what was matched."""
 
 _MARKER_RE = re.compile(
-    r"(?:^|(?<=[.!?\n]))\s*(" + "|".join(re.escape(m) for m in RETHINK_MARKERS) + r")\b",
+    r"(?:^|(?<=[.!?\n]))\s*("
+    + "|".join(re.escape(m) for m in RETHINK_MARKERS)
+    + r")\b",
     re.IGNORECASE,
 )
 
 _PUNCTUATION = set(string.punctuation) | {"…", "—", "–", "“", "”", "‘", "’", "·"}
 
 _FILLER_WORDS = frozenset(
-    """
-    a an and answer are as at be but by conclusion for from in is it its no of
-    on or result so that the then therefore this to was we yes
-    """.split()
+    [
+        "a",
+        "an",
+        "and",
+        "answer",
+        "are",
+        "as",
+        "at",
+        "be",
+        "but",
+        "by",
+        "conclusion",
+        "for",
+        "from",
+        "in",
+        "is",
+        "it",
+        "its",
+        "no",
+        "of",
+        "on",
+        "or",
+        "result",
+        "so",
+        "that",
+        "the",
+        "then",
+        "therefore",
+        "this",
+        "to",
+        "was",
+        "we",
+        "yes",
+    ]
 )
 """Words that carry no substance when comparing a conclusion to an answer."""
 
@@ -107,9 +140,7 @@ class TokenRecord:
         """Gap between the most likely alternative and the runner-up."""
         if len(self.alternatives) < 2:
             return 1.0
-        ranked = sorted(
-            (a.probability for a in self.alternatives), reverse=True
-        )
+        ranked = sorted((a.probability for a in self.alternatives), reverse=True)
         return ranked[0] - ranked[1]
 
     @property
@@ -208,7 +239,9 @@ def _normalise(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
 
 
-def conclusion_match(thinking: str, answer: str) -> Literal["yes", "no", "undetermined"]:
+def conclusion_match(
+    thinking: str, answer: str
+) -> Literal["yes", "no", "undetermined"]:
     """Whether the end of the thinking and the answer say the same thing.
 
     Decided by normalised containment, which only recognises agreement it can
@@ -250,8 +283,13 @@ class InspectionRun:
 
     _last_decision: int | None = field(default=None, repr=False)
 
-    def add(self, text: str, logprob: float,
-            alternatives: Iterable[Alternative], phase: Phase = "answer") -> TokenRecord:
+    def add(
+        self,
+        text: str,
+        logprob: float,
+        alternatives: Iterable[Alternative],
+        phase: Phase = "answer",
+    ) -> TokenRecord:
         """Append one token, deciding there and then whether it is a decision point."""
         record = TokenRecord(
             index=len(self.records),
@@ -274,10 +312,10 @@ class InspectionRun:
             return False
         if record.margin > criteria.margin_threshold:
             return False
-        if self._last_decision is not None:
-            if record.index - self._last_decision < criteria.min_distance:
-                return False
-        return True
+        return not (
+            self._last_decision is not None
+            and record.index - self._last_decision < criteria.min_distance
+        )
 
     # ------------------------------------------------------------ selections
 
@@ -317,7 +355,10 @@ class InspectionRun:
         thinking = self.phase_stats("thinking")
         answer = self.phase_stats("answer")
         difference = None
-        if thinking.mean_probability is not None and answer.mean_probability is not None:
+        if (
+            thinking.mean_probability is not None
+            and answer.mean_probability is not None
+        ):
             difference = answer.mean_probability - thinking.mean_probability
         return {
             "tokens": len(self.records),

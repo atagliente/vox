@@ -40,7 +40,8 @@ def test_a_certain_token_has_no_entropy_and_a_full_margin() -> None:
 
 def test_runners_up_exclude_the_chosen_token_and_are_ranked() -> None:
     record = InspectionRun().add(
-        " Earth", math.log(0.43),
+        " Earth",
+        math.log(0.43),
         alts((" Earth", 0.43), (" dominant", 0.28), (" selective", 0.11)),
     )
     assert [a.token for a in record.runners_up] == [" dominant", " selective"]
@@ -48,7 +49,9 @@ def test_runners_up_exclude_the_chosen_token_and_are_ranked() -> None:
 
 def test_a_flat_close_position_is_a_decision_point() -> None:
     run = InspectionRun(criteria=DecisionCriteria(min_distance=0))
-    record = run.add(" of", math.log(0.4), alts((" of", 0.4), (" in", 0.35), (" to", 0.25)))
+    record = run.add(
+        " of", math.log(0.4), alts((" of", 0.4), (" in", 0.35), (" to", 0.25))
+    )
     assert record.is_decision
     assert run.decisions == [record]
 
@@ -60,7 +63,9 @@ def test_a_confident_position_is_not() -> None:
 
 
 def test_a_wide_margin_disqualifies_even_a_spread_distribution() -> None:
-    run = InspectionRun(criteria=DecisionCriteria(min_distance=0, margin_threshold=0.35))
+    run = InspectionRun(
+        criteria=DecisionCriteria(min_distance=0, margin_threshold=0.35)
+    )
     spread = alts(("a", 0.6), ("b", 0.1), ("c", 0.1), ("d", 0.1), ("e", 0.1))
     record = run.add("a", math.log(0.6), spread)
     assert record.entropy > 1.0, "the distribution is spread"
@@ -146,14 +151,22 @@ def test_thinking_without_markers_is_one_segment() -> None:
         ("So the answer is 21.", "The answer is 22.", "undetermined"),
     ],
 )
-def test_conclusion_match_never_guesses(thinking: str, answer: str, verdict: str) -> None:
+def test_conclusion_match_never_guesses(
+    thinking: str, answer: str, verdict: str
+) -> None:
     assert conclusion_match(thinking, answer) == verdict
 
 
 def test_criteria_come_from_the_configuration() -> None:
     criteria = criteria_from_config(
-        {"inspect": {"entropy_threshold": 2.0, "margin_threshold": 0.1,
-                     "min_distance": 7, "skip_punctuation": False}}
+        {
+            "inspect": {
+                "entropy_threshold": 2.0,
+                "margin_threshold": 0.1,
+                "min_distance": 7,
+                "skip_punctuation": False,
+            }
+        }
     )
     assert criteria.entropy_threshold == 2.0
     assert criteria.min_distance == 7

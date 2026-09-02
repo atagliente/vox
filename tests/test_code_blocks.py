@@ -87,6 +87,8 @@ def test_the_empty_panel_explains_itself() -> None:
 
 
 def test_the_panel_truncates_a_huge_block() -> None:
-    rendered = render_panel([CodeBlock("python", "\n".join(f"line {i}" for i in range(500)))], max_lines=10)
+    rendered = render_panel(
+        [CodeBlock("python", "\n".join(f"line {i}" for i in range(500)))], max_lines=10
+    )
     assert "truncated" in rendered
     assert rendered.count("\n") < 30

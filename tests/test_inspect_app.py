@@ -99,7 +99,9 @@ async def test_the_screen_shows_the_measurements(app: VoxApp) -> None:
         rows = str(app.screen.query_one("#inspect-rows").render())
         assert "' of'" in rows
         assert "DECISION" in rows
-        assert "1 decision points" in str(app.screen.query_one("#inspect-title").render())
+        assert "1 decision points" in str(
+            app.screen.query_one("#inspect-title").render()
+        )
         summary = str(app.screen.query_one("#inspect-summary").render())
         assert "top-k" in summary, "the entropy basis is stated on screen"
 
@@ -169,7 +171,9 @@ async def test_a_provider_refusal_is_shown_instead_of_the_invitation(
     async with app.run_test(size=(120, 30)) as pilot:
         await pilot.pause()
         app.run_command("/inspect on")
-        app.inspection.note = "the provider rejected logprobs, so this answer was not measured"
+        app.inspection.note = (
+            "the provider rejected logprobs, so this answer was not measured"
+        )
         await pilot.press("ctrl+t")
         await pilot.pause()
         summary = str(app.screen.query_one("#inspect-summary").render())
@@ -276,7 +280,8 @@ async def test_a_provider_that_refuses_logprobs_is_reported_once(app: VoxApp) ->
 
         def notes() -> list[str]:
             return [
-                box.message.content for box in messages(app)
+                box.message.content
+                for box in messages(app)
                 if "NOT MEASURED" in box.message.content
             ]
 
@@ -285,7 +290,8 @@ async def test_a_provider_that_refuses_logprobs_is_reported_once(app: VoxApp) ->
         assert notes(), "the operator is told once"
         assert "rejected logprobs" in (app.inspection.note or "")
         assert not [
-            box for box in messages(app)
+            box
+            for box in messages(app)
             if box.message.role == "error" and "NOT MEASURED" in box.message.content
         ], "nothing failed, so it is not an error"
 
@@ -319,7 +325,9 @@ async def test_the_inspect_key_is_one_a_terminal_can_actually_send(app: VoxApp) 
     assert "ctrl+i" not in bound, "it would never be delivered"
 
     ambiguous = {alias for aliases in KEY_ALIASES.values() for alias in aliases}
-    assert not (bound & ambiguous), f"a binding shares a byte with another key: {bound & ambiguous}"
+    assert not (bound & ambiguous), (
+        f"a binding shares a byte with another key: {bound & ambiguous}"
+    )
 
 
 async def test_tab_still_belongs_to_the_input(app: VoxApp) -> None:
@@ -429,7 +437,8 @@ async def test_a_model_that_refuses_logprobs_is_mentioned_once(app: VoxApp) -> N
         await pilot.pause()
 
         said = [
-            box.message for box in app.transcript.children
+            box.message
+            for box in app.transcript.children
             if isinstance(box, MessageBox) and "NOT MEASURED" in box.message.content
         ]
         assert len(said) == 1, "once per model, not once per turn"

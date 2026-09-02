@@ -36,7 +36,9 @@ def largest_system(messages: list[Message]) -> int | None:
 
 
 def shrink(
-    messages: list[Message], used: int, window: int,
+    messages: list[Message],
+    used: int,
+    window: int,
     headroom: int = HEADROOM_TOKENS,
 ) -> list[Message] | None:
     """Cut the request to fit ``window``, or None when it cannot be done.

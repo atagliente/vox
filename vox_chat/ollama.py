@@ -41,11 +41,13 @@ def looks_like_ollama(base_url: str) -> bool:
     return "11434" in lowered or "ollama" in lowered
 
 
-def _post(base_url: str, path: str, payload: dict[str, Any],
-          timeout: float = TIMEOUT) -> dict[str, Any]:
+def _post(
+    base_url: str, path: str, payload: dict[str, Any], timeout: float = TIMEOUT
+) -> dict[str, Any]:
     url = f"{native_base(base_url)}{path}"
     request = urllib.request.Request(
-        url, json.dumps(payload).encode("utf-8"),
+        url,
+        json.dumps(payload).encode("utf-8"),
         {"Content-Type": "application/json"},
     )
     try:
@@ -90,12 +92,14 @@ def list_models(base_url: str, timeout: float = 10.0) -> list[dict[str, Any]]:
         if not isinstance(model, dict) or not model.get("name"):
             continue
         details = model.get("details") if isinstance(model.get("details"), dict) else {}
-        rows.append({
-            "name": str(model["name"]),
-            "size": int(model.get("size") or 0),
-            "parameters": str(details.get("parameter_size") or ""),
-            "quantization": str(details.get("quantization_level") or ""),
-        })
+        rows.append(
+            {
+                "name": str(model["name"]),
+                "size": int(model.get("size") or 0),
+                "parameters": str(details.get("parameter_size") or ""),
+                "quantization": str(details.get("quantization_level") or ""),
+            }
+        )
     rows.sort(key=lambda row: row["name"])
     return rows
 
@@ -108,7 +112,8 @@ def _resident_entry(base_url: str, model: str, timeout: float) -> dict[str, Any]
     enough to find it.
     """
     entries = [
-        entry for entry in _get(base_url, "/api/ps", timeout).get("models") or []
+        entry
+        for entry in _get(base_url, "/api/ps", timeout).get("models") or []
         if isinstance(entry, dict)
     ]
     names = {model}
@@ -198,9 +203,13 @@ def _resolve_source(base_url: str, model: str) -> str:
     return parent or model
 
 
-def create_with_context(base_url: str, model: str, num_ctx: int,
-                        parameters: dict[str, Any] | None = None,
-                        timeout: float = TIMEOUT) -> str:
+def create_with_context(
+    base_url: str,
+    model: str,
+    num_ctx: int,
+    parameters: dict[str, Any] | None = None,
+    timeout: float = TIMEOUT,
+) -> str:
     """Write a derived model with ``num_ctx`` set, and return its name.
 
     The weights are not copied: this is a manifest pointing at the same blobs,
@@ -214,12 +223,17 @@ def create_with_context(base_url: str, model: str, num_ctx: int,
     name = derived_name(source, num_ctx)
     body = {"num_ctx": int(num_ctx)}
     body.update(parameters or {})
-    data = _post(base_url, "/api/create", {
-        "model": name,
-        "from": source,
-        "parameters": body,
-        "stream": False,
-    }, timeout)
+    data = _post(
+        base_url,
+        "/api/create",
+        {
+            "model": name,
+            "from": source,
+            "parameters": body,
+            "stream": False,
+        },
+        timeout,
+    )
     status = str(data.get("status", ""))
     if status and status != "success":
         raise OllamaError(f"create answered {status!r}")
@@ -230,8 +244,10 @@ def delete_model(base_url: str, model: str, timeout: float = 30.0) -> None:
     """Remove a derived model. Only ever called on names VOX itself made."""
     url = f"{native_base(base_url)}/api/delete"
     request = urllib.request.Request(
-        url, json.dumps({"model": model}).encode("utf-8"),
-        {"Content-Type": "application/json"}, method="DELETE",
+        url,
+        json.dumps({"model": model}).encode("utf-8"),
+        {"Content-Type": "application/json"},
+        method="DELETE",
     )
     try:
         urllib.request.urlopen(request, timeout=timeout).read()
@@ -242,6 +258,7 @@ def delete_model(base_url: str, model: str, timeout: float = 30.0) -> None:
 
 
 # --------------------------------------------------------------- the GPU
+
 
 def layer_count(base_url: str, model: str, timeout: float = 10.0) -> int | None:
     """How many blocks the model has, which is the ceiling for ``num_gpu``."""
@@ -267,9 +284,15 @@ def vram_mb() -> tuple[int, int] | None:
         return None
     try:
         completed = subprocess.run(
-            [binary, "--query-gpu=memory.used,memory.total",
-             "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=15, check=True,
+            [
+                binary,
+                "--query-gpu=memory.used,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=True,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -326,25 +349,32 @@ def residency(base_url: str, model: str, timeout: float = 10.0) -> Residency | N
     )
 
 
-def probe(base_url: str, model: str, options: dict[str, Any],
-          timeout: float = 900.0) -> Residency | None:
+def probe(
+    base_url: str, model: str, options: dict[str, Any], timeout: float = 900.0
+) -> Residency | None:
     """Load ``model`` with these options and report where it ended up.
 
     One token is generated, which is the cheapest way to make Ollama commit to
     a layout. Nothing is written: the options are per request.
     """
-    _post(base_url, "/api/generate", {
-        "model": model,
-        "prompt": "hi",
-        "stream": False,
-        "keep_alive": "60s",
-        "options": dict(options, num_predict=1),
-    }, timeout)
+    _post(
+        base_url,
+        "/api/generate",
+        {
+            "model": model,
+            "prompt": "hi",
+            "stream": False,
+            "keep_alive": "60s",
+            "options": dict(options, num_predict=1),
+        },
+        timeout,
+    )
     return residency(base_url, model)
 
 
-def fit_layers(base_url: str, model: str, num_ctx: int, reserve_mb: int = 384,
-               on_step: Any = None) -> tuple[int, Residency | None]:
+def fit_layers(
+    base_url: str, model: str, num_ctx: int, reserve_mb: int = 384, on_step: Any = None
+) -> tuple[int, Residency | None]:
     """The largest ``num_gpu`` that does not spill into shared memory.
 
     Measured rather than calculated: each candidate is loaded and the card is

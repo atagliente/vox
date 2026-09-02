@@ -14,9 +14,10 @@ import re
 import shlex
 import subprocess
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 DEFAULT_MAX_OUTPUT = 8192
 _SKIP_DIRS = {".git", "__pycache__", ".venv", "venv", "node_modules", ".vox"}
@@ -68,15 +69,10 @@ class Workspace:
         symlinks whose target escapes the root.
         """
         raw = Path(candidate)
-        if raw.is_absolute():
-            target = raw
-        else:
-            target = self.root / raw
+        target = raw if raw.is_absolute() else self.root / raw
         resolved = target.resolve()
         if resolved != self.root and self.root not in resolved.parents:
-            raise ToolSecurityError(
-                f"path escapes the workspace: {candidate}"
-            )
+            raise ToolSecurityError(f"path escapes the workspace: {candidate}")
         if must_exist and not resolved.exists():
             raise ToolError(f"no such path: {self.relative(resolved)}")
         return resolved
@@ -94,8 +90,9 @@ class Workspace:
                 yield Path(dirpath) / filename
 
 
-def list_files(workspace: Workspace, path: str = ".", pattern: str = "*",
-               limit: int = 400) -> ToolResult:
+def list_files(
+    workspace: Workspace, path: str = ".", pattern: str = "*", limit: int = 400
+) -> ToolResult:
     """List the entries of a directory inside the workspace."""
     target = workspace.resolve(path, must_exist=True)
     if not target.is_dir():
@@ -117,9 +114,13 @@ def list_files(workspace: Workspace, path: str = ".", pattern: str = "*",
     return ToolResult(True, text, cut)
 
 
-def read_file(workspace: Workspace, path: str, start_line: int = 1,
-              end_line: int | None = None, max_output: int = DEFAULT_MAX_OUTPUT
-              ) -> ToolResult:
+def read_file(
+    workspace: Workspace,
+    path: str,
+    start_line: int = 1,
+    end_line: int | None = None,
+    max_output: int = DEFAULT_MAX_OUTPUT,
+) -> ToolResult:
     """Read a text file, optionally a line range, from inside the workspace."""
     target = workspace.resolve(path, must_exist=True)
     if not target.is_file():
@@ -141,9 +142,14 @@ def read_file(workspace: Workspace, path: str, start_line: int = 1,
     return ToolResult(True, text, cut)
 
 
-def search_text(workspace: Workspace, query: str, path: str = ".",
-                pattern: str = "*", max_results: int = 200,
-                max_output: int = DEFAULT_MAX_OUTPUT) -> ToolResult:
+def search_text(
+    workspace: Workspace,
+    query: str,
+    path: str = ".",
+    pattern: str = "*",
+    max_results: int = 200,
+    max_output: int = DEFAULT_MAX_OUTPUT,
+) -> ToolResult:
     """Plain substring search over text files in the workspace."""
     if not query:
         raise ToolError("search query is empty")
@@ -286,7 +292,9 @@ def apply_patch(workspace: Workspace, patch: str) -> ToolResult:
         try:
             item.path.write_text(item.new_content, encoding="utf-8", newline="\n")
         except OSError as exc:
-            raise ToolError(f"cannot write {workspace.relative(item.path)}: {exc}") from exc
+            raise ToolError(
+                f"cannot write {workspace.relative(item.path)}: {exc}"
+            ) from exc
         written.append(workspace.relative(item.path))
     return ToolResult(True, "patched: " + ", ".join(written))
 
@@ -308,9 +316,13 @@ def _split_command(command: str) -> list[str]:
     return cleaned
 
 
-def run_command(workspace: Workspace, command: str, cwd: str = ".",
-                timeout_seconds: int = 60,
-                max_output: int = DEFAULT_MAX_OUTPUT) -> ToolResult:
+def run_command(
+    workspace: Workspace,
+    command: str,
+    cwd: str = ".",
+    timeout_seconds: int = 60,
+    max_output: int = DEFAULT_MAX_OUTPUT,
+) -> ToolResult:
     """Run a command inside the workspace. Callers must confirm beforehand.
 
     The command is split with :mod:`shlex` and executed without a shell, so
@@ -347,8 +359,11 @@ def run_command(workspace: Workspace, command: str, cwd: str = ".",
         return ToolResult(False, f"command not found: {argv[0]}")
     except OSError as exc:
         return ToolResult(False, f"cannot run command: {exc}")
-    parts = [f"$ {command}", f"cwd: {workspace.relative(directory)}",
-             f"exit code: {completed.returncode}"]
+    parts = [
+        f"$ {command}",
+        f"cwd: {workspace.relative(directory)}",
+        f"exit code: {completed.returncode}",
+    ]
     if completed.stdout:
         parts.append("--- stdout ---\n" + completed.stdout.rstrip())
     if completed.stderr:
@@ -410,8 +425,14 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Directory, relative to the workspace."},
-                    "pattern": {"type": "string", "description": "Optional glob filter for file names."},
+                    "path": {
+                        "type": "string",
+                        "description": "Directory, relative to the workspace.",
+                    },
+                    "pattern": {
+                        "type": "string",
+                        "description": "Optional glob filter for file names.",
+                    },
                 },
                 "required": ["path"],
             },
@@ -426,8 +447,14 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "type": "object",
                 "properties": {
                     "path": {"type": "string"},
-                    "start_line": {"type": "integer", "description": "1-based first line."},
-                    "end_line": {"type": "integer", "description": "1-based last line, inclusive."},
+                    "start_line": {
+                        "type": "integer",
+                        "description": "1-based first line.",
+                    },
+                    "end_line": {
+                        "type": "integer",
+                        "description": "1-based last line, inclusive.",
+                    },
                 },
                 "required": ["path"],
             },
@@ -443,7 +470,10 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "properties": {
                     "query": {"type": "string"},
                     "path": {"type": "string"},
-                    "pattern": {"type": "string", "description": "Optional glob filter, e.g. *.py"},
+                    "pattern": {
+                        "type": "string",
+                        "description": "Optional glob filter, e.g. *.py",
+                    },
                 },
                 "required": ["query"],
             },
@@ -514,8 +544,9 @@ def _read_for_diff(path: Path) -> tuple[list[str], str | None]:
         return [], f"cannot read the existing file: {exc}"
 
 
-def render_diff(before: list[str], after: list[str], name: str,
-                max_lines: int = DEFAULT_DIFF_LINES) -> str:
+def render_diff(
+    before: list[str], after: list[str], name: str, max_lines: int = DEFAULT_DIFF_LINES
+) -> str:
     """A unified diff between two versions of one file, clipped to fit."""
     lines = list(
         difflib.unified_diff(
@@ -526,12 +557,13 @@ def render_diff(before: list[str], after: list[str], name: str,
         return "no changes: the file already has this content"
     if len(lines) > max_lines:
         remaining = len(lines) - max_lines
-        lines = lines[:max_lines] + [f"... {remaining} more diff lines"]
+        lines = [*lines[:max_lines], f"... {remaining} more diff lines"]
     return "\n".join(lines)
 
 
-def preview_write(workspace: Workspace, path: str, content: str,
-                  max_lines: int = DEFAULT_DIFF_LINES) -> str:
+def preview_write(
+    workspace: Workspace, path: str, content: str, max_lines: int = DEFAULT_DIFF_LINES
+) -> str:
     """What ``write_file`` would change, as a diff the operator can read."""
     target = workspace.resolve(path)
     name = workspace.relative(target)
@@ -546,8 +578,9 @@ def preview_write(workspace: Workspace, path: str, content: str,
     return render_diff(before, after, name, max_lines)
 
 
-def preview_patch(workspace: Workspace, patch: str,
-                  max_lines: int = DEFAULT_DIFF_LINES) -> str:
+def preview_patch(
+    workspace: Workspace, patch: str, max_lines: int = DEFAULT_DIFF_LINES
+) -> str:
     """What ``apply_patch`` would change, computed by applying it in memory.
 
     Building the preview also validates the patch, so one that does not apply
@@ -601,7 +634,9 @@ def describe_call(name: str, arguments: dict[str, Any], workspace: Workspace) ->
     return f"{name} {arguments}"
 
 
-def web_search(query: str, settings, max_output: int = DEFAULT_MAX_OUTPUT) -> ToolResult:
+def web_search(
+    query: str, settings, max_output: int = DEFAULT_MAX_OUTPUT
+) -> ToolResult:
     """Search the internet. The workspace has nothing to do with it."""
     from . import web
 
@@ -625,9 +660,14 @@ def fetch_url(url: str, settings, max_output: int = DEFAULT_MAX_OUTPUT) -> ToolR
     return ToolResult(True, body, truncated or page.truncated)
 
 
-def execute(name: str, arguments: dict[str, Any], workspace: Workspace,
-            command_timeout: int = 60, max_output: int = DEFAULT_MAX_OUTPUT,
-            web_settings=None) -> ToolResult:
+def execute(
+    name: str,
+    arguments: dict[str, Any],
+    workspace: Workspace,
+    command_timeout: int = 60,
+    max_output: int = DEFAULT_MAX_OUTPUT,
+    web_settings=None,
+) -> ToolResult:
     """Dispatch a confirmed tool call. Raises :class:`ToolError` on refusal."""
     if name in ("web_search", "fetch_url"):
         if web_settings is None:
@@ -636,8 +676,11 @@ def execute(name: str, arguments: dict[str, Any], workspace: Workspace,
             return web_search(str(arguments["query"]), web_settings, max_output)
         return fetch_url(str(arguments["url"]), web_settings, max_output)
     if name == "list_files":
-        return list_files(workspace, str(arguments.get("path", ".")),
-                          str(arguments.get("pattern", "*")))
+        return list_files(
+            workspace,
+            str(arguments.get("path", ".")),
+            str(arguments.get("pattern", "*")),
+        )
     if name == "read_file":
         return read_file(
             workspace,
@@ -655,7 +698,9 @@ def execute(name: str, arguments: dict[str, Any], workspace: Workspace,
             max_output=max_output,
         )
     if name == "write_file":
-        return write_file(workspace, str(arguments["path"]), str(arguments.get("content", "")))
+        return write_file(
+            workspace, str(arguments["path"]), str(arguments.get("content", ""))
+        )
     if name == "apply_patch":
         return apply_patch(workspace, str(arguments["patch"]))
     if name == "run_command":

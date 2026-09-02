@@ -224,10 +224,12 @@ def test_the_derived_name_is_stable_and_says_what_it_is() -> None:
 
 def test_a_derived_model_is_derived_again_from_the_original(monkeypatch) -> None:
     """Otherwise every change of window keeps the previous one alive on disk."""
-    http = FakeHTTP({
-        "/api/show": {"details": {"parent_model": "granite4.2:3b"}},
-        "/api/create": {"status": "success"},
-    })
+    http = FakeHTTP(
+        {
+            "/api/show": {"details": {"parent_model": "granite4.2:3b"}},
+            "/api/create": {"status": "success"},
+        }
+    )
     monkeypatch.setattr(ollama.urllib.request, "urlopen", http)
     name = ollama.create_with_context(
         "http://localhost:11434/v1", "vox-granite4.2-3b:ctx8192", 16384
@@ -249,7 +251,7 @@ class FakeHTTP:
         self.answers = answers
         self.calls: list[tuple[str, dict]] = []
 
-    def __call__(self, request, timeout=None):  # noqa: ARG002
+    def __call__(self, request, timeout=None):
         url = request if isinstance(request, str) else request.full_url
         payload = {}
         if not isinstance(request, str) and request.data:
@@ -269,12 +271,24 @@ class _closing(io.BytesIO):
 
 
 def test_the_model_list_carries_what_tells_two_local_builds_apart(monkeypatch) -> None:
-    http = FakeHTTP({"/api/tags": {"models": [
-        {"name": "granite4.2:3b", "size": 2_244_023_965,
-         "details": {"parameter_size": "3.7B", "quantization_level": "Q4_K_M"}},
-        {"name": "qwen2.5:3b", "size": 1_900_000_000, "details": {}},
-        {"no name": True},
-    ]}})
+    http = FakeHTTP(
+        {
+            "/api/tags": {
+                "models": [
+                    {
+                        "name": "granite4.2:3b",
+                        "size": 2_244_023_965,
+                        "details": {
+                            "parameter_size": "3.7B",
+                            "quantization_level": "Q4_K_M",
+                        },
+                    },
+                    {"name": "qwen2.5:3b", "size": 1_900_000_000, "details": {}},
+                    {"no name": True},
+                ]
+            }
+        }
+    )
     monkeypatch.setattr(ollama.urllib.request, "urlopen", http)
     rows = ollama.list_models("http://localhost:11434/v1")
     assert [row["name"] for row in rows] == ["granite4.2:3b", "qwen2.5:3b"]
@@ -285,7 +299,9 @@ def test_the_model_list_carries_what_tells_two_local_builds_apart(monkeypatch) -
 def test_creating_a_window_sends_from_and_num_ctx(monkeypatch) -> None:
     http = FakeHTTP({"/api/create": {"status": "success"}})
     monkeypatch.setattr(ollama.urllib.request, "urlopen", http)
-    name = ollama.create_with_context("http://localhost:11434/v1", "granite4.2:3b", 16384)
+    name = ollama.create_with_context(
+        "http://localhost:11434/v1", "granite4.2:3b", 16384
+    )
     assert name == "vox-granite4.2-3b:ctx16384"
     path, payload = http.calls[-1]
     assert path == "/api/create"
@@ -302,9 +318,15 @@ def test_an_unusable_window_is_refused_before_the_server_is_asked(monkeypatch) -
 
 
 def test_the_loaded_window_is_read_from_what_is_resident(monkeypatch) -> None:
-    http = FakeHTTP({"/api/ps": {"models": [
-        {"name": "granite4.2:3b", "context_length": 16384},
-    ]}})
+    http = FakeHTTP(
+        {
+            "/api/ps": {
+                "models": [
+                    {"name": "granite4.2:3b", "context_length": 16384},
+                ]
+            }
+        }
+    )
     monkeypatch.setattr(ollama.urllib.request, "urlopen", http)
     base = "http://localhost:11434/v1"
     assert ollama.loaded_context(base, "granite4.2:3b") == 16384
@@ -312,10 +334,17 @@ def test_the_loaded_window_is_read_from_what_is_resident(monkeypatch) -> None:
 
 
 def test_the_trained_window_comes_from_the_weights(monkeypatch) -> None:
-    http = FakeHTTP({"/api/show": {
-        "model_info": {"granite.context_length": 131072, "granite.block_count": 40},
-        "parameters": "num_ctx                        8192\ntemperature 1",
-    }})
+    http = FakeHTTP(
+        {
+            "/api/show": {
+                "model_info": {
+                    "granite.context_length": 131072,
+                    "granite.block_count": 40,
+                },
+                "parameters": "num_ctx                        8192\ntemperature 1",
+            }
+        }
+    )
     monkeypatch.setattr(ollama.urllib.request, "urlopen", http)
     base = "http://localhost:11434/v1"
     assert ollama.trained_context(base, "granite4.2:3b") == 131072
@@ -345,7 +374,9 @@ async def test_model_ctx_wants_a_number(app: VoxApp) -> None:
         assert "/model ctx [N|off]" in transcript(app)
 
 
-async def test_model_ctx_off_goes_back_to_the_original(app: VoxApp, monkeypatch) -> None:
+async def test_model_ctx_off_goes_back_to_the_original(
+    app: VoxApp, monkeypatch
+) -> None:
     """The name cannot be reversed - granite4.2:3b flattens to granite4.2-3b -
     so the parent is read from Ollama rather than guessed at."""
     app.config["providers"]["local-ollama"]["base_url"] = "http://localhost:11434/v1"
@@ -370,13 +401,16 @@ async def test_model_ctx_off_on_a_model_nobody_derived(app: VoxApp) -> None:
         assert "already the original" in transcript(app)
 
 
-async def test_a_window_larger_than_the_weights_is_refused(app: VoxApp, monkeypatch) -> None:
+async def test_a_window_larger_than_the_weights_is_refused(
+    app: VoxApp, monkeypatch
+) -> None:
     app.config["providers"]["local-ollama"]["base_url"] = "http://localhost:11434/v1"
     app.config["active_model"] = "granite4.2:3b"
     monkeypatch.setattr(ollama, "trained_context", lambda *a, **k: 4096)
     created: list = []
-    monkeypatch.setattr(ollama, "create_with_context",
-                        lambda *a, **k: created.append(a) or "never")
+    monkeypatch.setattr(
+        ollama, "create_with_context", lambda *a, **k: created.append(a) or "never"
+    )
     async with app.run_test() as pilot:
         await pilot.pause()
         app.cmd_model_ctx("131072")
@@ -386,7 +420,9 @@ async def test_a_window_larger_than_the_weights_is_refused(app: VoxApp, monkeypa
     assert created == [], "nothing is written for a window the weights cannot use"
 
 
-async def test_a_built_window_becomes_the_active_model(app: VoxApp, monkeypatch) -> None:
+async def test_a_built_window_becomes_the_active_model(
+    app: VoxApp, monkeypatch
+) -> None:
     app.config["providers"]["local-ollama"]["base_url"] = "http://localhost:11434/v1"
     app.config["active_model"] = "granite4.2:3b"
     monkeypatch.setattr(ollama, "trained_context", lambda *a, **k: 131072)
@@ -408,7 +444,11 @@ async def test_a_built_window_becomes_the_active_model(app: VoxApp, monkeypatch)
 def test_the_key_bar_carries_five_entries_and_no_more() -> None:
     """A legend nobody can read at a glance is decoration."""
     assert [label for _key, label in KeyBar.KEYS] == [
-        "send", "copy/paste", "quit", "stop", "mode",
+        "send",
+        "copy/paste",
+        "quit",
+        "stop",
+        "mode",
     ]
     assert dict(KeyBar.KEYS)["F2"] == "mode"
 
@@ -469,12 +509,24 @@ async def test_the_active_model_is_the_row_the_picker_opens_on(
 ) -> None:
     app.config["providers"]["local-ollama"]["base_url"] = "http://localhost:11434/v1"
     app.config["active_model"] = "qwen2.5:3b"
-    monkeypatch.setattr(ollama, "list_models", lambda *a, **k: [
-        {"name": "granite4.2:3b", "size": 2_244_023_965,
-         "parameters": "3.7B", "quantization": "Q4_K_M"},
-        {"name": "qwen2.5:3b", "size": 1_900_000_000, "parameters": "3B",
-         "quantization": ""},
-    ])
+    monkeypatch.setattr(
+        ollama,
+        "list_models",
+        lambda *a, **k: [
+            {
+                "name": "granite4.2:3b",
+                "size": 2_244_023_965,
+                "parameters": "3.7B",
+                "quantization": "Q4_K_M",
+            },
+            {
+                "name": "qwen2.5:3b",
+                "size": 1_900_000_000,
+                "parameters": "3B",
+                "quantization": "",
+            },
+        ],
+    )
     async with app.run_test() as pilot:
         await pilot.pause()
         items = app.model_items()
@@ -487,8 +539,13 @@ async def test_the_active_model_is_the_row_the_picker_opens_on(
 
 
 def resident(**kwargs) -> ollama.Residency:
-    defaults = dict(size=3_085_539_736, size_vram=2_845_499_719, context=16384,
-                    gpu_used_mb=2755, gpu_total_mb=4096)
+    defaults = dict(
+        size=3_085_539_736,
+        size_vram=2_845_499_719,
+        context=16384,
+        gpu_used_mb=2755,
+        gpu_total_mb=4096,
+    )
     defaults.update(kwargs)
     return ollama.Residency(**defaults)
 
@@ -533,8 +590,7 @@ def test_the_fit_search_stops_at_the_first_layout_that_stays_on_the_card(
 
 def test_a_card_that_can_hold_nothing_gives_up_rather_than_looping(monkeypatch) -> None:
     monkeypatch.setattr(ollama, "layer_count", lambda *a, **k: 40)
-    monkeypatch.setattr(ollama, "probe",
-                        lambda *a, **k: resident(gpu_used_mb=4090))
+    monkeypatch.setattr(ollama, "probe", lambda *a, **k: resident(gpu_used_mb=4090))
     best, where = ollama.fit_layers("http://localhost:11434/v1", "m", 16384, 384)
     assert best == 0 and where is None
 
@@ -542,8 +598,12 @@ def test_a_card_that_can_hold_nothing_gives_up_rather_than_looping(monkeypatch) 
 def test_the_build_parameters_are_written_beside_the_window(monkeypatch) -> None:
     http = FakeHTTP({"/api/create": {"status": "success"}})
     monkeypatch.setattr(ollama.urllib.request, "urlopen", http)
-    ollama.create_with_context("http://localhost:11434/v1", "granite4.2:3b", 8192,
-                               {"num_gpu": 40, "num_batch": 256})
+    ollama.create_with_context(
+        "http://localhost:11434/v1",
+        "granite4.2:3b",
+        8192,
+        {"num_gpu": 40, "num_batch": 256},
+    )
     _path, payload = http.calls[-1]
     assert payload["parameters"] == {"num_ctx": 8192, "num_gpu": 40, "num_batch": 256}
 
@@ -600,12 +660,21 @@ async def test_a_build_can_leave_the_split_to_ollama(app: VoxApp, monkeypatch) -
     app.config["active_model"] = "granite4.2:3b"
     app.config["model_build"]["num_gpu"] = None
     monkeypatch.setattr(ollama, "trained_context", lambda *a, **k: 131072)
-    monkeypatch.setattr(ollama, "fit_layers", lambda *a, **k: (_ for _ in ()).throw(
-        AssertionError("nothing should be measured when the split is not ours")))
+    monkeypatch.setattr(
+        ollama,
+        "fit_layers",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("nothing should be measured when the split is not ours")
+        ),
+    )
     written: list = []
-    monkeypatch.setattr(ollama, "create_with_context",
-                        lambda b, m, n, parameters=None, timeout=120.0:
-                        written.append(parameters) or "vox-x:ctx16384")
+    monkeypatch.setattr(
+        ollama,
+        "create_with_context",
+        lambda b, m, n, parameters=None, timeout=120.0: (
+            written.append(parameters) or "vox-x:ctx16384"
+        ),
+    )
     async with app.run_test() as pilot:
         await pilot.pause()
         app.cmd_model_ctx("16384")
@@ -620,9 +689,13 @@ async def test_model_gpu_max_measures_then_writes(app: VoxApp, monkeypatch) -> N
     monkeypatch.setattr(ollama, "configured_context", lambda *a, **k: 16384)
     monkeypatch.setattr(ollama, "fit_layers", lambda *a, **k: (33, resident()))
     written: list = []
-    monkeypatch.setattr(ollama, "create_with_context",
-                        lambda b, m, n, parameters=None, timeout=120.0:
-                        written.append((n, parameters)) or "vox-granite4.2-3b:ctx16384")
+    monkeypatch.setattr(
+        ollama,
+        "create_with_context",
+        lambda b, m, n, parameters=None, timeout=120.0: (
+            written.append((n, parameters)) or "vox-granite4.2-3b:ctx16384"
+        ),
+    )
     async with app.run_test() as pilot:
         await pilot.pause()
         app.cmd_model_gpu("max")
@@ -645,7 +718,9 @@ async def test_model_gpu_off_hands_the_split_back(app: VoxApp) -> None:
     assert app.config["model_build"]["num_gpu"] is None
 
 
-async def test_model_gpu_reports_where_the_model_lives(app: VoxApp, monkeypatch) -> None:
+async def test_model_gpu_reports_where_the_model_lives(
+    app: VoxApp, monkeypatch
+) -> None:
     app.config["providers"]["local-ollama"]["base_url"] = "http://localhost:11434/v1"
     app.config["active_model"] = "granite4.2:3b"
     monkeypatch.setattr(ollama, "residency", lambda *a, **k: resident())
@@ -672,13 +747,21 @@ async def test_model_gpu_is_ollama_only(app: VoxApp) -> None:
 def test_a_derived_model_is_found_under_its_parents_name(monkeypatch) -> None:
     """Regression: a derived model shares its blobs, and /api/ps lists it under
     the model it was built from, so an exact match never finds it."""
-    http = FakeHTTP({
-        "/api/ps": {"models": [
-            {"name": "granite4.2:3b", "size": 3_085_539_736,
-             "size_vram": 2_845_499_719, "context_length": 16384},
-        ]},
-        "/api/show": {"details": {"parent_model": "granite4.2:3b"}},
-    })
+    http = FakeHTTP(
+        {
+            "/api/ps": {
+                "models": [
+                    {
+                        "name": "granite4.2:3b",
+                        "size": 3_085_539_736,
+                        "size_vram": 2_845_499_719,
+                        "context_length": 16384,
+                    },
+                ]
+            },
+            "/api/show": {"details": {"parent_model": "granite4.2:3b"}},
+        }
+    )
     monkeypatch.setattr(ollama.urllib.request, "urlopen", http)
     monkeypatch.setattr(ollama, "vram_mb", lambda: (2755, 4096))
     base = "http://localhost:11434/v1"

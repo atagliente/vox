@@ -84,9 +84,7 @@ class RoundScreen(Screen[None]):
         else:
             line = Text(f"asked: {question}", style="dim")
         if self.round_log.conversation_id:
-            line.append(
-                f"\nconversation {self.round_log.conversation_id}", style="dim"
-            )
+            line.append(f"\nconversation {self.round_log.conversation_id}", style="dim")
         self.query_one("#round-question", Static).update(line)
 
         width = max(30, self.size.width - 26)

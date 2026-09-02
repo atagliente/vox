@@ -7,8 +7,9 @@ replacement: no ``eval``, no code execution, ever.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from .models import Prompt, utc_now
 from .storage import prompts_path, read_json_safe, write_json_atomic

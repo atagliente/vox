@@ -36,7 +36,9 @@ def test_a_blocked_worker_is_seen_and_the_process_is_forced(
 ) -> None:
     """A non-daemon thread stuck on the network would hold the interpreter."""
     release = threading.Event()
-    blocked = threading.Thread(target=release.wait, daemon=False, name="pretend-request")
+    blocked = threading.Thread(
+        target=release.wait, daemon=False, name="pretend-request"
+    )
     blocked.start()
     try:
         assert any(t.name == "pretend-request" for t in _stuck_threads())
@@ -101,13 +103,15 @@ async def test_a_request_killed_by_the_shutdown_raises_no_dialog(app: VoxApp) ->
         app._shutting_down = True
         app.generating = True
         errors_before = [
-            box for box in app.transcript.children
+            box
+            for box in app.transcript.children
             if getattr(getattr(box, "message", None), "role", "") == "error"
         ]
         app.finish_generation(None)
         await pilot.pause()
         errors_after = [
-            box for box in app.transcript.children
+            box
+            for box in app.transcript.children
             if getattr(getattr(box, "message", None), "role", "") == "error"
         ]
         assert len(errors_after) == len(errors_before)

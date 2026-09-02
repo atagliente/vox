@@ -17,15 +17,14 @@ from textual.widgets import Static
 from ..mesh import MeshController, PeerView
 
 _HEADER = (
-    f"{'AGENT':<20}{'CATEGORY':<14}{'STATE':<11}{'ADDRESS':<22}"
-    f"{'SEEN':>8}   VERBS"
+    f"{'AGENT':<20}{'CATEGORY':<14}{'STATE':<11}{'ADDRESS':<22}{'SEEN':>8}   VERBS"
 )
 
 _STATE_STYLE = {
-    "ACTIVE": "#8da287",     # sage: answering, classified, routable
+    "ACTIVE": "#8da287",  # sage: answering, classified, routable
     "PROBATION": "#c9a15a",  # amber: seen, not yet interrogated
-    "SUSPECT": "#c47a5d",    # terracotta: heartbeats missing
-    "DEAD": "#6b6349",       # dim: out of routing
+    "SUSPECT": "#c47a5d",  # terracotta: heartbeats missing
+    "DEAD": "#6b6349",  # dim: out of routing
 }
 
 REFRESH_SECONDS = 1.0
@@ -115,12 +114,12 @@ class UniverseScreen(Screen[None]):
         rendered = Text()
         for peer in peers:
             name = peer.name if len(peer.name) <= 19 else peer.name[:18] + "…"
-            address = peer.address if len(peer.address) <= 21 else peer.address[:20] + "…"
+            address = (
+                peer.address if len(peer.address) <= 21 else peer.address[:20] + "…"
+            )
             rendered.append(f"{name:<20}")
             rendered.append(f"{peer.category:<14}")
-            rendered.append(
-                f"{peer.state:<11}", style=_STATE_STYLE.get(peer.state, "")
-            )
+            rendered.append(f"{peer.state:<11}", style=_STATE_STYLE.get(peer.state, ""))
             rendered.append(f"{address:<22}")
             rendered.append(f"{peer.age:>7.1f}s   ", style="dim")
             rendered.append(", ".join(peer.verbs) or "—", style="dim")
@@ -135,14 +134,20 @@ class UniverseScreen(Screen[None]):
             rendered.append(meaning + "\n")
 
         rendered.append("STATES\n", style="bold")
-        row("PROBATION", "announced itself, not yet interrogated: no work goes to it",
-            _STATE_STYLE["PROBATION"])
-        row("ACTIVE", "WHOIS completed over mTLS, classified, routable",
-            _STATE_STYLE["ACTIVE"])
-        row("SUSPECT", "heartbeats missing for three intervals",
-            _STATE_STYLE["SUSPECT"])
-        row("DEAD", "silent for five intervals: out of routing",
-            _STATE_STYLE["DEAD"])
+        row(
+            "PROBATION",
+            "announced itself, not yet interrogated: no work goes to it",
+            _STATE_STYLE["PROBATION"],
+        )
+        row(
+            "ACTIVE",
+            "WHOIS completed over mTLS, classified, routable",
+            _STATE_STYLE["ACTIVE"],
+        )
+        row(
+            "SUSPECT", "heartbeats missing for three intervals", _STATE_STYLE["SUSPECT"]
+        )
+        row("DEAD", "silent for five intervals: out of routing", _STATE_STYLE["DEAD"])
 
         rendered.append("\nCATEGORIES\n", style="bold")
         row("SOURCE", "ingest, publish")

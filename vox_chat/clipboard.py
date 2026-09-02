@@ -38,8 +38,7 @@ def copy_helpers() -> list[Helper]:
     if sys.platform == "win32":
         return [
             Helper(
-                ["powershell", "-NoProfile", "-Command",
-                 "$input | Set-Clipboard"],
+                ["powershell", "-NoProfile", "-Command", "$input | Set-Clipboard"],
                 "powershell Set-Clipboard",
             ),
             Helper(["clip"], "clip"),
@@ -139,4 +138,6 @@ def describe() -> str:
     pasters = [helper.label for helper in paste_helpers() if helper.available]
     if not copiers and not pasters:
         return "none found"
-    return f"copy: {', '.join(copiers) or 'none'} | paste: {', '.join(pasters) or 'none'}"
+    return (
+        f"copy: {', '.join(copiers) or 'none'} | paste: {', '.join(pasters) or 'none'}"
+    )

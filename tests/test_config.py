@@ -35,7 +35,9 @@ def test_first_run_creates_a_valid_global_config(vox_home: Path) -> None:
 def test_default_config_is_a_fresh_copy() -> None:
     first = default_config()
     first["providers"]["local-ollama"]["base_url"] = "http://changed/v1"
-    assert default_config()["providers"]["local-ollama"]["base_url"] != "http://changed/v1"
+    assert (
+        default_config()["providers"]["local-ollama"]["base_url"] != "http://changed/v1"
+    )
 
 
 def test_deep_merge_replaces_only_declared_keys() -> None:
@@ -149,7 +151,9 @@ def test_the_installer_keeps_unix_line_endings() -> None:
     assert data.startswith(b"#!/bin/sh\n")
 
 
-def test_every_doctor_check_runs(monkeypatch: pytest.MonkeyPatch, workspace: Path) -> None:
+def test_every_doctor_check_runs(
+    monkeypatch: pytest.MonkeyPatch, workspace: Path
+) -> None:
     """Regression: doctor imported a module that had been deleted, so `vox
     doctor` — the first thing the installer runs — died with an ImportError."""
     import json

@@ -5,8 +5,9 @@ The active role supplies the ``system`` message sent to the model.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .models import Role
 from .storage import read_json_safe, roles_path, write_json_atomic
@@ -89,9 +90,7 @@ class RoleStore:
             self.warnings.append(result.error)
         raw = result.data
         if not isinstance(raw, list) or not raw:
-            self._roles = {
-                item["name"]: Role.from_dict(item) for item in DEFAULT_ROLES
-            }
+            self._roles = {item["name"]: Role.from_dict(item) for item in DEFAULT_ROLES}
             self.save()
             return
         roles: dict[str, Role] = {}

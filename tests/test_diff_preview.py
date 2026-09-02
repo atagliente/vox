@@ -54,7 +54,9 @@ def test_a_binary_file_is_reported_not_diffed(ws: Workspace) -> None:
 
 
 def test_a_huge_diff_is_clipped(ws: Workspace) -> None:
-    (ws.root / "big.py").write_text("\n".join(f"a{i}" for i in range(500)), encoding="utf-8")
+    (ws.root / "big.py").write_text(
+        "\n".join(f"a{i}" for i in range(500)), encoding="utf-8"
+    )
     preview = preview_write(
         ws, "big.py", "\n".join(f"b{i}" for i in range(500)), max_lines=20
     )

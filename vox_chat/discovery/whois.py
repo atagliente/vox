@@ -33,9 +33,15 @@ import socketserver
 import ssl
 import threading
 import time
-from typing import Callable
+from collections.abc import Callable
 
-from .identity import Identity, IdentityError, client_context, peer_agent_id, server_context
+from .identity import (
+    Identity,
+    IdentityError,
+    client_context,
+    peer_agent_id,
+    server_context,
+)
 
 log = logging.getLogger("discovery.whois")
 
@@ -131,7 +137,7 @@ class _Handler(socketserver.StreamRequestHandler):
                 self._answer(caller, request)
                 return
             self._reply({"error": "unsupported op"})
-        except (json.JSONDecodeError, ValueError, socket.timeout, OSError):
+        except (TimeoutError, json.JSONDecodeError, ValueError, OSError):
             # A malformed or slow peer: close without any noise.
             return
 
@@ -164,12 +170,14 @@ class _Handler(socketserver.StreamRequestHandler):
             result = handler(caller, question, self._emit, conversation)
             elapsed = time.monotonic() - started
             log.info("ask: answered %s in %.1fs", caller, elapsed)
-            self._reply({
-                "ok": True,
-                "answer": str(result.get("answer", "")),
-                "model": str(result.get("model", "")),
-                "elapsed": round(elapsed, 2),
-            })
+            self._reply(
+                {
+                    "ok": True,
+                    "answer": str(result.get("answer", "")),
+                    "model": str(result.get("model", "")),
+                    "elapsed": round(elapsed, 2),
+                }
+            )
         except Exception as exc:  # the peer gets a reason, not a dropped socket
             log.warning("ask: refusing %s: %s", caller, exc)
             self._reply({"error": str(exc)[:200]})
@@ -198,7 +206,9 @@ class _Handler(socketserver.StreamRequestHandler):
 
     def _reply(self, payload: dict) -> None:
         try:
-            self.wfile.write(json.dumps(payload, separators=(",", ":")).encode() + b"\n")
+            self.wfile.write(
+                json.dumps(payload, separators=(",", ":")).encode() + b"\n"
+            )
             self.wfile.flush()
         except OSError:
             pass
@@ -240,7 +250,7 @@ class WhoisServer:
         host: str = "0.0.0.0",
         port: int = 0,
         authorizer: Authorizer | None = None,
-        ask_handler: "AskHandler | None" = None,
+        ask_handler: AskHandler | None = None,
         ask_timeout: float = ASK_TIMEOUT,
     ):
         self._identity = identity
@@ -257,7 +267,7 @@ class WhoisServer:
         self._server.ask_slot = threading.Semaphore(1)
         self._thread: threading.Thread | None = None
 
-    def set_ask_handler(self, handler: "AskHandler | None") -> None:
+    def set_ask_handler(self, handler: AskHandler | None) -> None:
         """Start or stop answering questions, without restarting the server."""
         self._server.ask_handler = handler
 
@@ -266,8 +276,9 @@ class WhoisServer:
         return self._server.server_address[1]
 
     def start(self) -> None:
-        self._thread = threading.Thread(target=self._server.serve_forever,
-                                        name="whois-server", daemon=True)
+        self._thread = threading.Thread(
+            target=self._server.serve_forever, name="whois-server", daemon=True
+        )
         self._thread.start()
 
     def reload_identity(self, identity: Identity) -> None:
@@ -298,22 +309,24 @@ def query(
     SANs.
     """
     context = client_context(identity)
-    with socket.create_connection((address, port), timeout=timeout) as raw_sock:
-        # server_hostname is the agent_id, not the IP: this is exactly what
-        # binds the multicast announcement to the certificate's identity.
-        with context.wrap_socket(raw_sock, server_hostname=expected_agent_id) as sock:
-            sock.settimeout(timeout)
-            sock.sendall(json.dumps({"op": "WHOIS"}).encode() + b"\n")
+    # server_hostname is the agent_id, not the IP: this is exactly what
+    # binds the multicast announcement to the certificate's identity.
+    with (
+        socket.create_connection((address, port), timeout=timeout) as raw_sock,
+        context.wrap_socket(raw_sock, server_hostname=expected_agent_id) as sock,
+    ):
+        sock.settimeout(timeout)
+        sock.sendall(json.dumps({"op": "WHOIS"}).encode() + b"\n")
 
-            chunks, total = [], 0
-            while total < MAX_DESCRIPTOR_BYTES:
-                chunk = sock.recv(4096)
-                if not chunk:
-                    break
-                chunks.append(chunk)
-                total += len(chunk)
-                if b"\n" in chunk:
-                    break
+        chunks, total = [], 0
+        while total < MAX_DESCRIPTOR_BYTES:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if b"\n" in chunk:
+                break
 
     payload = json.loads(b"".join(chunks).decode())
     if not payload.get("ok"):
@@ -323,7 +336,9 @@ def query(
     # Defence in depth: TLS has already checked the SAN, but a misconfigured
     # context must not go unnoticed.
     if descriptor.get("agent_id") != expected_agent_id:
-        raise ValueError("the agent_id in the descriptor does not match the announcement")
+        raise ValueError(
+            "the agent_id in the descriptor does not match the announcement"
+        )
     return descriptor
 
 
@@ -350,39 +365,46 @@ def ask(
     """
     context = client_context(identity)
     payload: dict | None = None
-    with socket.create_connection((address, port), timeout=timeout) as raw_sock:
-        with context.wrap_socket(raw_sock, server_hostname=expected_agent_id) as sock:
-            sock.settimeout(timeout)
-            sock.sendall(
-                json.dumps(
-                    {"op": "ASK", "v": 2, "question": question, "stream": True,
-                     "conversation": conversation}
-                ).encode()
-                + b"\n"
-            )
-            with sock.makefile("rb") as stream:
-                streamed = 0
-                while True:
-                    line = stream.readline(MAX_DESCRIPTOR_BYTES)
-                    if not line:
-                        break
-                    try:
-                        message = json.loads(line)
-                    except ValueError:
-                        break
-                    if "event" in message:
-                        streamed += len(line)
-                        if streamed > MAX_STREAM_BYTES:
-                            raise ValueError("peer streamed too much")
-                        if on_event is not None:
-                            on_event(
-                                str(message.get("event", "text")),
-                                str(message.get("text", "")),
-                                float(message.get("ts", 0.0)),
-                            )
-                        continue
-                    payload = message
+    with (
+        socket.create_connection((address, port), timeout=timeout) as raw_sock,
+        context.wrap_socket(raw_sock, server_hostname=expected_agent_id) as sock,
+    ):
+        sock.settimeout(timeout)
+        sock.sendall(
+            json.dumps(
+                {
+                    "op": "ASK",
+                    "v": 2,
+                    "question": question,
+                    "stream": True,
+                    "conversation": conversation,
+                }
+            ).encode()
+            + b"\n"
+        )
+        with sock.makefile("rb") as stream:
+            streamed = 0
+            while True:
+                line = stream.readline(MAX_DESCRIPTOR_BYTES)
+                if not line:
                     break
+                try:
+                    message = json.loads(line)
+                except ValueError:
+                    break
+                if "event" in message:
+                    streamed += len(line)
+                    if streamed > MAX_STREAM_BYTES:
+                        raise ValueError("peer streamed too much")
+                    if on_event is not None:
+                        on_event(
+                            str(message.get("event", "text")),
+                            str(message.get("text", "")),
+                            float(message.get("ts", 0.0)),
+                        )
+                    continue
+                payload = message
+                break
 
     if payload is None:
         raise ValueError("the peer closed without answering")

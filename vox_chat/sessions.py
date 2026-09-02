@@ -46,8 +46,9 @@ SESSION_PREFIX = "vox-session-"
 class SessionStore:
     """Save, load, list and delete sessions in one directory."""
 
-    def __init__(self, directory: Path | None = None,
-                 prefix: str = SESSION_PREFIX) -> None:
+    def __init__(
+        self, directory: Path | None = None, prefix: str = SESSION_PREFIX
+    ) -> None:
         self.directory = Path(directory) if directory is not None else sessions_dir()
         self.prefix = prefix
         self.warnings: list[str] = []
@@ -61,7 +62,11 @@ class SessionStore:
     def name_of(self, path: Path) -> str:
         """The name to pass back to load(), taken from a file name."""
         stem = path.stem
-        return stem[len(self.prefix):] if self.prefix and stem.startswith(self.prefix) else stem
+        return (
+            stem[len(self.prefix) :]
+            if self.prefix and stem.startswith(self.prefix)
+            else stem
+        )
 
     def save(self, session: Session, name: str | None = None) -> Path:
         """Persist ``session``; returns the file it was written to."""

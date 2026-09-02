@@ -18,9 +18,7 @@ from ..inspection import InspectionRun, TokenRecord
 
 FILTERS = ("all", "decisions", "thinking", "answer")
 
-_HEADER = (
-    f"{'#':>4}  {'TOKEN':<18}{'P':>6}{'H':>7}{'MARGIN':>8}   ALTERNATIVES"
-)
+_HEADER = f"{'#':>4}  {'TOKEN':<18}{'P':>6}{'H':>7}{'MARGIN':>8}   ALTERNATIVES"
 
 
 class InspectScreen(Screen[None]):
@@ -37,8 +35,9 @@ class InspectScreen(Screen[None]):
         Binding("question_mark", "toggle_legend", "Legend", show=False),
     ]
 
-    def __init__(self, run: InspectionRun, enabled: bool = True,
-                 just_enabled: bool = False) -> None:
+    def __init__(
+        self, run: InspectionRun, enabled: bool = True, just_enabled: bool = False
+    ) -> None:
         super().__init__()
         self.run = run
         self.enabled = enabled
@@ -103,13 +102,13 @@ class InspectScreen(Screen[None]):
                     "something: the table fills while the answer streams."
                 )
             opening = (
-                "Inspection is now on. " if self.just_enabled
+                "Inspection is now on. "
+                if self.just_enabled
                 else "Nothing measured yet. "
             )
             # The view has no input of its own, so say where the question goes.
             return Text(
-                opening
-                + "Press esc, ask a question, and this table fills while the "
+                opening + "Press esc, ask a question, and this table fills while the "
                 "answer streams. Ctrl+T brings it back."
             )
         stats = self.run.stats()
@@ -124,8 +123,9 @@ class InspectScreen(Screen[None]):
                 f"   ·   thinking {thinking.mean_probability:.2f} / "
                 f"answer {answer.mean_probability:.2f}"
             )
-        return Text(line + "\n" + "entropy is over the returned top-k, not the "
-                    "full vocabulary")
+        return Text(
+            line + "\n" + "entropy is over the returned top-k, not the full vocabulary"
+        )
 
     def _rows(self) -> Text:
         records = self.visible_records()

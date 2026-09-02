@@ -7,6 +7,7 @@ against a real mTLS server in ``tests/test_discovery_vendor.py``.
 
 from __future__ import annotations
 
+import contextlib
 import json
 from pathlib import Path
 
@@ -18,7 +19,6 @@ from vox_chat.config import default_config, load_config, validate_config
 from vox_chat.mesh import MeshSettings
 from vox_chat.storage import global_config_path
 from vox_chat.ui.widgets import MessageBox
-
 
 # --------------------------------------------------------------------- the tag
 
@@ -71,8 +71,14 @@ def test_an_empty_span_is_not_a_question() -> None:
 
 
 def answer(agent: str, text: str = "", error: str = "", elapsed: float = 1.0):
-    return cns.PeerAnswer(agent_id=agent, name=agent, model="m:1b",
-                          answer=text, error=error, elapsed=elapsed)
+    return cns.PeerAnswer(
+        agent_id=agent,
+        name=agent,
+        model="m:1b",
+        answer=text,
+        error=error,
+        elapsed=elapsed,
+    )
 
 
 def test_wording_differences_do_not_break_a_vote() -> None:
@@ -87,8 +93,13 @@ def test_wording_differences_do_not_break_a_vote() -> None:
 def test_a_minority_agreeing_is_not_a_verdict() -> None:
     """Two out of five is a coincidence, not a decision."""
     kind, winner, _ = cns.verdict(
-        [answer("a", "Yes"), answer("b", "Yes"), answer("c", "No"),
-         answer("d", "Maybe"), answer("e", "Never")]
+        [
+            answer("a", "Yes"),
+            answer("b", "Yes"),
+            answer("c", "No"),
+            answer("d", "Maybe"),
+            answer("e", "Never"),
+        ]
     )
     assert kind == "synthesise"
     assert winner is None
@@ -101,15 +112,20 @@ def test_one_answer_alone_is_never_a_vote() -> None:
 
 def test_prose_falls_through_to_synthesis() -> None:
     kind, _, _ = cns.verdict(
-        [answer("a", "It is safe if readers never stall."),
-         answer("b", "Unsafe: a stalled reader blocks reclamation.")]
+        [
+            answer("a", "It is safe if readers never stall."),
+            answer("b", "Unsafe: a stalled reader blocks reclamation."),
+        ]
     )
     assert kind == "synthesise"
 
 
 def test_failures_are_reported_not_hidden() -> None:
-    answers = [answer("a", "Yes"), answer("b", error="timed out"),
-               answer("c", error="busy")]
+    answers = [
+        answer("a", "Yes"),
+        answer("b", error="timed out"),
+        answer("c", error="busy"),
+    ]
     line = cns.describe(answers)
     assert "1/3 answered" in line
     assert "timed out" in line and "busy" in line
@@ -166,8 +182,9 @@ class StubPeer:
 class FakeMesh:
     """The mesh as the app sees it: no sockets, scripted answers."""
 
-    def __init__(self, answers=None, peers=("alpha", "beta"), online=True,
-                 demo_ca=False) -> None:
+    def __init__(
+        self, answers=None, peers=("alpha", "beta"), online=True, demo_ca=False
+    ) -> None:
         self.settings = MeshSettings.from_config(default_config())
         self.online = online
         self.demo_ca = demo_ca
@@ -182,8 +199,15 @@ class FakeMesh:
     def processors(self, verb="infer", limit=5):
         return self._peers[:limit] if self.online else []
 
-    def ask_peers(self, question, verb="infer", limit=5, timeout=90.0,
-                  on_event=None, conversation=""):
+    def ask_peers(
+        self,
+        question,
+        verb="infer",
+        limit=5,
+        timeout=90.0,
+        on_event=None,
+        conversation="",
+    ):
         self.asked.append(question)
         self.conversations.append(conversation)
         # A real peer streams what it writes before the answer lands.
@@ -267,8 +291,10 @@ async def test_agreement_answers_without_asking_the_local_model(app: VoxApp) -> 
 
 async def test_disagreement_is_reconciled_locally(app: VoxApp) -> None:
     app.mesh = FakeMesh(
-        answers=[answer("alpha", "Safe if readers never stall."),
-                 answer("beta", "Unsafe, reclamation blocks.")]
+        answers=[
+            answer("alpha", "Safe if readers never stall."),
+            answer("beta", "Unsafe, reclamation blocks."),
+        ]
     )
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -311,8 +337,9 @@ async def test_a_silent_agent_is_reported_and_does_not_hang_the_turn(
 
 async def test_the_sample_certificate_warns_every_round_but_sends(app: VoxApp) -> None:
     """It works on the shipped authority, and says what that costs each time."""
-    app.mesh = FakeMesh(answers=[answer("alpha", "Yes"), answer("beta", "Yes")],
-                        demo_ca=True)
+    app.mesh = FakeMesh(
+        answers=[answer("alpha", "Yes"), answer("beta", "Yes")], demo_ca=True
+    )
     async with app.run_test() as pilot:
         await pilot.pause()
         app.input_area.insert("[CNS]is it safe?[/CNS]")
@@ -387,7 +414,10 @@ async def test_consensus_can_be_turned_off(app: VoxApp) -> None:
         await pilot.pause()
         app.run_command("/consensus off")
         await pilot.pause()
-        assert json.loads(global_config_path().read_text())["consensus"]["enabled"] is False
+        assert (
+            json.loads(global_config_path().read_text())["consensus"]["enabled"]
+            is False
+        )
 
         app.input_area.insert("[CNS]question[/CNS]")
         app.action_send()
@@ -576,10 +606,8 @@ async def test_answering_names_the_conversation_it_belongs_to(app: VoxApp) -> No
             # call_from_thread work. No provider is reachable here, so it fails
             # after writing the line that matters: the request is recorded
             # before any model is called.
-            try:
+            with contextlib.suppress(Exception):
                 app.answer_for_peer("peer-01", "is it safe?", conversation="abc123")
-            except Exception:
-                pass
 
         await asyncio.to_thread(answer_off_thread)
         await pilot.pause()
@@ -657,9 +685,7 @@ async def test_the_answering_machine_shows_what_it_replied(app: VoxApp) -> None:
         # Their conversation, not ours: it never enters our session or the
         # context our own model is given.
         assert all(m.role != "peer" for m in app.session.messages)
-        assert "Yes." not in "".join(
-            m.content for m in app.build_request_messages()
-        )
+        assert "Yes." not in "".join(m.content for m in app.build_request_messages())
 
 
 async def test_answering_does_not_overwrite_our_own_round(app: VoxApp) -> None:
@@ -688,13 +714,19 @@ class SlowMesh(FakeMesh):
         super().__init__(*args, **kwargs)
         self.delay = delay
 
-    def ask_peers(self, question, verb="infer", limit=5, timeout=90.0,
-                  on_event=None, conversation=""):
+    def ask_peers(
+        self,
+        question,
+        verb="infer",
+        limit=5,
+        timeout=90.0,
+        on_event=None,
+        conversation="",
+    ):
         import time
 
         time.sleep(self.delay)
-        return super().ask_peers(question, verb, limit, timeout, on_event,
-                                 conversation)
+        return super().ask_peers(question, verb, limit, timeout, on_event, conversation)
 
 
 async def test_a_message_sent_mid_round_is_refused(app: VoxApp) -> None:
@@ -718,7 +750,9 @@ async def test_a_message_sent_mid_round_is_refused(app: VoxApp) -> None:
 
         assert "STILL ASKING THE MESH" in transcript(app)
         assert app.input_area.text, "the second message is kept, not swallowed"
-        assert [m.content for m in app.session.messages if m.role == "user"] == ["FIRST"]
+        assert [m.content for m in app.session.messages if m.role == "user"] == [
+            "FIRST"
+        ]
 
         await app.workers.wait_for_complete()
         await pilot.pause()
@@ -751,7 +785,8 @@ async def test_a_round_can_be_abandoned(app: VoxApp) -> None:
         app.action_send()
         await pilot.pause()
         assert [m.content for m in app.session.messages if m.role == "user"] == [
-            "FIRST", "SECOND"
+            "FIRST",
+            "SECOND",
         ]
 
 

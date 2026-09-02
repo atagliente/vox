@@ -8,6 +8,7 @@ so they are skipped unless ``VOX_TEST_MESH=1`` asks for them:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import shutil
@@ -37,6 +38,7 @@ from vox_chat.discovery.identity import (  # noqa: E402
     spiffe_id,
 )
 from vox_chat.discovery.registry import Observation, PeerState, Registry  # noqa: E402
+
 
 @pytest.fixture(scope="module")
 def pki() -> tuple[Path, Path]:
@@ -140,11 +142,13 @@ def test_mtls_handshake(pki: tuple[Path, Path]) -> None:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
-            with socket.create_connection(("127.0.0.1", server.port), timeout=3) as raw:
-                with context.wrap_socket(raw) as tls:
-                    tls.sendall(b'{"op":"WHOIS"}\n')
-                    assert not tls.recv(100)
-                    raise OSError("no answer")
+            with (
+                socket.create_connection(("127.0.0.1", server.port), timeout=3) as raw,
+                context.wrap_socket(raw) as tls,
+            ):
+                tls.sendall(b'{"op":"WHOIS"}\n')
+                assert not tls.recv(100)
+                raise OSError("no answer")
 
         # 3. impersonation: the announcement claims another agent id
         with pytest.raises(ssl.SSLCertVerificationError):
@@ -184,17 +188,27 @@ def test_ask_over_mtls(pki: tuple[Path, Path]) -> None:
         return {"answer": f"{question} -> yes", "model": "test:1b"}
 
     server = whois.WhoisServer(
-        {"agent_id": "answerer-01", "name": "answerer",
-         "capabilities": {"verbs": ["infer"]}},
+        {
+            "agent_id": "answerer-01",
+            "name": "answerer",
+            "capabilities": {"verbs": ["infer"]},
+        },
         identity=server_identity,
         ask_handler=handler,
     )
     server.start()
     try:
         streamed: list[tuple[str, str]] = []
-        reply = whois.ask("127.0.0.1", server.port, "answerer-01", client_identity,
-                          "is it safe", timeout=10, conversation="conv-42",
-                          on_event=lambda kind, text, ts: streamed.append((kind, text)))
+        reply = whois.ask(
+            "127.0.0.1",
+            server.port,
+            "answerer-01",
+            client_identity,
+            "is it safe",
+            timeout=10,
+            conversation="conv-42",
+            on_event=lambda kind, text, ts: streamed.append((kind, text)),
+        )
         assert reply["answer"] == "is it safe -> yes"
         assert reply["model"] == "test:1b"
         assert seen == [("asker-01", "is it safe", "conv-42")], (
@@ -204,21 +218,37 @@ def test_ask_over_mtls(pki: tuple[Path, Path]) -> None:
         assert streamed == [("reasoning", "weighing it"), ("text", "partial ")]
 
         # WHOIS still works on the same socket.
-        assert whois.query("127.0.0.1", server.port, "answerer-01",
-                           client_identity)["name"] == "answerer"
+        assert (
+            whois.query("127.0.0.1", server.port, "answerer-01", client_identity)[
+                "name"
+            ]
+            == "answerer"
+        )
 
         # A question that is too large never reaches the model.
         with pytest.raises(ValueError, match="bytes"):
-            whois.ask("127.0.0.1", server.port, "answerer-01", client_identity,
-                      "x" * (whois.MAX_ASK_BYTES + 1), timeout=10)
+            whois.ask(
+                "127.0.0.1",
+                server.port,
+                "answerer-01",
+                client_identity,
+                "x" * (whois.MAX_ASK_BYTES + 1),
+                timeout=10,
+            )
 
         # One at a time: the second caller is told to go away, not queued.
         results: list[str] = []
 
         def fire() -> None:
             try:
-                whois.ask("127.0.0.1", server.port, "answerer-01",
-                          client_identity, "concurrent", timeout=10)
+                whois.ask(
+                    "127.0.0.1",
+                    server.port,
+                    "answerer-01",
+                    client_identity,
+                    "concurrent",
+                    timeout=10,
+                )
                 results.append("answered")
             except ValueError as exc:
                 results.append(str(exc))
@@ -242,8 +272,14 @@ def test_a_node_that_does_not_answer_says_so(pki: tuple[Path, Path]) -> None:
     server.start()
     try:
         with pytest.raises(ValueError, match="ask not supported"):
-            whois.ask("127.0.0.1", server.port, "quiet-01",
-                      issue("caller-01", pki), "hello", timeout=10)
+            whois.ask(
+                "127.0.0.1",
+                server.port,
+                "quiet-01",
+                issue("caller-01", pki),
+                "hello",
+                timeout=10,
+            )
     finally:
         server.stop()
 
@@ -270,12 +306,14 @@ def test_integration(pki: tuple[Path, Path]) -> None:
     time.sleep(8)
     try:
         for agent in agents:
-            active = [p for p in agent.registry.snapshot() if p.state is PeerState.ACTIVE]
+            active = [
+                p for p in agent.registry.snapshot() if p.state is PeerState.ACTIVE
+            ]
             assert len(active) == 2, f"{agent.name}: {len(active)}/2"
 
         assert [p.name for p in agents[0].peers_for("transform")] == ["enricher"]
 
-        watcher = [p for p in agents[0].registry.snapshot() if p.name == "watcher"][0]
+        watcher = next(p for p in agents[0].registry.snapshot() if p.name == "watcher")
         # A passive agent is visible but deliberately kept out of routing.
         assert watcher.category == "OBSERVER"
         assert watcher not in agents[0].peers_for("observe")
@@ -283,7 +321,9 @@ def test_integration(pki: tuple[Path, Path]) -> None:
         # An intruder from another CA: its announcements no longer even parse,
         # because the certificate they carry is not one this mesh trusts.
         intruder = DiscoveryAgent(
-            identity=Identity.load("intruder-01", rogue_dir, ca_path=rogue_dir / "ca.crt"),
+            identity=Identity.load(
+                "intruder-01", rogue_dir, ca_path=rogue_dir / "ca.crt"
+            ),
             name="intruder",
             capabilities={"verbs": ["observe"]},
             announce_interval=2.0,
@@ -296,11 +336,9 @@ def test_integration(pki: tuple[Path, Path]) -> None:
 
         agents[2].stop()
         time.sleep(9)  # long enough for the reaper to notice
-        watcher = [p for p in agents[0].registry.snapshot() if p.name == "watcher"][0]
+        watcher = next(p for p in agents[0].registry.snapshot() if p.name == "watcher")
         assert watcher.state in (PeerState.SUSPECT, PeerState.DEAD)
     finally:
         for agent in agents:
-            try:
+            with contextlib.suppress(Exception):  # pragma: no cover - teardown
                 agent.stop()
-            except Exception:  # pragma: no cover - best effort teardown
-                pass

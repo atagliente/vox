@@ -15,16 +15,26 @@ from vox_chat.models import Message
 
 def sample_run() -> InspectionRun:
     run = InspectionRun(model="qwen2.5:3b", provider="local-ollama", top_k=3)
-    run.add("The", math.log(0.99), [Alternative("The", math.log(0.99)),
-                                    Alternative("A", math.log(0.01))])
-    run.add(" of", math.log(0.4), [Alternative(" of", math.log(0.4)),
-                                   Alternative(" in", math.log(0.35)),
-                                   Alternative(" to", math.log(0.25))])
+    run.add(
+        "The",
+        math.log(0.99),
+        [Alternative("The", math.log(0.99)), Alternative("A", math.log(0.01))],
+    )
+    run.add(
+        " of",
+        math.log(0.4),
+        [
+            Alternative(" of", math.log(0.4)),
+            Alternative(" in", math.log(0.35)),
+            Alternative(" to", math.log(0.25)),
+        ],
+    )
     return run
 
 
-def sample_report(inspection: InspectionRun | None = None,
-                  enabled: bool = True) -> reporting.Report:
+def sample_report(
+    inspection: InspectionRun | None = None, enabled: bool = True
+) -> reporting.Report:
     return reporting.Report(
         title="VOX session · qwen2.5:3b",
         created_at="2026-08-25T11:46:59+02:00",
@@ -35,8 +45,11 @@ def sample_report(inspection: InspectionRun | None = None,
         parameters={"temperature": 0.2, "max_tokens": 60, "agent_mode": False},
         messages=[
             Message(role="user", content="why is the sky blue?"),
-            Message(role="assistant", content="Because of scattering.",
-                    reasoning="Rayleigh, probably."),
+            Message(
+                role="assistant",
+                content="Because of scattering.",
+                reasoning="Rayleigh, probably.",
+            ),
         ],
         usage={"turns": 1, "completion_tokens": 33, "average_tokens_per_second": 13.63},
         inspection=inspection,
@@ -51,10 +64,15 @@ def test_the_question_titles_the_report() -> None:
 
 
 def test_all_formats_are_written(tmp_path: Path) -> None:
-    written = reporting.write(sample_report(sample_run()), directory=tmp_path,
-                              stem="run")
+    written = reporting.write(
+        sample_report(sample_run()), directory=tmp_path, stem="run"
+    )
     assert [path.name for path in written] == [
-        "run.html", "run.json", "run.md", "run.toon"]
+        "run.html",
+        "run.json",
+        "run.md",
+        "run.toon",
+    ]
     assert all(path.exists() and path.stat().st_size > 0 for path in written)
 
 
@@ -90,8 +108,9 @@ def test_the_html_escapes_what_the_model_wrote() -> None:
 
 
 def test_the_json_is_one_documented_schema(tmp_path: Path) -> None:
-    path = reporting.write(sample_report(sample_run()), formats=("json",),
-                           directory=tmp_path, stem="run")[0]
+    path = reporting.write(
+        sample_report(sample_run()), formats=("json",), directory=tmp_path, stem="run"
+    )[0]
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["schema"] == "vox.report/1"
     assert data["question"] == "why is the sky blue?"
@@ -115,8 +134,9 @@ def test_the_same_figures_appear_in_every_format(tmp_path: Path) -> None:
     html = reporting.render_html(report)
     markdown = reporting.render_markdown(report)
     data = json.loads(
-        reporting.write(report, formats=("json",), directory=tmp_path, stem="r")[0]
-        .read_text(encoding="utf-8")
+        reporting.write(report, formats=("json",), directory=tmp_path, stem="r")[
+            0
+        ].read_text(encoding="utf-8")
     )
     decisions = data["inspection"]["statistics"]["decision_points"]
     assert decisions == len(run.decisions) == 1
@@ -132,7 +152,7 @@ def test_toon_is_a_valid_document_and_carries_the_same_figures(tmp_path: Path) -
     toon = reporting.render_toon(report)
     assert toon.startswith("schema: vox.report/1")
     assert "question: why is the sky blue?" in toon
-    assert "model: \"qwen2.5:3b\"" in toon, "a colon forces quoting"
+    assert 'model: "qwen2.5:3b"' in toon, "a colon forces quoting"
     assert "Because of scattering." in toon
     assert "Rayleigh, probably." in toon, "thinking is kept"
     assert "13.63" in toon, "the speed is the same here as everywhere"
@@ -160,8 +180,7 @@ def test_toon_escapes_and_quotes_what_the_model_wrote() -> None:
 
 def test_toon_written_by_the_write_path_matches_render(tmp_path: Path) -> None:
     report = sample_report()
-    path = reporting.write(report, directory=tmp_path, stem="r",
-                           formats=("toon",))[0]
+    path = reporting.write(report, directory=tmp_path, stem="r", formats=("toon",))[0]
     assert path.suffix == ".toon"
     assert path.exists() and path.stat().st_size > 0
     assert reporting.render_toon(report) == path.read_text(encoding="utf-8")
@@ -182,8 +201,9 @@ def test_inspection_on_but_empty_says_so() -> None:
     assert "no token data arrived" in html
 
 
-def test_reports_default_to_the_current_directory(tmp_path: Path,
-                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reports_default_to_the_current_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """They belong to the work, not to a hidden folder in the home."""
     monkeypatch.chdir(tmp_path)
     written = reporting.write(sample_report(), formats=("md",), stem="here")

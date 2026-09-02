@@ -26,7 +26,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+dev = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "ruff>=0.16",
+  "mypy>=1.11",
+  "pre-commit>=3.7",
+]
 
 [project.scripts]
 vox = "vox_chat.__main__:main"
@@ -40,7 +46,72 @@ include = ["vox_chat*"]
 [tool.setuptools.package-data]
 # The demo authority, so a fresh download joins a mesh without provisioning.
 "vox_chat.demo_pki" = ["*.crt", "*.key", "*.md"]
+# The code is annotated throughout; the marker is what lets a type checker
+# downstream see any of it.
+"vox_chat" = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["vox_chat"]
+branch = true
+omit = [
+  # The vendored demo authority is data, and __main__ is the entry point the
+  # tests drive through the app rather than by importing it.
+  "vox_chat/demo_pki/*",
+]
+
+[tool.coverage.report]
+# The defensive branches are already marked in the source, one comment each
+# saying why they cannot be reached from a test.
+exclude_also = [
+  "pragma: no cover",
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+]
+show_missing = true
+skip_covered = true
+
+[tool.mypy]
+python_version = "3.11"
+# textual, rich and openai ship types unevenly; demanding stubs for them would
+# mean silencing more than it found.
+ignore_missing_imports = true
+strict = true
+# The pure modules first — no UI, no sockets, no provider — because they are
+# already clean under strict and can be held there from today. The rest of the
+# tree reports around a hundred findings; it joins this list one module at a
+# time, as each is cleared, rather than all at once behind a wall of silencing.
+files = [
+  "vox_chat/code_blocks.py",
+  "vox_chat/inspection.py",
+  "vox_chat/models.py",
+  "vox_chat/reasoning.py",
+  "vox_chat/usage.py",
+]
+
+[tool.ruff]
+# 88 is what the code already does by hand; the formatter has to agree with
+# the existing diff, not rewrite 21k lines to introduce itself.
+line-length = 88
+target-version = "py311"
+# build/lib is a stale copy of the package left by setuptools, not source.
+extend-exclude = ["build"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+  # The formatter enforces the width; what E501 has left to complain about is
+  # string literals it cannot split — SVG, HTML fixtures, message text — and
+  # breaking those by hand makes them harder to read, not easier.
+  "E501",
+  # Textual takes BINDINGS, and this code takes KEYS, as class-level lists.
+  # That is the framework's API, not a mutable default by accident.
+  "RUF012",
+  # The interface text uses real typography — en dashes, curly quotes, middle
+  # dots. They are deliberate, not homoglyphs slipped in by mistake.
+  "RUF001",
+]

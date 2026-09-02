@@ -16,19 +16,21 @@ from dataclasses import dataclass, field, replace
 
 class PeerState(enum.Enum):
     PROBATION = "PROBATION"  # seen, not yet interrogated: no work is routed to it
-    ACTIVE = "ACTIVE"        # WHOIS completed, classified, usable
-    SUSPECT = "SUSPECT"      # heartbeats missing: probably dead
-    DEAD = "DEAD"            # to be dropped from routing
+    ACTIVE = "ACTIVE"  # WHOIS completed, classified, usable
+    SUSPECT = "SUSPECT"  # heartbeats missing: probably dead
+    DEAD = "DEAD"  # to be dropped from routing
 
 
 class Observation(enum.Enum):
     """What receiving an announcement turned out to mean."""
 
-    NEW = "NEW"                    # never seen: a WHOIS is needed
+    NEW = "NEW"  # never seen: a WHOIS is needed
     REINCARNATED = "REINCARNATED"  # restarted or moved: the cache is void, WHOIS again
-    CAPS_CHANGED = "CAPS_CHANGED"  # same incarnation, different capabilities: WHOIS again
-    HEARTBEAT = "HEARTBEAT"        # known and unchanged: only last_seen moves
-    STALE = "STALE"                # an announcement from an older incarnation: ignored
+    CAPS_CHANGED = (
+        "CAPS_CHANGED"  # same incarnation, different capabilities: WHOIS again
+    )
+    HEARTBEAT = "HEARTBEAT"  # known and unchanged: only last_seen moves
+    STALE = "STALE"  # an announcement from an older incarnation: ignored
 
 
 @dataclass
@@ -56,8 +58,12 @@ class Registry:
     """Thread-safe. Every agent keeps its own: the view is eventually
     consistent, and there is no central authority."""
 
-    def __init__(self, suspect_after: float = 3.0, dead_after: float = 5.0,
-                 announce_interval: float = 60.0):
+    def __init__(
+        self,
+        suspect_after: float = 3.0,
+        dead_after: float = 5.0,
+        announce_interval: float = 60.0,
+    ):
         # The thresholds are multiples of the announce interval rather than
         # fixed seconds, so changing the interval cannot break the detector.
         self._suspect_after = suspect_after * announce_interval
@@ -109,7 +115,9 @@ class Registry:
             if known.state in (PeerState.SUSPECT, PeerState.DEAD):
                 # A false positive from the failure detector, or a return
                 # after a network partition.
-                known.state = PeerState.ACTIVE if known.capabilities else PeerState.PROBATION
+                known.state = (
+                    PeerState.ACTIVE if known.capabilities else PeerState.PROBATION
+                )
 
             if announce.caps_digest != known.caps_digest:
                 known.caps_digest = announce.caps_digest
@@ -118,8 +126,14 @@ class Registry:
 
             return Observation.HEARTBEAT, known
 
-    def promote(self, agent_id: str, name: str, capabilities: dict,
-                category: str, taxonomy_version: str) -> None:
+    def promote(
+        self,
+        agent_id: str,
+        name: str,
+        capabilities: dict,
+        category: str,
+        taxonomy_version: str,
+    ) -> None:
         """End the probation after a successful WHOIS."""
         with self._lock:
             peer = self._peers.get(agent_id)
@@ -145,8 +159,10 @@ class Registry:
                 previous = peer.state
                 if silence > self._dead_after and peer.state is not PeerState.DEAD:
                     peer.state = PeerState.DEAD
-                elif (self._suspect_after < silence <= self._dead_after
-                      and peer.state in (PeerState.ACTIVE, PeerState.PROBATION)):
+                elif (
+                    self._suspect_after < silence <= self._dead_after
+                    and peer.state in (PeerState.ACTIVE, PeerState.PROBATION)
+                ):
                     peer.state = PeerState.SUSPECT
                 if peer.state is not previous:
                     transitions.append((peer, previous))

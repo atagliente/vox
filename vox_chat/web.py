@@ -84,7 +84,7 @@ class WebSettings:
     auto_max_chars: int = 6000
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "WebSettings":
+    def from_config(cls, config: dict[str, Any]) -> WebSettings:
         section = config.get("web", {}) if isinstance(config, dict) else {}
         if not isinstance(section, dict):
             section = {}
@@ -103,16 +103,13 @@ class WebSettings:
             ),
             allow_fetch=bool(section.get("allow_fetch", defaults.allow_fetch)),
             allow_private_addresses=bool(
-                section.get("allow_private_addresses",
-                            defaults.allow_private_addresses)
+                section.get("allow_private_addresses", defaults.allow_private_addresses)
             ),
             language=str(section.get("language", "") or ""),
             auto=bool(section.get("auto", defaults.auto)),
             auto_results=int(section.get("auto_results", defaults.auto_results)),
             auto_fetch=int(section.get("auto_fetch", defaults.auto_fetch)),
-            auto_max_chars=int(
-                section.get("auto_max_chars", defaults.auto_max_chars)
-            ),
+            auto_max_chars=int(section.get("auto_max_chars", defaults.auto_max_chars)),
         )
 
     def unusable(self) -> str | None:
@@ -165,8 +162,13 @@ def _is_private(host: str) -> bool:
             parsed = ipaddress.ip_address(address.split("%")[0])
         except ValueError:
             continue
-        if (parsed.is_private or parsed.is_loopback or parsed.is_link_local
-                or parsed.is_reserved or parsed.is_multicast):
+        if (
+            parsed.is_private
+            or parsed.is_loopback
+            or parsed.is_link_local
+            or parsed.is_reserved
+            or parsed.is_multicast
+        ):
             return True
     return False
 
@@ -175,7 +177,9 @@ def check_url(url: str, settings: WebSettings, *, internal: bool = False) -> str
     """Refuse anything that is not a plain http(s) request to a public host."""
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        raise WebError(f"only http and https are fetched, not {parsed.scheme or 'that'}")
+        raise WebError(
+            f"only http and https are fetched, not {parsed.scheme or 'that'}"
+        )
     if not parsed.hostname:
         raise WebError("that URL has no host")
     # The configured search endpoint is normally the operator's own SearXNG on
@@ -190,14 +194,21 @@ def check_url(url: str, settings: WebSettings, *, internal: bool = False) -> str
     return url
 
 
-def _open(url: str, settings: WebSettings, headers: dict[str, str] | None = None,
-          internal: bool = False):
+def _open(
+    url: str,
+    settings: WebSettings,
+    headers: dict[str, str] | None = None,
+    internal: bool = False,
+):
     check_url(url, settings, internal=internal)
-    request = urllib.request.Request(url, headers={
-        "User-Agent": USER_AGENT,
-        "Accept-Encoding": "identity",  # no decompression to write or get wrong
-        **(headers or {}),
-    })
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept-Encoding": "identity",  # no decompression to write or get wrong
+            **(headers or {}),
+        },
+    )
     try:
         return urllib.request.urlopen(request, timeout=settings.timeout_seconds)
     except urllib.error.HTTPError as exc:
@@ -219,7 +230,7 @@ def _open(url: str, settings: WebSettings, headers: dict[str, str] | None = None
                 f"nothing is listening on {where} - /web start, or F6"
             ) from exc
         raise WebError(f"cannot reach {where}: {exc.reason}") from exc
-    except (TimeoutError, socket.timeout) as exc:
+    except TimeoutError as exc:
         raise WebError(f"{url} timed out after {settings.timeout_seconds:g}s") from exc
     except OSError as exc:  # pragma: no cover - platform specific
         raise WebError(f"cannot reach {url}: {exc}") from exc
@@ -228,8 +239,9 @@ def _open(url: str, settings: WebSettings, headers: dict[str, str] | None = None
 # --------------------------------------------------------------------- search
 
 
-def search(query: str, settings: WebSettings, notes: list[str] | None = None
-           ) -> list[Result]:
+def search(
+    query: str, settings: WebSettings, notes: list[str] | None = None
+) -> list[Result]:
     """Run one search. Raises :class:`WebError` rather than returning nothing.
 
     ``notes`` collects anything the operator should see about how the answer
@@ -251,8 +263,9 @@ def search(query: str, settings: WebSettings, notes: list[str] | None = None
     return results[: settings.max_results]
 
 
-def _searxng(query: str, settings: WebSettings,
-             notes: list[str] | None = None) -> list[Result]:
+def _searxng(
+    query: str, settings: WebSettings, notes: list[str] | None = None
+) -> list[Result]:
     params = {"q": query, "format": "json"}
     if settings.language:
         params["language"] = settings.language
@@ -293,10 +306,15 @@ def _brave(query: str, settings: WebSettings) -> list[Result]:
     if settings.language:
         params["search_lang"] = settings.language
     url = BRAVE_ENDPOINT + "?" + urllib.parse.urlencode(params)
-    with _open(url, settings, headers={
-        "Accept": "application/json",
-        "X-Subscription-Token": settings.api_key,
-    }, internal=True) as response:
+    with _open(
+        url,
+        settings,
+        headers={
+            "Accept": "application/json",
+            "X-Subscription-Token": settings.api_key,
+        },
+        internal=True,
+    ) as response:
         payload = json.loads(response.read(2_000_000))
     web = payload.get("web") or {}
     return [
@@ -325,9 +343,29 @@ class _TextExtractor(HTMLParser):
     # a table, and without a break between its cells the label and the value
     # arrive glued together — "Cod. postale72022" — which is exactly the shape
     # a model fails to read an answer out of.
-    BLOCKS = {"p", "div", "br", "li", "tr", "td", "th", "dt", "dd", "section",
-              "article", "h1", "h2", "h3", "h4", "h5", "h6", "pre",
-              "blockquote", "caption", "figcaption"}
+    BLOCKS = {
+        "p",
+        "div",
+        "br",
+        "li",
+        "tr",
+        "td",
+        "th",
+        "dt",
+        "dd",
+        "section",
+        "article",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "pre",
+        "blockquote",
+        "caption",
+        "figcaption",
+    }
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -402,7 +440,9 @@ def fetch(url: str, settings: WebSettings) -> Page:
         raise WebError("web.allow_fetch is off; only search results are available")
 
     with _open(url, settings) as response:
-        content_type = (response.headers.get("Content-Type") or "").split(";")[0].strip()
+        content_type = (
+            (response.headers.get("Content-Type") or "").split(";")[0].strip()
+        )
         if content_type and not any(
             content_type.startswith(kind) for kind in TEXT_TYPES
         ):
@@ -556,12 +596,12 @@ def excerpt(text: str, query: str, budget: int, head: int = 2600) -> str:
 
     kept: list[tuple[int, str]] = []
     used = 0
-    for score, index, block in scored:
+    for _score, index, block in scored:
         if used + len(block) > remaining:
             continue
         kept.append((index, block))
         used += len(block) + 2
-    kept.sort()   # back into the order they were written in
+    kept.sort()  # back into the order they were written in
     body = "\n\n".join(block for _, block in kept)
     return (opening + "\n\n" + body).strip() if body else text[:budget]
 
@@ -597,11 +637,17 @@ def research_prompt(sources: Sources, limit: int = 6000) -> str:
     for page in sources.pages:
         share = budget // max(1, len(sources.pages))
         text = excerpt(page.text, sources.query, share)
-        lines.extend([
-            "",
-            f"--- FROM: {page.title or page.url} ---",
-            f"{page.url}",
-            text + ("\n[the rest of the page is not shown]"
-                    if len(text) < len(page.text) else ""),
-        ])
+        lines.extend(
+            [
+                "",
+                f"--- FROM: {page.title or page.url} ---",
+                f"{page.url}",
+                text
+                + (
+                    "\n[the rest of the page is not shown]"
+                    if len(text) < len(page.text)
+                    else ""
+                ),
+            ]
+        )
     return "\n".join(lines)

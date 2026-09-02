@@ -6,12 +6,14 @@ calls are merged by index, because providers send them fragment by fragment.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import threading
 import time
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Iterator, Literal, Mapping, Sequence
+from typing import Any, Literal
 
 import openai
 from openai import OpenAI
@@ -20,9 +22,7 @@ from .models import Message, ToolCall
 from .reasoning import ThinkSplitter
 from .usage import TokenUsage
 
-ErrorKind = Literal[
-    "connection", "timeout", "http", "cancelled", "protocol", "context"
-]
+ErrorKind = Literal["connection", "timeout", "http", "cancelled", "protocol", "context"]
 
 
 class LLMError(Exception):
@@ -165,8 +165,9 @@ def consume_stream(
         if text:
             # Some models inline their thinking in the content instead.
             for kind, piece in splitter.feed(text):
-                yield StreamEvent("reasoning" if kind == "reasoning" else "text",
-                                  text=piece)
+                yield StreamEvent(
+                    "reasoning" if kind == "reasoning" else "text", text=piece
+                )
         # Logprobs ride along with the delta that produced them, which is the
         # only honest way to tell a thinking token from an answer token. A
         # chunk that carries a logprob but no text — measured to be about a
@@ -226,8 +227,13 @@ def to_api_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
 class LLMClient:
     """Thin wrapper over :class:`openai.OpenAI` with readable failures."""
 
-    def __init__(self, base_url: str, api_key: str, timeout: float = 600.0,
-                 extra_body: Mapping[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        timeout: float = 600.0,
+        extra_body: Mapping[str, Any] | None = None,
+    ) -> None:
         self.base_url = base_url
         self.timeout = float(timeout)
         self.extra_body: dict[str, Any] = dict(extra_body or {})
@@ -264,17 +270,15 @@ class LLMClient:
         for target in (stream, request_client):
             closer = getattr(target, "close", None)
             if callable(closer):
-                try:
+                # Cancellation is best-effort; the worker converts the
+                # resulting transport error into a cancelled event.
+                with contextlib.suppress(Exception):
                     closer()
-                except Exception:
-                    # Cancellation is best-effort; the worker converts the
-                    # resulting transport error into a cancelled event.
-                    pass
                 closed = True
         return closed
 
     @classmethod
-    def from_provider(cls, provider: Mapping[str, Any]) -> "LLMClient":
+    def from_provider(cls, provider: Mapping[str, Any]) -> LLMClient:
         return cls(
             base_url=str(provider.get("base_url", "")),
             api_key=str(provider.get("api_key", "")),
@@ -320,12 +324,10 @@ class LLMClient:
 
     def close(self) -> None:
         """Release the connection pool. Safe to call more than once."""
-        try:
+        # Shutting down is best effort: a pool that is already gone, or a
+        # socket the peer closed first, is not a problem worth reporting.
+        with contextlib.suppress(OSError, RuntimeError):
             self._client.close()
-        except (OSError, RuntimeError):
-            # Shutting down is best effort: a pool that is already gone, or a
-            # socket the peer closed first, is not a problem worth reporting.
-            pass
 
     def list_models(self, timeout: float | None = None) -> list[str]:
         """Non-destructive reachability check against ``/v1/models``."""
@@ -336,7 +338,9 @@ class LLMClient:
                 client = client.with_options(timeout=timeout)
             response = client.models.list()
         except openai.APITimeoutError as exc:
-            raise LLMError("timeout", f"provider timed out: {self.base_url}", str(exc)) from exc
+            raise LLMError(
+                "timeout", f"provider timed out: {self.base_url}", str(exc)
+            ) from exc
         except openai.APIConnectionError as exc:
             raise LLMError(
                 "connection", f"cannot reach provider: {self.base_url}", str(exc)
@@ -496,10 +500,8 @@ class LLMClient:
             for target in (stream, request_client):
                 closer = getattr(target, "close", None)
                 if callable(closer):
-                    try:
+                    with contextlib.suppress(Exception):
                         closer()
-                    except Exception:
-                        pass
 
 
 def _unwrap_message(text: str) -> str:

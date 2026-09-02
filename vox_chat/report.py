@@ -15,13 +15,13 @@ the same figures for an LLM to read back.
 from __future__ import annotations
 
 import html
-import json
 import math
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from . import __version__
 from .inspection import InspectionRun
@@ -170,7 +170,7 @@ def render_markdown(report: Report) -> str:
             continue
         label = _ROLE_LABEL.get(message.role, message.role.upper())
         if message.reasoning:
-            lines.extend([f"**THINKING**", "", "```text", message.reasoning, "```", ""])
+            lines.extend(["**THINKING**", "", "```text", message.reasoning, "```", ""])
         lines.extend([f"**{label}**", "", message.content or "_(empty)_", ""])
 
     lines.extend(["## Statistics", "", "| | |", "| --- | --- |"])
@@ -179,20 +179,29 @@ def render_markdown(report: Report) -> str:
     run = report.inspection
     if run is not None and len(run):
         stats = run.stats()
-        lines.extend(f"| {label} | {value} |" for label, value in _pairs(
-            {k: v for k, v in stats.items() if k not in ("criteria", "thinking", "answer")}
-        ))
+        lines.extend(
+            f"| {label} | {value} |"
+            for label, value in _pairs(
+                {
+                    k: v
+                    for k, v in stats.items()
+                    if k not in ("criteria", "thinking", "answer")
+                }
+            )
+        )
         lines.extend(["", f"_{_phase_line(run)}_", ""])
         decisions = run.decisions
         if decisions:
             # The full token table is unreadable in Markdown; the decision
             # points are the part worth reading here.
-            lines.extend([
-                "### Decision points",
-                "",
-                "| # | token | p | top-k entropy | margin | runners-up |",
-                "| --- | --- | --- | --- | --- | --- |",
-            ])
+            lines.extend(
+                [
+                    "### Decision points",
+                    "",
+                    "| # | token | p | top-k entropy | margin | runners-up |",
+                    "| --- | --- | --- | --- | --- | --- |",
+                ]
+            )
             for record in decisions:
                 runners = " · ".join(
                     f"`{a.token}` {a.probability:.2f}" for a in record.runners_up[:3]
@@ -206,14 +215,16 @@ def render_markdown(report: Report) -> str:
     else:
         lines.extend(["", "_Inspection was off, so there are no token figures._"])
 
-    lines.extend([
-        "",
-        "## Provenance",
-        "",
-        f"- VOX {report.vox_version}, {report.created_at}",
-        "- entropy is computed over the returned top-k only; the API does not "
-        "return the tail of the vocabulary",
-    ])
+    lines.extend(
+        [
+            "",
+            "## Provenance",
+            "",
+            f"- VOX {report.vox_version}, {report.created_at}",
+            "- entropy is computed over the returned top-k only; the API does not "
+            "return the tail of the vocabulary",
+        ]
+    )
     lines.extend(f"- {note}" for note in report.notes)
     return "\n".join(lines) + "\n"
 
@@ -274,14 +285,16 @@ def render_html(report: Report) -> str:
         f"<h1>{html.escape(report.title)}</h1>",
         f"<p class='question'>{html.escape(report.question)}</p>",
         "<h2>Setup</h2><table>",
-        _rows_html([
-            ("model", report.model),
-            ("provider", report.provider),
-            ("endpoint", report.endpoint),
-            ("role", report.role),
-            ("conversation", report.conversation_id),
-            *_pairs(report.parameters),
-        ]),
+        _rows_html(
+            [
+                ("model", report.model),
+                ("provider", report.provider),
+                ("endpoint", report.endpoint),
+                ("role", report.role),
+                ("conversation", report.conversation_id),
+                *_pairs(report.parameters),
+            ]
+        ),
         "</table>",
         "<h2>Exchange</h2>",
     ]
@@ -305,9 +318,11 @@ def render_html(report: Report) -> str:
     run = report.inspection
     if run is not None and len(run):
         stats = run.stats()
-        parts.append(_rows_html(_pairs(
-            {k: v for k, v in stats.items() if k not in ("criteria",)}
-        )))
+        parts.append(
+            _rows_html(
+                _pairs({k: v for k, v in stats.items() if k not in ("criteria",)})
+            )
+        )
         parts.append("</table>")
         parts.append(f"<p>{html.escape(_phase_line(run))}</p>")
         parts.append("<h3>Decision points</h3><table>")
@@ -417,7 +432,7 @@ def _toon_quote(s: str) -> str:
         if esc is not None:
             out.append(esc)
         elif ord(ch) < 0x20:
-            out.append("\\u%04x" % ord(ch))
+            out.append(f"\\u{ord(ch):04x}")
         else:
             out.append(ch)
     out.append('"')
@@ -441,9 +456,7 @@ def _toon_needs_quotes(s: str, delimiter: str) -> bool:
         return True
     if any(ord(ch) < 0x20 for ch in s):
         return True
-    if s[0] in "#-":
-        return True
-    return False
+    return s[0] in "#-"
 
 
 def _toon_string(s: str, delimiter: str) -> str:
@@ -497,9 +510,7 @@ def _is_uniform_column(column: Sequence[Any]) -> bool:
         subkeys = set(column[0])
         if any(set(v) != subkeys for v in column):
             return False
-        return all(
-            _is_uniform_column([v[k] for v in column]) for k in column[0]
-        )
+        return all(_is_uniform_column([v[k] for v in column]) for k in column[0])
     return False
 
 
@@ -549,8 +560,9 @@ def _field_header(entry: Any, delimiter: str) -> str:
     return f"{_toon_key(name)}{{{inner}}}"
 
 
-def _row_cells(element: dict[str, Any], fields: Sequence[Any],
-               delimiter: str) -> list[str]:
+def _row_cells(
+    element: dict[str, Any], fields: Sequence[Any], delimiter: str
+) -> list[str]:
     """Leaf cells for one tabular/entry row, in depth-first pre-order."""
     cells: list[str] = []
     for entry in fields:
@@ -567,14 +579,16 @@ def _delim_symbol(delimiter: str) -> str:
     return "" if delimiter == "," else delimiter
 
 
-def _toon_object(mapping: dict[str, Any], depth: int,
-                 lines: list[str], delimiter: str) -> None:
+def _toon_object(
+    mapping: dict[str, Any], depth: int, lines: list[str], delimiter: str
+) -> None:
     for key, value in mapping.items():
         _toon_field(key, value, depth, lines, delimiter)
 
 
-def _toon_field(key: str, value: Any, depth: int,
-                lines: list[str], delimiter: str) -> None:
+def _toon_field(
+    key: str, value: Any, depth: int, lines: list[str], delimiter: str
+) -> None:
     prefix = _toon_indent(depth)
     if isinstance(value, dict):
         if value and _is_keyed_tabular(value):
@@ -589,8 +603,9 @@ def _toon_field(key: str, value: Any, depth: int,
         lines.append(f"{prefix}{_toon_key(key)}: {_toon_scalar(value, delimiter)}")
 
 
-def _toon_keyed_field(key: str, value: dict[str, Any], depth: int,
-                      lines: list[str], delimiter: str) -> None:
+def _toon_keyed_field(
+    key: str, value: dict[str, Any], depth: int, lines: list[str], delimiter: str
+) -> None:
     entries = list(value.items())
     fields = _field_entries([v for _, v in entries])
     fieldstr = delimiter.join(_field_header(f, delimiter) for f in fields)
@@ -602,13 +617,13 @@ def _toon_keyed_field(key: str, value: dict[str, Any], depth: int,
     for entry_key, entry_value in entries:
         cells = _row_cells(entry_value, fields, delimiter)
         lines.append(
-            f"{_toon_indent(depth + 1)}{_toon_key(entry_key)}: "
-            f"{delimiter.join(cells)}"
+            f"{_toon_indent(depth + 1)}{_toon_key(entry_key)}: {delimiter.join(cells)}"
         )
 
 
-def _toon_array_field(key: str, value: list[Any], depth: int,
-                      lines: list[str], delimiter: str) -> None:
+def _toon_array_field(
+    key: str, value: list[Any], depth: int, lines: list[str], delimiter: str
+) -> None:
     prefix = _toon_indent(depth)
     if not value:
         lines.append(f"{prefix}{_toon_key(key)}: []")
@@ -620,9 +635,10 @@ def _toon_array_field(key: str, value: list[Any], depth: int,
             f"[{len(value)}{_delim_symbol(delimiter)}]{{{fieldstr}}}:"
         )
         for element in value:
-            lines.append(_toon_indent(depth + 1) + delimiter.join(
-                _row_cells(element, fields, delimiter)
-            ))
+            lines.append(
+                _toon_indent(depth + 1)
+                + delimiter.join(_row_cells(element, fields, delimiter))
+            )
     elif all(_is_primitive(e) for e in value):
         inline = delimiter.join(_toon_scalar(e, delimiter) for e in value)
         lines.append(
@@ -631,15 +647,13 @@ def _toon_array_field(key: str, value: list[Any], depth: int,
         )
     else:
         lines.append(
-            f"{prefix}{_toon_key(key)}"
-            f"[{len(value)}{_delim_symbol(delimiter)}]:"
+            f"{prefix}{_toon_key(key)}[{len(value)}{_delim_symbol(delimiter)}]:"
         )
         for element in value:
             _toon_list_item(element, depth + 1, lines, delimiter)
 
 
-def _toon_list_item(element: Any, depth: int,
-                    lines: list[str], delimiter: str) -> None:
+def _toon_list_item(element: Any, depth: int, lines: list[str], delimiter: str) -> None:
     """One element of a list-form array at ``depth`` (§9.2, §9.4, §10)."""
     prefix = _toon_indent(depth)
     if isinstance(element, dict):
@@ -648,8 +662,7 @@ def _toon_list_item(element: Any, depth: int,
             return
         items = list(element.items())
         first_key, first_value = items[0]
-        _toon_list_object_first(prefix, first_key, first_value, depth,
-                                lines, delimiter)
+        _toon_list_object_first(prefix, first_key, first_value, depth, lines, delimiter)
         for key, value in items[1:]:
             _toon_field(key, value, depth + 1, lines, delimiter)
     elif isinstance(element, list):
@@ -668,8 +681,9 @@ def _toon_list_item(element: Any, depth: int,
         lines.append(prefix + "- " + _toon_scalar(element, delimiter))
 
 
-def _toon_list_object_first(prefix: str, key: str, value: Any, depth: int,
-                            lines: list[str], delimiter: str) -> None:
+def _toon_list_object_first(
+    prefix: str, key: str, value: Any, depth: int, lines: list[str], delimiter: str
+) -> None:
     """The first field of a list-item object sits on the hyphen line (§10)."""
     if isinstance(value, dict):
         if value and _is_keyed_tabular(value):
@@ -696,8 +710,14 @@ def _toon_list_object_first(prefix: str, key: str, value: Any, depth: int,
         lines.append(f"{prefix}- {_toon_key(key)}: {_toon_scalar(value, delimiter)}")
 
 
-def _toon_list_object_array(prefix: str, key: str, value: list[Any], depth: int,
-                            lines: list[str], delimiter: str) -> None:
+def _toon_list_object_array(
+    prefix: str,
+    key: str,
+    value: list[Any],
+    depth: int,
+    lines: list[str],
+    delimiter: str,
+) -> None:
     if not value:
         lines.append(f"{prefix}- {_toon_key(key)}: []")
     elif _is_tabular(value):
@@ -708,9 +728,10 @@ def _toon_list_object_array(prefix: str, key: str, value: list[Any], depth: int,
             f"[{len(value)}{_delim_symbol(delimiter)}]{{{fieldstr}}}:"
         )
         for element in value:
-            lines.append(_toon_indent(depth + 2) + delimiter.join(
-                _row_cells(element, fields, delimiter)
-            ))
+            lines.append(
+                _toon_indent(depth + 2)
+                + delimiter.join(_row_cells(element, fields, delimiter))
+            )
     elif all(_is_primitive(e) for e in value):
         inline = delimiter.join(_toon_scalar(e, delimiter) for e in value)
         lines.append(
@@ -719,8 +740,7 @@ def _toon_list_object_array(prefix: str, key: str, value: list[Any], depth: int,
         )
     else:
         lines.append(
-            f"{prefix}- {_toon_key(key)}"
-            f"[{len(value)}{_delim_symbol(delimiter)}]:"
+            f"{prefix}- {_toon_key(key)}[{len(value)}{_delim_symbol(delimiter)}]:"
         )
         for element in value:
             _toon_list_item(element, depth + 2, lines, delimiter)
@@ -747,8 +767,12 @@ def write_toon(report: Report, path: Path) -> Path:
 # ------------------------------------------------------------------ writing
 
 
-def write(report: Report, formats: Sequence[str] = FORMATS,
-          directory: Path | None = None, stem: str | None = None) -> list[Path]:
+def write(
+    report: Report,
+    formats: Sequence[str] = FORMATS,
+    directory: Path | None = None,
+    stem: str | None = None,
+) -> list[Path]:
     """Write the report in each requested format; returns the files written."""
     # Reports belong to the work, so they land in the current directory
     # unless the caller names another one.

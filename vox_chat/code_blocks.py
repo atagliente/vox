@@ -37,7 +37,7 @@ def extract(text: str) -> list[CodeBlock]:
     A fence left open at the end of the text still produces a block, marked
     ``closed=False``.
     """
-    if not text or "```" not in text and "~~~" not in text:
+    if not text or ("```" not in text and "~~~" not in text):
         return []
     blocks: list[CodeBlock] = []
     fence: str | None = None
@@ -83,7 +83,7 @@ def render_panel(blocks: list[CodeBlock], max_lines: int = 400) -> str:
         lines.append("")
         code_lines = block.code.splitlines() or [""]
         if len(code_lines) > budget:
-            code_lines = code_lines[:budget] + ["… (truncated)"]
+            code_lines = [*code_lines[:budget], "… (truncated)"]
         lines.extend(code_lines)
         lines.append("")
         budget -= len(code_lines)

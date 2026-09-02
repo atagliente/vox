@@ -14,22 +14,24 @@ That is a deliberate act, so the controller reports exactly what it did.
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import getpass
 import hashlib
-import os
 import re
-import secrets
 import socket
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .logging_setup import get_logger
 from .storage import vox_home
+
+if TYPE_CHECKING:  # consensus imports mesh, so this stays out of runtime.
+    from .consensus import PeerAnswer
 
 log = get_logger("mesh")
 
@@ -42,7 +44,7 @@ class MeshError(Exception):
     """Something stopped the mesh; the chat carries on regardless."""
 
 
-def pki_dir(settings: "MeshSettings" | None = None) -> Path:
+def pki_dir(settings: MeshSettings | None = None) -> Path:
     if settings is not None and settings.pki_dir:
         return Path(settings.pki_dir).expanduser()
     return vox_home() / "pki"
@@ -92,7 +94,7 @@ def machine_hash() -> str:
         except Exception:  # pragma: no cover - depends on the environment
             user = "vox"
         host = socket.gethostname().split(".")[0] or "host"
-        seed = f"{user}@{host}".encode("utf-8")
+        seed = f"{user}@{host}".encode()
     return hashlib.sha256(seed).hexdigest()[:ID_HASH_CHARS]
 
 
@@ -117,7 +119,7 @@ class MeshSettings:
     demo_ca: bool = True
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "MeshSettings":
+    def from_config(cls, config: dict[str, Any]) -> MeshSettings:
         section = config.get("mesh", {}) if isinstance(config, dict) else {}
         if not isinstance(section, dict):
             section = {}
@@ -213,10 +215,8 @@ def seed_demo_ca(directory: Path) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     for name in ("ca.crt", "ca.key"):
         shutil.copy(demo_pki_dir() / name, directory / name)
-    try:
+    with contextlib.suppress(OSError):  # pragma: no cover - no POSIX modes on Windows
         (directory / "ca.key").chmod(0o600)
-    except OSError:  # pragma: no cover - Windows has no POSIX modes
-        pass
     log.warning(
         "seeded %s with the demo authority shipped with VOX; its private key is "
         "public, so replace it before the mesh carries anything that matters",
@@ -273,8 +273,9 @@ def use_demo_ca(directory: Path, agent_id: str):
     return _swap_ca(directory, agent_id, seed=True)
 
 
-def ensure_identity(agent_id: str, directory: Path, provision: bool = True,
-                    demo: bool = True):
+def ensure_identity(
+    agent_id: str, directory: Path, provision: bool = True, demo: bool = True
+):
     """Load this agent's identity, creating the CA and certificate if needed.
 
     ``demo`` says which authority a machine with none should land on: the
@@ -402,14 +403,20 @@ class MeshController:
             # mesh.demo_ca is a statement about which authority to be on, not
             # only about what to do when there is none: a machine that asks for
             # the sample one is moved onto it.
-            if (settings.demo_ca and settings.auto_provision
-                    and (directory / "ca.crt").exists()
-                    and not using_demo_ca(directory)):
-                log.info("mesh.demo_ca is on: moving %s to the sample authority",
-                         directory)
+            if (
+                settings.demo_ca
+                and settings.auto_provision
+                and (directory / "ca.crt").exists()
+                and not using_demo_ca(directory)
+            ):
+                log.info(
+                    "mesh.demo_ca is on: moving %s to the sample authority", directory
+                )
                 use_demo_ca(directory, agent_id)
             identity = ensure_identity(
-                agent_id, directory, provision=settings.auto_provision,
+                agent_id,
+                directory,
+                provision=settings.auto_provision,
                 demo=settings.demo_ca,
             )
             agent = DiscoveryAgent(
@@ -425,7 +432,9 @@ class MeshController:
             try:
                 agent.start()
             except OSError as exc:
-                raise MeshError(f"cannot join {settings.group}:{settings.port}: {exc}") from exc
+                raise MeshError(
+                    f"cannot join {settings.group}:{settings.port}: {exc}"
+                ) from exc
             self.agent = agent
             self.identity = identity
             self.last_error = None
@@ -460,9 +469,15 @@ class MeshController:
             return []
         return list(agent.peers_for(verb))[:limit]
 
-    def ask_peers(self, question: str, verb: str = "infer", limit: int = 5,
-                  timeout: float = 90.0, on_event=None,
-                  conversation: str = "") -> list["PeerAnswer"]:
+    def ask_peers(
+        self,
+        question: str,
+        verb: str = "infer",
+        limit: int = 5,
+        timeout: float = 90.0,
+        on_event=None,
+        conversation: str = "",
+    ) -> list[PeerAnswer]:
         """Ask every matching peer the same question, in parallel.
 
         A peer that fails or times out comes back with ``error`` set rather
@@ -470,6 +485,7 @@ class MeshController:
         things, and the operator should see which happened.
         """
         from concurrent.futures import ThreadPoolExecutor
+
         from .consensus import PeerAnswer
         from .discovery import whois
 
@@ -488,20 +504,27 @@ class MeshController:
 
             try:
                 reply = whois.ask(
-                    peer.address, peer.whois_port, peer.agent_id,
-                    agent.identity, question, timeout=timeout,
+                    peer.address,
+                    peer.whois_port,
+                    peer.agent_id,
+                    agent.identity,
+                    question,
+                    timeout=timeout,
                     on_event=relay if on_event is not None else None,
                     conversation=conversation,
                 )
-            except Exception as exc:  # noqa: BLE001 - every failure is a result
+            except Exception as exc:
                 return PeerAnswer(
-                    agent_id=peer.agent_id, name=label,
+                    agent_id=peer.agent_id,
+                    name=label,
                     error=str(exc)[:200] or exc.__class__.__name__,
                     elapsed=time.monotonic() - started,
                 )
             return PeerAnswer(
-                agent_id=peer.agent_id, name=label,
-                model=reply.get("model", ""), answer=reply.get("answer", ""),
+                agent_id=peer.agent_id,
+                name=label,
+                model=reply.get("model", ""),
+                answer=reply.get("answer", ""),
                 elapsed=reply.get("elapsed") or (time.monotonic() - started),
             )
 

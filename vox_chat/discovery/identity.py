@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
@@ -63,13 +63,17 @@ def spiffe_id(agent_id: str, trust_domain: str = TRUST_DOMAIN) -> str:
 # Issuing
 # ---------------------------------------------------------------------------
 
+
 def _write_private(path: Path, data: bytes) -> None:
     path.write_bytes(data)
     path.chmod(0o600)  # nobody else may read the private key
 
 
-def create_ca(directory: Path, common_name: str = "agent-mesh-ca",
-              lifetime: dt.timedelta = CA_LIFETIME) -> tuple[Path, Path]:
+def create_ca(
+    directory: Path,
+    common_name: str = "agent-mesh-ca",
+    lifetime: dt.timedelta = CA_LIFETIME,
+) -> tuple[Path, Path]:
     """Create the internal CA. Done once, on a protected machine.
 
     In production the CA key does not belong on the agents: whoever takes that
@@ -82,7 +86,7 @@ def create_ca(directory: Path, common_name: str = "agent-mesh-ca",
 
     key = ed25519.Ed25519PrivateKey.generate()
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
 
     certificate = (
         x509.CertificateBuilder()
@@ -95,21 +99,29 @@ def create_ca(directory: Path, common_name: str = "agent-mesh-ca",
         .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
         .add_extension(
             x509.KeyUsage(
-                digital_signature=True, key_cert_sign=True, crl_sign=True,
-                content_commitment=False, key_encipherment=False,
-                data_encipherment=False, key_agreement=False,
-                encipher_only=False, decipher_only=False,
+                digital_signature=True,
+                key_cert_sign=True,
+                crl_sign=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                encipher_only=False,
+                decipher_only=False,
             ),
             critical=True,
         )
         .sign(key, None)
     )
 
-    _write_private(ca_key_path, key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
-    ))
+    _write_private(
+        ca_key_path,
+        key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ),
+    )
     ca_crt_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
     return ca_crt_path, ca_key_path
 
@@ -128,10 +140,12 @@ def issue_agent_cert(
     directory.mkdir(parents=True, exist_ok=True)
 
     ca_cert = x509.load_pem_x509_certificate(Path(ca_crt_path).read_bytes())
-    ca_key = serialization.load_pem_private_key(Path(ca_key_path).read_bytes(), password=None)
+    ca_key = serialization.load_pem_private_key(
+        Path(ca_key_path).read_bytes(), password=None
+    )
 
     key = ed25519.Ed25519PrivateKey.generate()
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
 
     certificate = (
         x509.CertificateBuilder()
@@ -142,20 +156,24 @@ def issue_agent_cert(
         .not_valid_before(now - dt.timedelta(minutes=5))
         .not_valid_after(now + lifetime)
         .add_extension(
-            x509.SubjectAlternativeName([
-                x509.DNSName(agent_id),
-                x509.UniformResourceIdentifier(spiffe_id(agent_id, trust_domain)),
-            ]),
+            x509.SubjectAlternativeName(
+                [
+                    x509.DNSName(agent_id),
+                    x509.UniformResourceIdentifier(spiffe_id(agent_id, trust_domain)),
+                ]
+            ),
             critical=False,
         )
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
         # The same certificate serves both as a server (answering WHOIS) and
         # as a client (interrogating others): there is only one identity.
         .add_extension(
-            x509.ExtendedKeyUsage([
-                ExtendedKeyUsageOID.SERVER_AUTH,
-                ExtendedKeyUsageOID.CLIENT_AUTH,
-            ]),
+            x509.ExtendedKeyUsage(
+                [
+                    ExtendedKeyUsageOID.SERVER_AUTH,
+                    ExtendedKeyUsageOID.CLIENT_AUTH,
+                ]
+            ),
             critical=False,
         )
         .sign(ca_key, None)
@@ -163,11 +181,14 @@ def issue_agent_cert(
 
     crt_path = directory / f"{agent_id}.crt"
     key_path = directory / f"{agent_id}.key"
-    _write_private(key_path, key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
-    ))
+    _write_private(
+        key_path,
+        key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ),
+    )
     crt_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
     return crt_path, key_path
 
@@ -175,6 +196,7 @@ def issue_agent_cert(
 # ---------------------------------------------------------------------------
 # Runtime use
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class Identity:
@@ -187,8 +209,13 @@ class Identity:
     trust_domain: str = TRUST_DOMAIN
 
     @classmethod
-    def load(cls, agent_id: str, directory: Path, ca_path: Path | None = None,
-             trust_domain: str = TRUST_DOMAIN) -> "Identity":
+    def load(
+        cls,
+        agent_id: str,
+        directory: Path,
+        ca_path: Path | None = None,
+        trust_domain: str = TRUST_DOMAIN,
+    ) -> Identity:
         directory = Path(directory)
         identity = cls(
             agent_id=validate_agent_id(agent_id),
@@ -205,7 +232,8 @@ class Identity:
         # mismatch here shows up as an opaque failure at the first handshake.
         cert = x509.load_pem_x509_certificate(identity.cert_path.read_bytes())
         names = cert.extensions.get_extension_for_class(
-            x509.SubjectAlternativeName).value.get_values_for_type(x509.DNSName)
+            x509.SubjectAlternativeName
+        ).value.get_values_for_type(x509.DNSName)
         if agent_id not in names:
             raise IdentityError(f"the certificate carries no DNS SAN '{agent_id}'")
         return identity
@@ -225,7 +253,7 @@ class Identity:
         """
         cert = self.certificate
         start, end = cert.not_valid_before_utc, cert.not_valid_after_utc
-        elapsed = (dt.datetime.now(dt.timezone.utc) - start).total_seconds()
+        elapsed = (dt.datetime.now(dt.UTC) - start).total_seconds()
         total = (end - start).total_seconds()
         return total <= 0 or (elapsed / total) >= threshold
 
@@ -240,7 +268,9 @@ def server_context(identity: Identity) -> ssl.SSLContext:
     context.minimum_version = ssl.TLSVersion.TLSv1_3
     context.verify_mode = ssl.CERT_REQUIRED
     context.load_verify_locations(cafile=str(identity.ca_path))
-    context.load_cert_chain(certfile=str(identity.cert_path), keyfile=str(identity.key_path))
+    context.load_cert_chain(
+        certfile=str(identity.cert_path), keyfile=str(identity.key_path)
+    )
     return context
 
 
@@ -256,7 +286,9 @@ def client_context(identity: Identity) -> ssl.SSLContext:
     context.verify_mode = ssl.CERT_REQUIRED
     context.check_hostname = True
     context.load_verify_locations(cafile=str(identity.ca_path))
-    context.load_cert_chain(certfile=str(identity.cert_path), keyfile=str(identity.key_path))
+    context.load_cert_chain(
+        certfile=str(identity.cert_path), keyfile=str(identity.key_path)
+    )
     return context
 
 
@@ -273,7 +305,7 @@ def peer_agent_id(ssl_socket: ssl.SSLSocket, trust_domain: str = TRUST_DOMAIN) -
     prefix = f"spiffe://{trust_domain}/agent/"
     for kind, value in cert.get("subjectAltName", ()):
         if kind == "URI" and value.startswith(prefix):
-            return value[len(prefix):]
+            return value[len(prefix) :]
     for kind, value in cert.get("subjectAltName", ()):
         if kind == "DNS":
             return value

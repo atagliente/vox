@@ -18,7 +18,9 @@ def test_find_variables_keeps_order_and_deduplicates() -> None:
 
 
 def test_render_substitutes_known_values() -> None:
-    out = render("in {{workspace}} open {{ file }}", {"workspace": "/tmp/p", "file": "a.py"})
+    out = render(
+        "in {{workspace}} open {{ file }}", {"workspace": "/tmp/p", "file": "a.py"}
+    )
     assert out == "in /tmp/p open a.py"
 
 

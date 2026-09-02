@@ -10,8 +10,9 @@ from __future__ import annotations
 import json
 import threading
 import time
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterator, Literal, Sequence
+from typing import Any, Literal
 
 from .llm_client import LLMClient, LLMError, StreamEvent, supports_tools_error
 from .models import Message, ToolCall, utc_now
@@ -20,18 +21,27 @@ from .tools import (
     TOOL_SCHEMAS,
     WEB_SCHEMAS,
     WEB_TOOLS,
+    WRITE_TOOLS,
     ToolError,
     ToolResult,
     Workspace,
-    WRITE_TOOLS,
     describe_call,
     execute,
 )
 from .usage import TurnUsage, estimate_tokens
 
 EventType = Literal[
-    "text", "reasoning", "token", "tool_start", "tool_result", "tool_denied",
-    "notice", "usage", "assistant_done", "cancelled", "limit"
+    "text",
+    "reasoning",
+    "token",
+    "tool_start",
+    "tool_result",
+    "tool_denied",
+    "notice",
+    "usage",
+    "assistant_done",
+    "cancelled",
+    "limit",
 ]
 
 ConfirmCallback = Callable[[str, str], bool]
@@ -220,8 +230,13 @@ def run_turn(
                 yield AgentEvent("cancelled", messages=produced)
                 return
             result_message = _run_tool(
-                call, workspace, agent_config, confirm, command_timeout,
-                max_output, web_settings,
+                call,
+                workspace,
+                agent_config,
+                confirm,
+                command_timeout,
+                max_output,
+                web_settings,
             )
             history.append(result_message)
             produced.append(result_message)
@@ -236,8 +251,10 @@ def run_turn(
 
 
 def _relay(
-    event: StreamEvent, text_parts: list[str], reasoning_parts: list[str],
-    tool_calls: list[ToolCall]
+    event: StreamEvent,
+    text_parts: list[str],
+    reasoning_parts: list[str],
+    tool_calls: list[ToolCall],
 ) -> Iterator[AgentEvent]:
     """Translate a stream event, accumulating the assistant message."""
     if event.type == "text":
@@ -291,7 +308,11 @@ def _run_tool(
 
     try:
         result: ToolResult = execute(
-            call.name, arguments, workspace, command_timeout, max_output,
+            call.name,
+            arguments,
+            workspace,
+            command_timeout,
+            max_output,
             web_settings,
         )
         call.result = result.as_text()

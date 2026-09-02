@@ -24,7 +24,9 @@ class InputHistory:
     the operator was writing when they started browsing.
     """
 
-    def __init__(self, path: Path | None = None, max_entries: int = MAX_ENTRIES) -> None:
+    def __init__(
+        self, path: Path | None = None, max_entries: int = MAX_ENTRIES
+    ) -> None:
         self.path = Path(path) if path is not None else history_path()
         self.max_entries = max_entries
         self.warnings: list[str] = []
@@ -38,7 +40,9 @@ class InputHistory:
         if result.error is not None:
             self.warnings.append(result.error)
         raw = result.data if isinstance(result.data, list) else []
-        self.entries = [str(item) for item in raw if isinstance(item, str) and item.strip()]
+        self.entries = [
+            str(item) for item in raw if isinstance(item, str) and item.strip()
+        ]
         self.entries = self.entries[-self.max_entries :]
 
     def save(self) -> None:

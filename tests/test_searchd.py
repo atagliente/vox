@@ -53,7 +53,8 @@ def test_results_are_read_out_of_the_page(monkeypatch: pytest.MonkeyPatch) -> No
     hits = searchd.duckduckgo("ring buffers")
 
     assert [hit.url for hit in hits] == [
-        "https://a.example/guide", "https://b.example/direct"
+        "https://a.example/guide",
+        "https://b.example/direct",
     ]
     # Markup out, entities in, whitespace collapsed.
     assert hits[0].title == "A guide to buffers"
@@ -68,8 +69,10 @@ def test_the_redirect_wrapper_is_unwrapped() -> None:
 
 
 def test_the_lite_page_is_the_second_try(monkeypatch: pytest.MonkeyPatch) -> None:
-    pages = {searchd.DDG_HTML: "<html>nothing useful</html>",
-             searchd.DDG_LITE: LITE_PAGE}
+    pages = {
+        searchd.DDG_HTML: "<html>nothing useful</html>",
+        searchd.DDG_LITE: LITE_PAGE,
+    }
     monkeypatch.setattr(searchd, "_post", lambda url, query: pages[url])
 
     hits = searchd.duckduckgo("x")
@@ -118,14 +121,18 @@ def test_every_upstream_contributes_without_duplicating(
         monkeypatch,
         web=lambda query, limit=10: [searchd.Hit("Ring buffer", "https://a.example")],
         wikipedia=lambda query, limit=3: [
-            searchd.Hit("Circular buffer",
-                        "https://en.wikipedia.org/wiki/Circular_buffer", "A structure."),
-            searchd.Hit("Dup", "https://a.example"),   # already seen
+            searchd.Hit(
+                "Circular buffer",
+                "https://en.wikipedia.org/wiki/Circular_buffer",
+                "A structure.",
+            ),
+            searchd.Hit("Dup", "https://a.example"),  # already seen
         ],
     )
     hits, answered, failures = searchd.search("ring buffer", limit=10)
     assert [hit.url for hit in hits] == [
-        "https://a.example", "https://en.wikipedia.org/wiki/Circular_buffer"
+        "https://a.example",
+        "https://en.wikipedia.org/wiki/Circular_buffer",
     ]
     assert answered == ["web", "wikipedia"]
     assert failures == []
@@ -135,6 +142,7 @@ def test_a_blocked_web_index_does_not_cost_the_rest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The failure that started this: a captcha killed the whole search."""
+
     def blocked(query, limit=10):
         raise searchd.SearchdError("asked for a captcha")
 
@@ -142,10 +150,14 @@ def test_a_blocked_web_index_does_not_cost_the_rest(
         monkeypatch,
         web=blocked,
         wikipedia=lambda query, limit=3: [
-            searchd.Hit("Circular buffer", "https://en.wikipedia.org/wiki/Circular_buffer")
+            searchd.Hit(
+                "Circular buffer", "https://en.wikipedia.org/wiki/Circular_buffer"
+            )
         ],
         stackoverflow=lambda query, limit=3: [
-            searchd.Hit("efficient circular buffer?", "https://stackoverflow.com/q/4151320")
+            searchd.Hit(
+                "efficient circular buffer?", "https://stackoverflow.com/q/4151320"
+            )
         ],
     )
     hits, answered, failures = searchd.search("circular buffer", limit=10)
@@ -156,6 +168,7 @@ def test_a_blocked_web_index_does_not_cost_the_rest(
 
 def test_an_upstream_that_explodes_is_survived(monkeypatch: pytest.MonkeyPatch) -> None:
     """An upstream is somebody else's code; it may fail in ways of its own."""
+
     def explode(query, limit=10):
         raise KeyError("hits")
 
@@ -164,7 +177,7 @@ def test_an_upstream_that_explodes_is_survived(monkeypatch: pytest.MonkeyPatch) 
         web=explode,
         wikipedia=lambda query, limit=3: [searchd.Hit("A", "https://a.example")],
     )
-    hits, answered, failures = searchd.search("x")
+    hits, _answered, failures = searchd.search("x")
     assert [hit.url for hit in hits] == ["https://a.example"]
     assert failures == ["web: KeyError"]
 
@@ -179,12 +192,23 @@ def test_only_a_total_failure_is_an_error(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_stackoverflow_answers_are_summarised(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(searchd, "_json", lambda url: {"items": [
-        {"title": "efficient circular buffer?", "link": "https://stackoverflow.com/q/1",
-         "score": 159, "answer_count": 15, "is_answered": True,
-         "tags": ["python", "circular-buffer"]},
-        {"title": "no link", "score": 1},
-    ]})
+    monkeypatch.setattr(
+        searchd,
+        "_json",
+        lambda url: {
+            "items": [
+                {
+                    "title": "efficient circular buffer?",
+                    "link": "https://stackoverflow.com/q/1",
+                    "score": 159,
+                    "answer_count": 15,
+                    "is_answered": True,
+                    "tags": ["python", "circular-buffer"],
+                },
+                {"title": "no link", "score": 1},
+            ]
+        },
+    )
     hits = searchd.stackexchange("circular buffer")
     assert len(hits) == 1, "an item without a link is not a result"
     assert "159 votes, 15 answers, accepted" in hits[0].content
@@ -194,9 +218,20 @@ def test_stackoverflow_answers_are_summarised(monkeypatch: pytest.MonkeyPatch) -
 def test_hacker_news_items_without_a_link_point_at_the_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(searchd, "_json", lambda url: {"hits": [
-        {"title": "Ask HN: buffers?", "objectID": "42", "points": 7, "num_comments": 3},
-    ]})
+    monkeypatch.setattr(
+        searchd,
+        "_json",
+        lambda url: {
+            "hits": [
+                {
+                    "title": "Ask HN: buffers?",
+                    "objectID": "42",
+                    "points": 7,
+                    "num_comments": 3,
+                },
+            ]
+        },
+    )
     hits = searchd.hackernews("buffers")
     assert hits[0].url == "https://news.ycombinator.com/item?id=42"
     assert "7 points" in hits[0].content
@@ -223,11 +258,16 @@ def test_the_port_comes_from_the_endpoint() -> None:
 @pytest.fixture
 def server(monkeypatch: pytest.MonkeyPatch):
     """A real socket on a free port, with the upstream stubbed."""
-    monkeypatch.setattr(searchd, "search", lambda query, limit=10: (
-        [searchd.Hit(f"Result for {query}", "https://a.example", "snippet")],
-        ["web"], ["wikipedia: down"],
-    ))
-    running = searchd.LocalSearch(port=0)   # 0: let the OS choose
+    monkeypatch.setattr(
+        searchd,
+        "search",
+        lambda query, limit=10: (
+            [searchd.Hit(f"Result for {query}", "https://a.example", "snippet")],
+            ["web"],
+            ["wikipedia: down"],
+        ),
+    )
+    running = searchd.LocalSearch(port=0)  # 0: let the OS choose
     running.start()
     running.port = running._server.server_address[1]
     try:
@@ -247,8 +287,8 @@ def get(port: int, path: str):
 
 def test_it_answers_the_json_a_searxng_client_expects(server) -> None:
     status, payload = get(
-        server.port, "/search?" + urllib.parse.urlencode({"q": "ring buffers",
-                                                          "format": "json"})
+        server.port,
+        "/search?" + urllib.parse.urlencode({"q": "ring buffers", "format": "json"}),
     )
     assert status == 200
     assert payload["results"][0]["url"] == "https://a.example"
@@ -359,7 +399,9 @@ def test_a_subject_only_documented_in_english_is_still_found(
     def fake_json(url):
         languages.append("it" if "//it." in url else "en")
         if "//it." in url:
-            return ["x", [], [], []] if "opensearch" in url else {"query": {"search": []}}
+            return (
+                ["x", [], [], []] if "opensearch" in url else {"query": {"search": []}}
+            )
         if "opensearch" in url:
             return ["x", ["Ring buffer"], [], []]
         return {"query": {"search": []}}

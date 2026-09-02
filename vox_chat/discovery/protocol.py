@@ -26,7 +26,7 @@ import hashlib
 import json
 import os
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
@@ -49,19 +49,21 @@ class ProtocolError(Exception):
 class Announce:
     """The presence payload every agent repeats on its own interval."""
 
-    agent_id: str          # a stable identity, surviving restarts
-    incarnation: int       # the process epoch: it changes on every restart
-    whois_port: int        # where to reach me for the real conversation
-    caps_digest: str       # a hash of the capabilities declared
-    ts: float              # when this was emitted
-    nonce: str             # anti-replay
+    agent_id: str  # a stable identity, surviving restarts
+    incarnation: int  # the process epoch: it changes on every restart
+    whois_port: int  # where to reach me for the real conversation
+    caps_digest: str  # a hash of the capabilities declared
+    ts: float  # when this was emitted
+    nonce: str  # anti-replay
 
     def canonical(self) -> bytes:
         """A deterministic serialisation: the signature has to be reproducible."""
         return json.dumps(asdict(self), sort_keys=True, separators=(",", ":")).encode()
 
 
-def new_announce(agent_id: str, incarnation: int, whois_port: int, caps_digest: str) -> Announce:
+def new_announce(
+    agent_id: str, incarnation: int, whois_port: int, caps_digest: str
+) -> Announce:
     return Announce(
         agent_id=agent_id,
         incarnation=incarnation,
@@ -92,18 +94,17 @@ def certificate_names(certificate: x509.Certificate) -> list[str]:
     return list(san.get_values_for_type(x509.DNSName))
 
 
-def check_certificate(certificate: x509.Certificate, ca_public_key,
-                      now: dt.datetime | None = None) -> None:
+def check_certificate(
+    certificate: x509.Certificate, ca_public_key, now: dt.datetime | None = None
+) -> None:
     """Was this certificate issued by our CA, and is it still valid?
 
     The chain is one level deep by construction, so verifying the leaf against
     the CA's public key is the whole of it — no path building, no CRL.
     """
-    now = now or dt.datetime.now(dt.timezone.utc)
+    now = now or dt.datetime.now(dt.UTC)
     try:
-        ca_public_key.verify(
-            certificate.signature, certificate.tbs_certificate_bytes
-        )
+        ca_public_key.verify(certificate.signature, certificate.tbs_certificate_bytes)
     except InvalidSignature as exc:
         raise ProtocolError("certificate was not issued by this mesh's CA") from exc
     except (TypeError, ValueError) as exc:  # a key of the wrong kind
@@ -191,9 +192,7 @@ def decode(raw: bytes, ca_public_key, now: dt.datetime | None = None) -> Announc
     # The signature proves the packet came from the holder of that certificate.
     # This is what stops the holder announcing itself as somebody else.
     if announce.agent_id not in certificate_names(certificate):
-        raise ProtocolError(
-            f"the certificate does not name {announce.agent_id!r}"
-        )
+        raise ProtocolError(f"the certificate does not name {announce.agent_id!r}")
 
     return announce
 
@@ -202,9 +201,7 @@ def load_signing_key(path):
     """The agent's own private key, used to sign what it announces."""
     from pathlib import Path
 
-    return serialization.load_pem_private_key(
-        Path(path).read_bytes(), password=None
-    )
+    return serialization.load_pem_private_key(Path(path).read_bytes(), password=None)
 
 
 def load_ca_public_key(path):

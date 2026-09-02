@@ -20,7 +20,6 @@ from vox_chat.storage import global_config_path
 from vox_chat.ui.universe_screen import UniverseScreen
 from vox_chat.ui.widgets import MessageBox
 
-
 # --------------------------------------------------------------- configuration
 
 
@@ -85,9 +84,10 @@ def test_one_config_on_two_machines_gives_two_identities(
         assert validate_agent_id(name)
 
     # Resolving an already resolved id must not keep growing it.
-    assert MeshSettings.from_config(
-        {"mesh": {"agent_id": second}}
-    ).resolved_agent_id() == second
+    assert (
+        MeshSettings.from_config({"mesh": {"agent_id": second}}).resolved_agent_id()
+        == second
+    )
 
 
 def test_an_awkward_label_is_still_a_valid_name() -> None:
@@ -143,7 +143,9 @@ def test_a_machine_without_a_mac_still_gets_a_name(
         (["nonsense"], "UNKNOWN"),
     ],
 )
-def test_the_category_follows_the_declared_verbs(verbs: list[str], category: str) -> None:
+def test_the_category_follows_the_declared_verbs(
+    verbs: list[str], category: str
+) -> None:
     assert mesh.category_for(verbs) == category
 
 
@@ -190,7 +192,7 @@ def test_every_agent_signs_with_its_own_key(pki) -> None:
     ca_public = protocol.load_ca_public_key(ours / "ca.crt")
 
     alice_key, alice_cert = _material(identity("alice-01", ours))
-    bob_key, bob_cert = _material(identity("bob-01", ours))
+    bob_key, _bob_cert = _material(identity("bob-01", ours))
 
     announce = protocol.new_announce("alice-01", 1, 9000, "cafe")
     packet = protocol.encode(announce, alice_key, alice_cert)
@@ -285,7 +287,7 @@ def test_an_expired_certificate_is_refused(pki) -> None:
         protocol.new_announce("alice-01", 1, 9000, "cafe"), key, cert
     )
 
-    later = dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=2)
+    later = dt.datetime.now(dt.UTC) + dt.timedelta(days=2)
     with pytest.raises(protocol.ProtocolError, match="expired"):
         protocol.decode(packet, ca_public, now=later)
 
@@ -324,7 +326,7 @@ def test_the_sample_authority_ships_with_vox() -> None:
     # It has to outlive the release, or a fresh download stops working.
     import datetime as dt
 
-    remaining = certificate.not_valid_after_utc - dt.datetime.now(dt.timezone.utc)
+    remaining = certificate.not_valid_after_utc - dt.datetime.now(dt.UTC)
     assert remaining > dt.timedelta(days=365 * 5), remaining
 
 
@@ -457,8 +459,15 @@ def controller(monkeypatch: pytest.MonkeyPatch) -> MeshController:
 
     now = time.time()
     peers = [
-        StubPeer("ingestor-01", "ingestor", "SOURCE", "ACTIVE", "10.0.0.1",
-                 ["ingest"], now - 2.0),
+        StubPeer(
+            "ingestor-01",
+            "ingestor",
+            "SOURCE",
+            "ACTIVE",
+            "10.0.0.1",
+            ["ingest"],
+            now - 2.0,
+        ),
         StubPeer("legacy-01", "legacy", None, "PROBATION", "10.0.0.2", [], now - 0.5),
     ]
     monkeypatch.setattr(mesh, "ensure_identity", lambda *a, **k: object())
@@ -486,9 +495,13 @@ def test_starting_says_exactly_what_it_did(controller: MeshController) -> None:
 def test_the_peers_are_flattened_for_the_screen(controller: MeshController) -> None:
     controller.start()
     peers = controller.peers()
-    assert [peer.name for peer in peers] == ["legacy", "ingestor"], "newest sighting first"
+    assert [peer.name for peer in peers] == ["legacy", "ingestor"], (
+        "newest sighting first"
+    )
     assert peers[1].category == "SOURCE"
-    assert peers[0].category == "—", "a peer that has not answered WHOIS has no category"
+    assert peers[0].category == "—", (
+        "a peer that has not answered WHOIS has no category"
+    )
     assert peers[1].address == "10.0.0.1:41000"
     assert controller.active_count() == 1
     assert "1 active" in controller.status_line()
@@ -559,8 +572,9 @@ def test_provisioning_can_be_refused(tmp_path: Path) -> None:
 class FakeController:
     """The controller as the app sees it, without any discovery underneath."""
 
-    def __init__(self, peers: list[PeerView] | None = None, fail: str = "",
-                 demo_ca: bool = False) -> None:
+    def __init__(
+        self, peers: list[PeerView] | None = None, fail: str = "", demo_ca: bool = False
+    ) -> None:
         self.settings = MeshSettings.from_config(default_config())
         self.online = False
         self.demo_ca = demo_ca
@@ -592,17 +606,27 @@ class FakeController:
         return f"MESH ONLINE  ·  {len(self.peers())} agents" if self.online else ""
 
     def sharing_note(self) -> str:
-        return "issue the other machine a certificate from ca.crt; its own key stays there"
+        return (
+            "issue the other machine a certificate from ca.crt; its own key stays there"
+        )
 
     def set_answer_hook(self, hook) -> None:
         self.answer_hook = hook
 
 
 PEERS = [
-    PeerView("ingestor-01", "ingestor", "SOURCE", "ACTIVE", "10.0.0.1:41000",
-             ["ingest"], 2.1),
-    PeerView("watcher-09", "watcher", "OBSERVER", "SUSPECT", "10.0.0.9:41000",
-             ["observe"], 91.4),
+    PeerView(
+        "ingestor-01", "ingestor", "SOURCE", "ACTIVE", "10.0.0.1:41000", ["ingest"], 2.1
+    ),
+    PeerView(
+        "watcher-09",
+        "watcher",
+        "OBSERVER",
+        "SUSPECT",
+        "10.0.0.9:41000",
+        ["observe"],
+        91.4,
+    ),
     PeerView("legacy-01", "legacy", "—", "PROBATION", "10.0.0.2:41000", [], 0.9),
 ]
 
@@ -707,8 +731,17 @@ async def test_the_universe_lists_every_agent_with_its_category(app: VoxApp) -> 
         assert isinstance(app.screen, UniverseScreen)
 
         rows = text_of(app.screen, "#universe-rows")
-        for expected in ("ingestor", "SOURCE", "ACTIVE", "10.0.0.1:41000",
-                         "watcher", "OBSERVER", "SUSPECT", "legacy", "PROBATION"):
+        for expected in (
+            "ingestor",
+            "SOURCE",
+            "ACTIVE",
+            "10.0.0.1:41000",
+            "watcher",
+            "OBSERVER",
+            "SUSPECT",
+            "legacy",
+            "PROBATION",
+        ):
             assert expected in rows
         assert "3 agents" in text_of(app.screen, "#universe-title")
 
@@ -749,7 +782,9 @@ async def test_the_keys_are_bound_to_the_same_actions_as_the_commands(
     # No ctrl combination at all, and nothing the input box already owns.
     mesh_keys = set(bound["toggle_mesh"]) | set(bound["open_universe"])
     assert not any(key.startswith("ctrl") for key in mesh_keys)
-    input_keys = {key for binding in TextArea.BINDINGS for key in binding.key.split(",")}
+    input_keys = {
+        key for binding in TextArea.BINDINGS for key in binding.key.split(",")
+    }
     assert not mesh_keys & input_keys
 
     async with app.run_test() as pilot:

@@ -40,7 +40,9 @@ def test_paths_are_confined_to_the_workspace(ws: Workspace) -> None:
             ws.resolve(candidate)
 
 
-def test_absolute_paths_outside_the_workspace_are_refused(ws: Workspace, tmp_path: Path) -> None:
+def test_absolute_paths_outside_the_workspace_are_refused(
+    ws: Workspace, tmp_path: Path
+) -> None:
     outside = tmp_path / "secret.txt"
     outside.write_text("top secret", encoding="utf-8")
     with pytest.raises(ToolSecurityError):
@@ -53,7 +55,9 @@ def test_absolute_paths_outside_the_workspace_are_refused(ws: Workspace, tmp_pat
     sys.platform == "win32" and not os.environ.get("VOX_TEST_SYMLINKS"),
     reason="creating symlinks on Windows needs developer mode or admin rights",
 )
-def test_symlinks_leaving_the_workspace_are_refused(ws: Workspace, tmp_path: Path) -> None:
+def test_symlinks_leaving_the_workspace_are_refused(
+    ws: Workspace, tmp_path: Path
+) -> None:
     outside = tmp_path / "outside.txt"
     outside.write_text("nope", encoding="utf-8")
     link = ws.root / "escape.txt"
@@ -111,13 +115,7 @@ def test_apply_patch_edits_an_existing_file(ws: Workspace) -> None:
 
 
 def test_apply_patch_refuses_a_context_mismatch(ws: Workspace) -> None:
-    patch = (
-        "--- a/notes.txt\n"
-        "+++ b/notes.txt\n"
-        "@@ -1,2 +1,2 @@\n"
-        " WRONG\n"
-        "+added\n"
-    )
+    patch = "--- a/notes.txt\n+++ b/notes.txt\n@@ -1,2 +1,2 @@\n WRONG\n+added\n"
     with pytest.raises(ToolError):
         apply_patch(ws, patch)
     assert (ws.root / "notes.txt").read_text(encoding="utf-8") == "alpha\nbeta\nGAMMA\n"

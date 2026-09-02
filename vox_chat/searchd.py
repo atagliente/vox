@@ -61,8 +61,25 @@ WIKIPEDIA = "https://{language}.wikipedia.org/w/api.php"
 # nothing is how "what is the postal code of Latiano" became "I have never
 # heard of Latiano".
 _LANGUAGE_MARKERS = {
-    "it": {"il", "lo", "la", "gli", "che", "di", "quale", "come", "dove",
-           "perche", "perché", "qual", "cosa", "mi", "sono", "una", "del"},
+    "it": {
+        "il",
+        "lo",
+        "la",
+        "gli",
+        "che",
+        "di",
+        "quale",
+        "come",
+        "dove",
+        "perche",
+        "perché",
+        "qual",
+        "cosa",
+        "mi",
+        "sono",
+        "una",
+        "del",
+    },
     "es": {"el", "los", "las", "que", "cual", "como", "donde", "por", "una"},
     "fr": {"le", "les", "des", "que", "quel", "comment", "pourquoi", "une"},
     "de": {"der", "die", "das", "und", "wie", "warum", "wo", "ist", "eine"},
@@ -71,13 +88,73 @@ _LANGUAGE_MARKERS = {
 # Words that say how a question was asked rather than what it was about. The
 # APIs match titles, so leaving them in is what makes a real question miss.
 _NOISE = {
-    "a", "an", "and", "are", "can", "could", "do", "does", "for", "from", "how",
-    "in", "is", "it", "me", "of", "on", "or", "please", "tell", "than", "that",
-    "the", "to", "what", "when", "where", "which", "who", "why", "with", "you",
-    "che", "chi", "come", "cosa", "cos", "dammi", "del", "della", "dello", "di",
-    "dice", "dici", "dove", "e", "il", "in", "la", "le", "lo", "mi", "per",
-    "perche", "perché", "qual", "quale", "quali", "quando", "sai", "sono", "un",
-    "una", "uno", "vorrei", "è", "e'", "sai?",
+    "a",
+    "an",
+    "and",
+    "are",
+    "can",
+    "could",
+    "do",
+    "does",
+    "for",
+    "from",
+    "how",
+    "in",
+    "is",
+    "it",
+    "me",
+    "of",
+    "on",
+    "or",
+    "please",
+    "tell",
+    "than",
+    "that",
+    "the",
+    "to",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "why",
+    "with",
+    "you",
+    "che",
+    "chi",
+    "come",
+    "cosa",
+    "cos",
+    "dammi",
+    "del",
+    "della",
+    "dello",
+    "di",
+    "dice",
+    "dici",
+    "dove",
+    "e",
+    "il",
+    "la",
+    "le",
+    "lo",
+    "mi",
+    "per",
+    "perche",
+    "perché",
+    "qual",
+    "quale",
+    "quali",
+    "quando",
+    "sai",
+    "sono",
+    "un",
+    "una",
+    "uno",
+    "vorrei",
+    "è",
+    "e'",
+    "sai?",
 }
 STACKEXCHANGE = "https://api.stackexchange.com/2.3/search/advanced"
 HACKERNEWS = "https://hn.algolia.com/api/v1/search"
@@ -163,10 +240,13 @@ _LITE = re.compile(
 def _post(url: str, query: str) -> str:
     data = urllib.parse.urlencode({"q": query}).encode()
     request = urllib.request.Request(
-        url, data=data,
-        headers={"User-Agent": BROWSER_UA,
-                 "Content-Type": "application/x-www-form-urlencoded",
-                 "Accept-Encoding": "identity"},
+        url,
+        data=data,
+        headers={
+            "User-Agent": BROWSER_UA,
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept-Encoding": "identity",
+        },
     )
     try:
         with urllib.request.urlopen(request, timeout=UPSTREAM_TIMEOUT) as response:
@@ -190,8 +270,11 @@ def duckduckgo(query: str, limit: int = 10) -> list[Hit]:
             continue
         snippets = [_clean(fragment) for fragment in _SNIPPET.findall(page)]
         found = [
-            Hit(title=_clean(title), url=_direct(href),
-                content=snippets[index] if index < len(snippets) else "")
+            Hit(
+                title=_clean(title),
+                url=_direct(href),
+                content=snippets[index] if index < len(snippets) else "",
+            )
             for index, (href, title) in enumerate(_RESULT.findall(page))
         ]
         found += [
@@ -205,7 +288,8 @@ def duckduckgo(query: str, limit: int = 10) -> list[Hit]:
 
     if not hits:
         raise SearchdError(
-            "asked for a captcha; it rate-limits heavy use" if blocked
+            "asked for a captcha; it rate-limits heavy use"
+            if blocked
             else "returned nothing readable"
         )
     return [hit for hit in hits if hit.url.startswith("http")][:limit]
@@ -226,15 +310,25 @@ def _json(url: str) -> dict:
 
 
 def _wiki_url(language: str, title: str) -> str:
-    return (f"https://{language}.wikipedia.org/wiki/"
-            + urllib.parse.quote(title.replace(" ", "_")))
+    return f"https://{language}.wikipedia.org/wiki/" + urllib.parse.quote(
+        title.replace(" ", "_")
+    )
 
 
 def _wiki_titles(language: str, term: str, limit: int = 3) -> list[str]:
     """Titles that start with ``term``: how you find a place or a person."""
-    url = WIKIPEDIA.format(language=language) + "?" + urllib.parse.urlencode({
-        "action": "opensearch", "search": term, "limit": limit, "format": "json",
-    })
+    url = (
+        WIKIPEDIA.format(language=language)
+        + "?"
+        + urllib.parse.urlencode(
+            {
+                "action": "opensearch",
+                "search": term,
+                "limit": limit,
+                "format": "json",
+            }
+        )
+    )
     payload = _json(url)
     return [str(title) for title in (payload[1] if len(payload) > 1 else [])]
 
@@ -275,17 +369,31 @@ def wikipedia(query: str, limit: int = 3, language: str = "") -> list[Hit]:
         if hits:
             break
 
-    url = WIKIPEDIA.format(language=language) + "?" + urllib.parse.urlencode({
-        "action": "query", "list": "search", "srsearch": terms,
-        "format": "json", "srlimit": limit,
-    })
+    url = (
+        WIKIPEDIA.format(language=language)
+        + "?"
+        + urllib.parse.urlencode(
+            {
+                "action": "query",
+                "list": "search",
+                "srsearch": terms,
+                "format": "json",
+                "srlimit": limit,
+            }
+        )
+    )
     for item in _json(url).get("query", {}).get("search", []):
         title = str(item.get("title", ""))
         address = _wiki_url(language, title)
         if address not in seen:
             seen.add(address)
-            hits.append(Hit(title=title, url=address,
-                            content=_clean(str(item.get("snippet", "")))))
+            hits.append(
+                Hit(
+                    title=title,
+                    url=address,
+                    content=_clean(str(item.get("snippet", ""))),
+                )
+            )
 
     if not hits and language != "en":
         # The subject may simply be documented in English instead.
@@ -295,44 +403,69 @@ def wikipedia(query: str, limit: int = 3, language: str = "") -> list[Hit]:
 
 def stackexchange(query: str, limit: int = 3) -> list[Hit]:
     """Stack Overflow, which is where the answer often actually is."""
-    url = STACKEXCHANGE + "?" + urllib.parse.urlencode({
-        "order": "desc", "sort": "relevance", "q": keywords(query),
-        "site": "stackoverflow", "pagesize": limit,
-    })
+    url = (
+        STACKEXCHANGE
+        + "?"
+        + urllib.parse.urlencode(
+            {
+                "order": "desc",
+                "sort": "relevance",
+                "q": keywords(query),
+                "site": "stackoverflow",
+                "pagesize": limit,
+            }
+        )
+    )
     payload = _json(url)
     hits = []
     for item in payload.get("items", []):
         if not item.get("link"):
             continue
         tags = ", ".join(item.get("tags", [])[:5])
-        hits.append(Hit(
-            title=_clean(str(item.get("title", ""))),
-            url=str(item["link"]),
-            content=(f"{item.get('score', 0)} votes, "
-                     f"{item.get('answer_count', 0)} answers"
-                     + (", accepted" if item.get("is_answered") else "")
-                     + (f" · {tags}" if tags else "")),
-        ))
+        hits.append(
+            Hit(
+                title=_clean(str(item.get("title", ""))),
+                url=str(item["link"]),
+                content=(
+                    f"{item.get('score', 0)} votes, "
+                    f"{item.get('answer_count', 0)} answers"
+                    + (", accepted" if item.get("is_answered") else "")
+                    + (f" · {tags}" if tags else "")
+                ),
+            )
+        )
     return hits
 
 
 def hackernews(query: str, limit: int = 3) -> list[Hit]:
     """What was linked and argued about, which dates a thing usefully."""
-    url = HACKERNEWS + "?" + urllib.parse.urlencode({
-        "query": keywords(query), "hitsPerPage": limit, "tags": "story",
-    })
+    url = (
+        HACKERNEWS
+        + "?"
+        + urllib.parse.urlencode(
+            {
+                "query": keywords(query),
+                "hitsPerPage": limit,
+                "tags": "story",
+            }
+        )
+    )
     payload = _json(url)
     hits = []
     for item in payload.get("hits", []):
         link = item.get("url") or (
             f"https://news.ycombinator.com/item?id={item.get('objectID')}"
         )
-        hits.append(Hit(
-            title=_clean(str(item.get("title") or item.get("story_title") or link)),
-            url=str(link),
-            content=(f"{item.get('points', 0)} points, "
-                     f"{item.get('num_comments', 0)} comments on Hacker News"),
-        ))
+        hits.append(
+            Hit(
+                title=_clean(str(item.get("title") or item.get("story_title") or link)),
+                url=str(link),
+                content=(
+                    f"{item.get('points', 0)} points, "
+                    f"{item.get('num_comments', 0)} comments on Hacker News"
+                ),
+            )
+        )
     return hits
 
 
@@ -365,7 +498,7 @@ def search(query: str, limit: int = 10) -> tuple[list[Hit], list[str], list[str]
         except SearchdError as exc:
             failures.append(f"{name}: {exc}")
             continue
-        except Exception as exc:  # noqa: BLE001 - an upstream is not our code
+        except Exception as exc:
             failures.append(f"{name}: {exc.__class__.__name__}")
             continue
         new = [hit for hit in found if hit.url and hit.url not in seen]
@@ -378,9 +511,7 @@ def search(query: str, limit: int = 10) -> tuple[list[Hit], list[str], list[str]
 
     if not hits:
         detail = "; ".join(failures)
-        raise SearchdError(
-            f"nothing found ({detail})" if detail else "nothing found"
-        )
+        raise SearchdError(f"nothing found ({detail})" if detail else "nothing found")
     return hits[:limit], answered, failures
 
 
@@ -399,7 +530,7 @@ class _Server(ThreadingHTTPServer):
 class _Handler(BaseHTTPRequestHandler):
     server_version = "vox-searchd"
 
-    def do_GET(self) -> None:  # noqa: N802 - the base class names it
+    def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
         if parsed.path.rstrip("/") not in ("/search", ""):
@@ -417,14 +548,17 @@ class _Handler(BaseHTTPRequestHandler):
             # 502: the upstreams failed, not this server. The client shows it.
             self._json(502, {"error": str(exc)})
             return
-        self._json(200, {
-            "query": query,
-            "results": [hit.to_dict() for hit in hits],
-            # Which answered, so a blocked web index is visible rather than
-            # looking like a thin day on the internet.
-            "sources": answered,
-            "failures": failures,
-        })
+        self._json(
+            200,
+            {
+                "query": query,
+                "results": [hit.to_dict() for hit in hits],
+                # Which answered, so a blocked web index is visible rather than
+                # looking like a thin day on the internet.
+                "sources": answered,
+                "failures": failures,
+            },
+        )
 
     def _json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload).encode()
@@ -434,7 +568,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, format: str, *args) -> None:  # noqa: A002
+    def log_message(self, format: str, *args) -> None:
         log.debug("searchd %s", format % args)
 
 
@@ -444,8 +578,10 @@ def answering(endpoint: str, timeout: float = 3.0) -> bool:
     Another VOX, or a SearXNG of your own: either way there is no reason to
     bind the port a second time and every reason not to.
     """
-    url = endpoint.rstrip("/") + "/search?" + urllib.parse.urlencode(
-        {"q": "vox", "format": "json"}
+    url = (
+        endpoint.rstrip("/")
+        + "/search?"
+        + urllib.parse.urlencode({"q": "vox", "format": "json"})
     )
     request = urllib.request.Request(url, headers={"User-Agent": "vox/0.1"})
     try:

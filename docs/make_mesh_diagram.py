@@ -90,11 +90,19 @@ def arrow(x1, y1, x2, y2, stroke=INK, width=1.8, dash=None):
         )
 
 
-def text(x, y, s, size=15, fill=INK, anchor="start", weight="400", style="normal",
-         family=FONT, spacing="0"):
-    body = (
-        s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    )
+def text(
+    x,
+    y,
+    s,
+    size=15,
+    fill=INK,
+    anchor="start",
+    weight="400",
+    style="normal",
+    family=FONT,
+    spacing="0",
+):
+    body = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     parts.append(
         f'<text x="{x}" y="{y}" font-family="{family}" font-size="{size}" '
         f'fill="{fill}" text-anchor="{anchor}" font-weight="{weight}" '
@@ -103,8 +111,15 @@ def text(x, y, s, size=15, fill=INK, anchor="start", weight="400", style="normal
 
 
 def mono(x, y, s, size=13, fill=MUTED, anchor="start"):
-    text(x, y, s, size, fill, anchor,
-         family="'JetBrains Mono', 'SF Mono', Consolas, monospace")
+    text(
+        x,
+        y,
+        s,
+        size,
+        fill,
+        anchor,
+        family="'JetBrains Mono', 'SF Mono', Consolas, monospace",
+    )
 
 
 def step(x, y, n, label, colour=INK):
@@ -117,9 +132,16 @@ def step(x, y, n, label, colour=INK):
 
 parts.append(f'<rect width="{W}" height="{H}" fill="{PAPER}"/>')
 
-text(60, 56, "How VOX agents find each other, and work together", 25, INK, "start", "600")
-text(60, 82, "Nothing leaves the local network segment, and nothing is announced until you press F3.",
-     15, MUTED)
+text(
+    60, 56, "How VOX agents find each other, and work together", 25, INK, "start", "600"
+)
+text(
+    60,
+    82,
+    "Nothing leaves the local network segment, and nothing is announced until you press F3.",
+    15,
+    MUTED,
+)
 
 # --- the two agents -----------------------------------------------------
 sketch_box(60, 112, 330, 92, INK, "#f3f1ea")
@@ -141,24 +163,42 @@ arrow(955, 208, 955, 268, SLATE)
 sketch_box(60, 272, 1060, 96, SLATE, "#eef2f8")
 step(96, 300, 1, "ANNOUNCE", SLATE)
 mono(258, 305, "UDP multicast  239.17.42.1:45177  ·  TTL 1  ·  every 60s", 13, SLATE)
-mono(96, 336, "{ agent_id, incarnation, whois_port, caps_digest, ts, nonce }  +  Ed25519 signature  +  the sender's certificate")
-text(96, 358, "Each agent signs with its own key. There is no shared secret; TTL 1 keeps the packet on this segment.",
-     13, MUTED)
+mono(
+    96,
+    336,
+    "{ agent_id, incarnation, whois_port, caps_digest, ts, nonce }  +  Ed25519 signature  +  the sender's certificate",
+)
+text(
+    96,
+    358,
+    "Each agent signs with its own key. There is no shared secret; TTL 1 keeps the packet on this segment.",
+    13,
+    MUTED,
+)
 
 # --- 2. verify ----------------------------------------------------------
 arrow(300, 372, 300, 424, INK)
 sketch_box(60, 428, 500, 176, INK, "#f7f6f1")
 step(96, 456, 2, "VERIFY  ·  every packet, in order")
-for i, (line, colour) in enumerate([
-    ("certificate signed by our CA", CLAY),
-    ("announced id is a SAN of that certificate", CLAY),
-    ("signature matches the body", CLAY),
-    ("timestamp in window, nonce unseen", CLAY),
-]):
+for i, (line, colour) in enumerate(
+    [
+        ("certificate signed by our CA", CLAY),
+        ("announced id is a SAN of that certificate", CLAY),
+        ("signature matches the body", CLAY),
+        ("timestamp in window, nonce unseen", CLAY),
+    ]
+):
     y = 492 + i * 26
     parts.append(f'<circle cx="102" cy="{y - 5}" r="3.5" fill="{colour}"/>')
     text(118, y, line, 14, INK)
-text(96, 594, "A stranger's packet stops here, before the registry.", 13, MUTED, style="italic")
+text(
+    96,
+    594,
+    "A stranger's packet stops here, before the registry.",
+    13,
+    MUTED,
+    style="italic",
+)
 
 # --- 3. whois -----------------------------------------------------------
 arrow(560, 500, 618, 500, INK)
@@ -168,7 +208,14 @@ text(656, 492, "Only for a peer that is new or has restarted.", 14, INK)
 mono(656, 520, "client → is the server's SAN the id it announced?")
 mono(656, 543, "server → is this certificate from our CA?")
 mono(656, 566, "server → does the authorizer allow this caller?")
-text(656, 594, "Answer: { name, capabilities: { verbs: [...] } }", 13, MUTED, style="italic")
+text(
+    656,
+    594,
+    "Answer: { name, capabilities: { verbs: [...] } }",
+    13,
+    MUTED,
+    style="italic",
+)
 
 # --- 4. classify --------------------------------------------------------
 arrow(870, 608, 870, 656, INK)
@@ -217,13 +264,33 @@ arrow(300, 860, 300, 906, CLAY)
 arrow(870, 860, 870, 906, CLAY)
 sketch_box(60, 910, 1060, 150, CLAY, "#fbf2ee")
 step(96, 938, 6, "CONSENSUS  ·  [CNS] … [/CNS]", CLAY)
-text(96, 972, "Only the marked span leaves the machine. Each agent answers with its own model, knowing nothing else.",
-     14, INK)
-mono(96, 1000, "ASK over the same mTLS channel  →  {answer, model, elapsed}   ·   one at a time, or the peer replies \"busy\"", 13)
-text(96, 1028, "Answers that agree once normalised are a vote, with its tally. Otherwise the local model reconciles them",
-     13, MUTED)
-text(96, 1048, "and names the disagreement. Every reply is kept: aggregation is only worth having if it can be checked.",
-     13, MUTED)
+text(
+    96,
+    972,
+    "Only the marked span leaves the machine. Each agent answers with its own model, knowing nothing else.",
+    14,
+    INK,
+)
+mono(
+    96,
+    1000,
+    'ASK over the same mTLS channel  →  {answer, model, elapsed}   ·   one at a time, or the peer replies "busy"',
+    13,
+)
+text(
+    96,
+    1028,
+    "Answers that agree once normalised are a vote, with its tally. Otherwise the local model reconciles them",
+    13,
+    MUTED,
+)
+text(
+    96,
+    1048,
+    "and names the disagreement. Every reply is kept: aggregation is only worth having if it can be checked.",
+    13,
+    MUTED,
+)
 
 svg = (
     f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" '

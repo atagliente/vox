@@ -62,7 +62,7 @@ class Marked:
     """The result of reading a message for consensus tags."""
 
     spans: list[str] = field(default_factory=list)
-    text: str = ""          # what the local model sees: the tags removed
+    text: str = ""  # what the local model sees: the tags removed
     unclosed: bool = False  # a stray [CNS] with no [/CNS] after it
 
     @property
@@ -85,8 +85,9 @@ def extract(text: str) -> Marked:
     spans = [span for span in spans if span]
     stripped = _SPAN_RE.sub(lambda m: m.group(1).strip(), text).strip()
     remaining_opens = len(_OPEN_RE.findall(_SPAN_RE.sub("", text)))
-    return Marked(spans=spans, text=stripped or text.strip(),
-                  unclosed=remaining_opens > 0)
+    return Marked(
+        spans=spans, text=stripped or text.strip(), unclosed=remaining_opens > 0
+    )
 
 
 # ------------------------------------------------------------- reconciliation
@@ -120,7 +121,7 @@ def verdict(answers: list[PeerAnswer], quorum: int = DEFAULT_QUORUM):
     clusters = tally(answers)
     usable = sum(len(members) for _, members in clusters)
     if clusters:
-        winner, members = clusters[0]
+        _winner, members = clusters[0]
         if len(members) >= max(2, quorum) and len(members) * 2 > usable:
             return "vote", members[0].answer.strip(), clusters
     return "synthesise", None, clusters
@@ -163,13 +164,15 @@ def synthesis_prompt(question: str, answers: list[PeerAnswer]) -> str:
         lines.append(f"--- AGENT {index} ({label}{model}) ---")
         lines.append(answer.answer.strip())
         lines.append("")
-    lines.extend([
-        "Write the answer the user should act on. Say plainly where the agents "
-        "agreed and where they did not, and if they disagreed on something "
-        "that matters, say which reading you think is right and why. Do not "
-        "invent agreement that is not there, and do not simply list the "
-        "replies back."
-    ])
+    lines.extend(
+        [
+            "Write the answer the user should act on. Say plainly where the agents "
+            "agreed and where they did not, and if they disagreed on something "
+            "that matters, say which reading you think is right and why. Do not "
+            "invent agreement that is not there, and do not simply list the "
+            "replies back."
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -198,7 +201,7 @@ class Fragment:
     """One piece of what an agent was writing, as it arrived."""
 
     agent: str
-    kind: str          # "text" or "reasoning"
+    kind: str  # "text" or "reasoning"
     text: str
     ts: float
 
@@ -221,8 +224,13 @@ class RoundLog:
         self.started: float = 0.0
         self._limit = limit
 
-    def begin(self, question: str, started: float, conversation_id: str = "",
-              asked_by: str = "") -> None:
+    def begin(
+        self,
+        question: str,
+        started: float,
+        conversation_id: str = "",
+        asked_by: str = "",
+    ) -> None:
         self.fragments = []
         self.question = question
         self.conversation_id = conversation_id
