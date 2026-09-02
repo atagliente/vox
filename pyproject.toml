@@ -27,7 +27,7 @@ dependencies = [
   # calls and 1.x and 2.x of the OpenAI SDK do not share one. ">=1.30" said
   # a version this has never been run against would do.
   "openai>=2.0,<3",
-  "textual>=8.0,<9",
+  "textual>=8.2.8,<9",
   "rich>=13.0,<16",
   "cryptography>=42",
 ]
