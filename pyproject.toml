@@ -29,7 +29,7 @@ dependencies = [
   "openai>=2.0,<3",
   "textual>=8.0,<9",
   "rich>=13.0,<16",
-  "cryptography>=42",
+  "cryptography>=50.0.1",
 ]
 
 [project.optional-dependencies]
