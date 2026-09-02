@@ -29,8 +29,13 @@ dependencies = [
 dev = [
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
+  "hypothesis>=6.100",
+  "pytest-cov>=5.0",
+  "pytest-timeout>=2.3",
+  "pytest-xdist>=3.6",
   "ruff>=0.16",
   "mypy>=1.11",
+  "nox>=2024.4",
   "pre-commit>=3.7",
 ]
 
@@ -53,6 +58,18 @@ include = ["vox_chat*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# -n auto by default: the suite is 9m15s serial and 1m43s across the cores
+# here, and conftest.py already gives every test its own VOX_HOME, so there
+# is nothing shared to race over. `-p no:xdist` or `-n0` turns it off when a
+# traceback is easier to read in one process.
+addopts = "-n auto"
+markers = [
+  "slow: binds real sockets, waits on real timers, or otherwise costs seconds",
+]
+# A stalled handshake should fail the test, not hang CI for six hours. The
+# thread method is the one that works on Windows, where there is no SIGALRM.
+timeout = 120
+timeout_method = "thread"
 
 [tool.coverage.run]
 source = ["vox_chat"]

@@ -252,6 +252,7 @@ def transcript(app: VoxApp) -> str:
     )
 
 
+@pytest.mark.slow
 async def test_the_marked_text_is_all_that_leaves_the_machine(app: VoxApp) -> None:
     """The privacy boundary, held by a test."""
     app.mesh = FakeMesh(answers=[answer("alpha", "Yes"), answer("beta", "Yes")])
@@ -523,6 +524,7 @@ def test_an_empty_fragment_is_not_a_line() -> None:
     assert log.lines() == []
 
 
+@pytest.mark.slow
 async def test_the_round_view_fills_while_the_agents_write(app: VoxApp) -> None:
     from vox_chat.ui.round_screen import RoundScreen
 
@@ -595,6 +597,7 @@ async def test_the_round_view_shows_the_conversation(app: VoxApp) -> None:
         assert "abc123def456" in text_of(app.screen, "#round-question")
 
 
+@pytest.mark.slow
 async def test_answering_names_the_conversation_it_belongs_to(app: VoxApp) -> None:
     import asyncio
 
@@ -790,6 +793,7 @@ async def test_a_round_can_be_abandoned(app: VoxApp) -> None:
         ]
 
 
+@pytest.mark.slow
 async def test_the_status_bar_says_a_round_is_out(app: VoxApp) -> None:
     app.mesh = SlowMesh(answers=[answer("alpha", "It depends.")])
     async with app.run_test(size=(130, 30)) as pilot:

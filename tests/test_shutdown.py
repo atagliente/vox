@@ -25,7 +25,26 @@ def app(workspace: Path) -> VoxApp:
     return VoxApp(loaded=load_config(workspace), workspace=workspace)
 
 
-def test_nothing_stuck_means_leave_returns_at_once() -> None:
+def only(*names: str):
+    """A census that sees just the threads a test made.
+
+    ``_stuck_threads`` counts every non-daemon thread, which is exactly right
+    in production and exactly wrong under a parallel test runner: the worker
+    holds channel threads of its own, and they are not what any of this is
+    about. What is under test here is the decision leave() makes, not the
+    census it makes it from — that is asserted directly below.
+    """
+    return lambda: [
+        thread
+        for thread in threading.enumerate()
+        if thread.name in names and thread.is_alive()
+    ]
+
+
+def test_nothing_stuck_means_leave_returns_at_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("vox_chat.__main__._stuck_threads", only())
     started = time.monotonic()
     assert leave(0) == 0
     assert time.monotonic() - started < 0.5, "a clean exit pays no penalty"
@@ -45,6 +64,7 @@ def test_a_blocked_worker_is_seen_and_the_process_is_forced(
 
         forced: list[int] = []
         monkeypatch.setattr("vox_chat.__main__.os._exit", forced.append)
+        monkeypatch.setattr("vox_chat.__main__._stuck_threads", only("pretend-request"))
         started = time.monotonic()
         leave(3, grace_seconds=0.2)
         elapsed = time.monotonic() - started
@@ -59,10 +79,13 @@ def test_a_blocked_worker_is_seen_and_the_process_is_forced(
 def test_the_grace_period_lets_a_finishing_worker_end_cleanly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    almost_done = threading.Thread(target=lambda: time.sleep(0.2), daemon=False)
+    almost_done = threading.Thread(
+        target=lambda: time.sleep(0.2), daemon=False, name="almost-done"
+    )
     almost_done.start()
     forced: list[int] = []
     monkeypatch.setattr("vox_chat.__main__.os._exit", forced.append)
+    monkeypatch.setattr("vox_chat.__main__._stuck_threads", only("almost-done"))
 
     assert leave(0, grace_seconds=5) == 0
     assert forced == [], "no need to force anything"

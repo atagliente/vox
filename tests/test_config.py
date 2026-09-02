@@ -151,6 +151,7 @@ def test_the_installer_keeps_unix_line_endings() -> None:
     assert data.startswith(b"#!/bin/sh\n")
 
 
+@pytest.mark.slow
 def test_every_doctor_check_runs(
     monkeypatch: pytest.MonkeyPatch, workspace: Path
 ) -> None:

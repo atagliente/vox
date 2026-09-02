@@ -420,6 +420,7 @@ async def test_a_window_larger_than_the_weights_is_refused(
     assert created == [], "nothing is written for a window the weights cannot use"
 
 
+@pytest.mark.slow
 async def test_a_built_window_becomes_the_active_model(
     app: VoxApp, monkeypatch
 ) -> None:

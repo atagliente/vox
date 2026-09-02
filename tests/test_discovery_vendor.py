@@ -20,10 +20,13 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("VOX_TEST_MESH") != "1",
-    reason="set VOX_TEST_MESH=1 to run the mesh tests (real sockets, slow)",
-)
+pytestmark = [
+    pytest.mark.slow,
+    pytest.mark.skipif(
+        os.environ.get("VOX_TEST_MESH") != "1",
+        reason="set VOX_TEST_MESH=1 to run the mesh tests (real sockets, slow)",
+    ),
+]
 
 cryptography = pytest.importorskip("cryptography")
 from cryptography import x509  # noqa: E402

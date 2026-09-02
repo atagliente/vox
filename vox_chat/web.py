@@ -373,8 +373,14 @@ class _TextExtractor(HTMLParser):
         self.title = ""
         self._skipping = 0
         self._in_title = False
+        # Where self.parts stood when a start tag was last lost inside markup
+        # the parser could not read; see _swallowed_furniture.
+        self._lost_at: int | None = None
 
     def handle_starttag(self, tag: str, attrs) -> None:
+        if "<" in tag:  # a mangled name that swallowed the next tag
+            self._note_unreadable(tag)
+            return
         if tag in self.SKIP:
             self._skipping += 1
         elif tag == "title":
@@ -383,14 +389,55 @@ class _TextExtractor(HTMLParser):
             self.parts.append("\n")
 
     def handle_endtag(self, tag: str) -> None:
-        if tag in self.SKIP and self._skipping:
+        # `</p<footer>` parses as one end tag whose *name* is `p<footer`: the
+        # opening tag was eaten by the malformed one and will never arrive.
+        if "<" in tag:
+            self._note_unreadable(tag)
+            return
+        if tag in self.SKIP and not self._skipping and self._lost_at is not None:
+            # Its opening tag went down with a run of unreadable markup, so
+            # everything since is the element's own content. Take it back out.
+            del self.parts[self._lost_at :]
+            self._lost_at = None
+        elif tag in self.SKIP and self._skipping:
             self._skipping -= 1
         elif tag == "title":
             self._in_title = False
         elif tag in self.BLOCKS:
             self.parts.append("\n")
 
+    def _note_unreadable(self, raw: str) -> None:
+        """Record that a run of markup the parser gave up on took a start tag
+        with it.
+
+        Broken pages produce these constantly — a hanging ``<!--``, a stray
+        ``</`` — and depending on the shape the run comes back as a comment or
+        as data. Either way the tag inside it never reaches handle_starttag,
+        so nothing starts skipping, the *closing* tag still arrives, and a
+        whole <script> body goes to the model as prose. Remembering where the
+        text stood is what lets handle_endtag take it back out.
+        """
+        lowered = raw.lower()
+        if any(f"<{tag}" in lowered for tag in self.SKIP):
+            self._lost_at = len(self.parts)
+
+    def handle_comment(self, data: str) -> None:
+        # `</<footer>` and friends arrive here as a bogus comment carrying the
+        # start tag they swallowed. The comment itself is never text.
+        self._note_unreadable(data)
+
+    def unknown_decl(self, data: str) -> None:  # pragma: no cover - rare shape
+        self._note_unreadable(data)
+
     def handle_data(self, data: str) -> None:
+        # A run beginning with `<` is markup the parser could not read, not
+        # prose: an unclosed comment or tag flushed back verbatim. Requiring
+        # that it *begin* as markup keeps this off ordinary text that merely
+        # quotes `&lt;script&gt;`, which documentation pages do all the time.
+        if data.lstrip().startswith("<"):
+            self._note_unreadable(data)
+            if data.lstrip().startswith("<!--"):
+                return
         if self._in_title:
             self.title += data
         if self._skipping:
@@ -405,11 +452,27 @@ class _TextExtractor(HTMLParser):
         return re.sub(r"\n{3,}", "\n\n", joined).strip()
 
 
+# The elements whose content is code rather than prose. An unterminated one
+# runs to the end of the document, which is the right reading: a page that
+# opened a script and never closed it has no more text to offer.
+_CODE_ELEMENTS = re.compile(
+    r"<\s*(script|style|noscript|svg)\b.*?(?:</\s*\1\s*>|\Z)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
 def to_text(html: str) -> tuple[str, str]:
     """``(title, text)`` from a page's source."""
+    # Cut the code elements out before the parser sees them. Chasing this in
+    # the callbacks does not converge: broken markup hands a swallowed
+    # ``<script>`` back as a comment, as a mangled tag name, or as an
+    # attribute value, and each shape leaks the whole body to the model as if
+    # it were prose. Removing the span up front closes all of them at once,
+    # and the extractor still handles the well-formed case for everything
+    # else it skips.
     parser = _TextExtractor()
     try:
-        parser.feed(html)
+        parser.feed(_CODE_ELEMENTS.sub(" ", html))
         parser.close()
     except Exception as exc:  # pragma: no cover - malformed beyond the parser
         raise WebError(f"could not read that page: {exc}") from exc

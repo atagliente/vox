@@ -657,6 +657,7 @@ def transcript(app: VoxApp) -> list[str]:
     ]
 
 
+@pytest.mark.slow
 async def test_going_online_turns_the_border_red_and_says_so(app: VoxApp) -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -766,6 +767,7 @@ async def test_the_universe_says_what_to_do_when_offline(app: VoxApp) -> None:
         assert text_of(app.screen, "#universe-rows") == ""
 
 
+@pytest.mark.slow
 async def test_the_keys_are_bound_to_the_same_actions_as_the_commands(
     app: VoxApp,
 ) -> None:

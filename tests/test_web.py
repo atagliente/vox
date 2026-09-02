@@ -107,6 +107,26 @@ def test_a_page_becomes_the_text_a_reader_would_see() -> None:
         assert junk not in text
 
 
+def test_an_unclosed_comment_does_not_leak_the_rest_of_the_page() -> None:
+    """Found by the fuzzer in tests/test_parser_fuzz.py.
+
+    HTMLParser hands an unterminated construct back as ordinary data when it
+    closes, so a page that leaves `<!--` hanging — which is everyday broken
+    HTML — used to deliver everything after it, script source included, to
+    the model as prose.
+    """
+    _title, text = web.to_text(
+        "<html><body><p>Real prose.</p>"
+        "<!--<script>alert(1)</script><p>hidden</p>"
+        "</body></html>"
+    )
+    assert "Real prose." in text
+    assert "alert(1)" not in text, "the script body is furniture, not prose"
+    assert "<script" not in text, "and neither is the markup around it"
+    # What follows the script is ordinary content again, and stays.
+    assert "hidden" in text
+
+
 def test_entities_and_odd_markup_survive() -> None:
     _title, text = web.to_text("<p>caf&eacute; &amp; cr&egrave;me<br>next</p>")
     assert "café & crème" in text

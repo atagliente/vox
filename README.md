@@ -399,6 +399,11 @@ mypy
 pytest -q
 ```
 
+The suite runs across every core by default and takes under two minutes.
+`pytest -m "not slow"` drops the handful that wait on real sockets and timers;
+`pytest -n0` puts it back in one process when a traceback is easier to read
+that way. `nox` runs lint, types and the interpreter matrix locally.
+
 `ruff` is both the linter and the formatter, at 88 columns. `mypy` runs in
 strict mode over the modules that are already clean - `code_blocks`,
 `inspection`, `models`, `reasoning`, `usage` - and that list in `pyproject.toml`

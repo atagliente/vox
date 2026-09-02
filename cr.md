@@ -75,34 +75,67 @@ see 1.2.
 
 ---
 
-## 2. Tests: cost and reliability
+## 2. Tests: cost and reliability — `[done]`
 
-* **2.1 Run time (8m 24s is the most concrete problem in the repo)**
-  * `[to do]` Introduce `pytest-xdist` (`-n auto`); `conftest.py` already isolates every
-    test behind a temporary `VOX_HOME`, so parallelism is within reach
-  * `[to do]` Mark the network, mesh and timer tests `slow` and drop them from the
-    development loop (`-m "not slow"`), keeping them in CI
-  * `[to do]` Replace the fixed `time.sleep` calls (11 of them, including 7, 8 and 9
-    second waits in `tests/test_discovery_vendor.py`) with an injectable clock or event
-    waits — those alone account for roughly 30s per run
-  * `[to do]` `pytest-timeout` with a per-test cap, so a stalled handshake fails instead
-    of hanging CI
+* **2.1 Run time (8m 24s is the most concrete problem in the repo)** — `[done]`
+  * `[done]` `pytest-xdist` with `-n auto` in `addopts`, so it is the default and not
+    something to remember. **9m 15s → 1m 43s**, measured, a 5.4× cut. Two shutdown
+    tests had to change: they assumed the process held no non-daemon threads besides
+    the main one, which the xdist worker's own channel threads break. `_stuck_threads`
+    is right and unchanged; the tests now narrow the census to the threads they made,
+    and the real census is still asserted directly.
+  * `[done]` `slow` marker on what actually waits — real sockets, timers, handshakes —
+    rather than on what is merely slow to tear a Textual app down. `pytest -m "not slow"`
+    for the development loop; CI runs everything.
+  * `[done]` The fixed `time.sleep` calls: the 7, 8 and 9 second waits are all in
+    `tests/test_discovery_vendor.py`, which is **skipped unless `VOX_TEST_MESH=1`**, so
+    they never cost the ordinary run anything — the roughly 30s attributed to them here
+    was not being paid. The one that did cost was
+    `test_the_grace_period_lets_a_finishing_worker_end_cleanly`, waiting its full five
+    second grace because the xdist threads never cleared; that is gone with the fix above.
+  * `[done]` `pytest-timeout` at 120s per test, `timeout_method = "thread"` because
+    Windows has no SIGALRM
 
-* **2.2 Test-environment robustness**
-  * `[to do]` Handle or document the case where `%TEMP%\pytest-of-<user>` is not
-    writable: today it produces 511 identical `PermissionError` errors and completely
-    hides the real result
-  * `[to do]` A `tox.ini` or `noxfile.py` to reproduce the matrix locally
+* **2.2 Test-environment robustness** — `[done]`
+  * `[done]` `%TEMP%\pytest-of-<user>` not writable now fails once, at configure time,
+    naming the directory, the reason and the two ways out — instead of one identical
+    `PermissionError` per test burying the result. The probe is a real `mkdir`, not
+    `os.access`: on Windows `os.access` reports only the read-only attribute and calls
+    a directory writable that refuses every write in it, which is exactly the case
+    seen on this machine.
+  * `[done]` `noxfile.py` reproducing lint, types and the interpreter matrix locally
   * `[done]` `conftest.py` redirects `~/.vox` to a temporary home for every test
   * `[done]` No test requires a running inference server
 
-* **2.3 Missing classes of test**
-  * `[to do]` Property-based tests (`hypothesis`) over `ThinkSplitter` — `<think>` tags
-    split across chunks are exactly the right domain for fuzzing
-  * `[to do]` Fuzz the HTML parser in `web.py` and the parsers in `searchd.py` with
-    malformed input
-  * `[to do]` A performance regression test on the streaming path (minimum tokens/s
-    against a fake provider)
+* **2.3 Missing classes of test** — `[done]`
+  * `[done]` Property-based tests over `ThinkSplitter` in
+    `tests/test_reasoning_properties.py`: where the chunks fall does not change the
+    split, a token at a time matches all at once, nothing is dropped or invented, the
+    awaited tag never reaches the transcript. The splitter held. What the properties
+    did settle is the unbalanced case — a bare `</think>`, a second `<think>` inside a
+    thought — which is text by design and is now pinned by a named test rather than
+    left to be discovered. Some providers do emit a bare leading `</think>`; treating
+    it as the end of an unannounced thought would be a different contract, and that
+    is a decision, not a bug fix. See `[to complete]` below.
+  * `[done]` Fuzzing `web.py` and `searchd.py` in `tests/test_parser_fuzz.py`. **It
+    found a real one**: broken markup ahead of a `<script>` swallowed its opening tag,
+    so nothing started skipping while the closing tag still arrived, and the entire
+    script body was handed to the model as prose. Four different malformed shapes
+    reach that state — a hanging `<!--`, a stray `</`, a mangled end-tag name, an
+    unquoted attribute — so chasing it in the parser callbacks did not converge. The
+    code elements are now cut out of the source before the parser sees them, which
+    closes all four at once.
+  * `[done]` Streaming performance floors in `tests/test_streaming_speed.py`: 20k
+    tokens/s through the assembly path against a fake provider, with and without
+    reasoning tags in the stream, plus a linearity check on the splitter fed one
+    character at a time. The floors sit far below what this machine does, to catch an
+    order of magnitude rather than measure the hardware.
+  * `[to complete]` A bare leading `</think>`, with no `<think>` before it, is
+    currently answer text. Several providers emit exactly that when the model was
+    already mid-thought. Treating it as the close of an unannounced thought would put
+    that text in the reasoning pane instead. Both readings are defensible and the
+    choice is yours; `test_an_unmatched_tag_is_ordinary_text` in
+    `tests/test_reasoning_properties.py` is where the current one is written down.
   * `[done]` Context-window and prompt-fitting coverage (`tests/test_model_window.py`)
 
 ---
