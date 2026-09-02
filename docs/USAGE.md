@@ -731,6 +731,12 @@ cannot check is not worth having.
 
 With no peers to ask it says so and answers locally instead of failing.
 
+**One round at a time.** While the peers are out the status bar reads `ASKING
+THE MESH` and another message is refused with `STILL ASKING THE MESH - CTRL+G
+TO STOP`, because a round that returns after you have moved on would attach its
+answers to the wrong question. `Ctrl+G` abandons it: the peers may still answer,
+and those answers are dropped.
+
 **On the sample authority** a round works, and warns before every one of them:
 
 ```text

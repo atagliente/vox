@@ -672,3 +672,91 @@ async def test_answering_does_not_overwrite_our_own_round(app: VoxApp) -> None:
         assert app.consensus_log.question == "our own question"
         assert app.consensus_log.asked_by == ""
         assert all(f.text != "their answer" for f in app.consensus_log.fragments)
+
+
+# ------------------------------------------------------- one round at a time
+
+
+class SlowMesh(FakeMesh):
+    """A mesh whose peers take a moment, like real ones."""
+
+    def __init__(self, *args, delay: float = 0.4, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.delay = delay
+
+    def ask_peers(self, question, verb="infer", limit=5, timeout=90.0,
+                  on_event=None, conversation=""):
+        import time
+
+        time.sleep(self.delay)
+        return super().ask_peers(question, verb, limit, timeout, on_event,
+                                 conversation)
+
+
+async def test_a_message_sent_mid_round_is_refused(app: VoxApp) -> None:
+    """Regression: the round answered the question typed while waiting.
+
+    While peers were out the app was not "generating", so a second message was
+    accepted, answered at once, and then answered again with the first
+    question's peer replies attached.
+    """
+    app.mesh = SlowMesh(answers=[answer("alpha", "It depends.")])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.input_area.insert("[CNS]FIRST[/CNS]")
+        app.action_send()
+        await pilot.pause()
+        assert app._consensus_running is True
+
+        app.input_area.insert("SECOND, typed while waiting")
+        app.action_send()
+        await pilot.pause()
+
+        assert "STILL ASKING THE MESH" in transcript(app)
+        assert app.input_area.text, "the second message is kept, not swallowed"
+        assert [m.content for m in app.session.messages if m.role == "user"] == ["FIRST"]
+
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.mesh.asked == ["FIRST"]
+        assert app._consensus_prompt, "the round reconciles the question it asked"
+        assert "FIRST" in app._consensus_prompt
+
+
+async def test_a_round_can_be_abandoned(app: VoxApp) -> None:
+    app.mesh = SlowMesh(answers=[answer("alpha", "It depends.")])
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.input_area.insert("[CNS]FIRST[/CNS]")
+        app.action_send()
+        await pilot.pause()
+
+        app.action_stop()
+        await pilot.pause()
+        assert app._consensus_running is False
+        assert "CONSENSUS ABANDONED" in transcript(app)
+
+        # The peers still answer; those answers belong to nobody now.
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert not app._consensus_prompt
+        assert all(m.role != "peer" for m in app.session.messages)
+
+        # And the next question goes through normally.
+        app.input_area.insert("SECOND")
+        app.action_send()
+        await pilot.pause()
+        assert [m.content for m in app.session.messages if m.role == "user"] == [
+            "FIRST", "SECOND"
+        ]
+
+
+async def test_the_status_bar_says_a_round_is_out(app: VoxApp) -> None:
+    app.mesh = SlowMesh(answers=[answer("alpha", "It depends.")])
+    async with app.run_test(size=(130, 30)) as pilot:
+        await pilot.pause()
+        app.input_area.insert("[CNS]FIRST[/CNS]")
+        app.action_send()
+        await pilot.pause()
+        assert "ASKING THE MESH" in str(app.query_one("#status").render())
+        await app.workers.wait_for_complete()

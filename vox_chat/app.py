@@ -155,6 +155,7 @@ class VoxApp(App[None]):
         self._consensus_prompt: str = ""
         self._consensus_answers: list[cns.PeerAnswer] = []
         self._consensus_running = False
+        self._consensus_round = 0
         self.consensus_log = cns.RoundLog()
         self._round_screen: RoundScreen | None = None
         self.inspection = self._new_inspection()
@@ -300,7 +301,10 @@ class VoxApp(App[None]):
                 if self.generating or self._preloading
                 else ""
             ),
-            busy="" if self._preloading is None else f"PRELOADING {self._preloading}",
+            busy=(
+                f"PRELOADING {self._preloading}" if self._preloading is not None
+                else ("ASKING THE MESH" if self._consensus_running else "")
+            ),
         )
 
     @work(thread=True, group="connection")
@@ -508,6 +512,9 @@ class VoxApp(App[None]):
             return
         if self.generating:
             self.write_error("ALREADY GENERATING - CTRL+G TO STOP")
+            return
+        if self._consensus_running:
+            self.write_error("STILL ASKING THE MESH - CTRL+G TO STOP")
             return
         if text.startswith("//"):
             text = text[1:]
@@ -885,6 +892,13 @@ class VoxApp(App[None]):
 
     def action_stop(self) -> None:
         if self.cancel_preload():
+            return
+        if self._consensus_running:
+            self._consensus_running = False
+            self._consensus_round += 1  # anything still in flight is stale now
+            self.clear_thinking()
+            self.write_system("CONSENSUS ABANDONED - the peers may still answer")
+            self.refresh_status()
             return
         if not self.generating or self.cancel_event.is_set():
             return
@@ -1531,6 +1545,7 @@ class VoxApp(App[None]):
         )
         self._consensus_answers = []
         self._consensus_running = True
+        self._consensus_round += 1
         self.consensus_log.begin(question, time.time(), self.session.id)
         if self._round_screen is not None:
             self._round_screen.refresh_view()
@@ -1547,6 +1562,7 @@ class VoxApp(App[None]):
             # so these arrive far slower than local tokens.
             self.call_from_thread(self.consensus_event, agent, kind, text, ts)
 
+        round_number = self._consensus_round
         answers = self.mesh.ask_peers(
             question,
             verb=str(settings.get("verb", "infer")),
@@ -1555,7 +1571,9 @@ class VoxApp(App[None]):
             on_event=relay,
             conversation=self.session.id,
         )
-        self.call_from_thread(self.consensus_answered, question, answers, settings)
+        self.call_from_thread(
+            self.consensus_answered, question, answers, settings, round_number
+        )
 
     def consensus_event(self, agent: str, kind: str, text: str, ts: float) -> None:
         """One fragment from one peer, live."""
@@ -1565,7 +1583,13 @@ class VoxApp(App[None]):
         if self._panel_mode == "consensus":
             self.refresh_panel()
 
-    def consensus_answered(self, question: str, answers: list, settings: dict) -> None:
+    def consensus_answered(self, question: str, answers: list, settings: dict,
+                           round_number: int = 0) -> None:
+        if round_number and round_number != self._consensus_round:
+            # The operator abandoned this round, or started another one. Its
+            # answers belong to a question that is no longer on screen.
+            log.info("dropping answers from round %s", round_number)
+            return
         self._consensus_running = False
         self._consensus_answers = answers
         self.clear_thinking()

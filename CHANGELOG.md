@@ -40,6 +40,18 @@ machine and version named, not estimated.
   time as whom. The caller caps how much a peer may stream. Measured on one
   machine with `qwen2.5-coder:3b` answering: the first fragment 4.1s in, then
   roughly ten tokens a second until the answer completed.
+- **Fixed: a round answered the question typed while waiting for it.** While
+  peers were out the app did not consider itself busy — `generating` is only
+  set once a model is actually streaming — so a second message was accepted,
+  answered immediately, and then answered a *second* time when the round
+  returned, with the first question's peer replies attached to it. From the
+  operator's side it looked like a delay and an answer to the previous
+  question, which is exactly what it was. A round in flight is now busy:
+  `STILL ASKING THE MESH - CTRL+G TO STOP`, the status bar says `ASKING THE
+  MESH`, `Ctrl+G` abandons the round, and answers that arrive for an abandoned
+  or superseded round are dropped rather than delivered to whatever question
+  happens to be on screen. Each round carries a number, which is how a late
+  answer is recognised as stale.
 - **Both ends of a round can watch it.** The machine being asked filled no
   view of its own: it wrote two summary lines and kept its reasoning to
   itself. `F5` there now shows `ANSWERING`, who asked, the conversation id and
