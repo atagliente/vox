@@ -42,7 +42,7 @@ vox doctor
 
 ```text
 [ OK ] PYTHON   3.12.3
-[ OK ] DEPS     openai 3.3.1 | textual 8.2.8 | rich 15.0.0
+[ OK ] DEPS     openai 2.41.1 | textual 8.2.8 | rich 15.0.0 | cryptography 50.0.1
 [ OK ] CONFIG   /home/you/.vox
 [FAIL] LINK     cannot reach provider: http://localhost:11434/v1
 ```
@@ -432,6 +432,13 @@ pre-commit install
 pytest
 ```
 
+For an installation that has to be reproducible, `requirements.lock` pins
+every runtime dependency to an exact version and its hash:
+
+```bash
+pip install --require-hashes -r requirements.lock
+```
+
 No test needs a running inference server. `docs/make_mesh_diagram.py` regenerates
 the diagram above.
 
@@ -482,6 +489,8 @@ the framework's business and belongs with the widget.
 - [vox_chat/discovery/README.md](vox_chat/discovery/README.md) — the mesh
   protocol and its security model
 - [spec.md](spec.md) — the specification the implementation follows
+- [SECURITY.md](SECURITY.md) — how to report something, and what VOX does and
+  does not defend
 - [CHANGELOG.md](CHANGELOG.md) — what changed and when
 
 ## License

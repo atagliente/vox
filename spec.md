@@ -1,6 +1,6 @@
 # VOX — specification
 
-VOX is a terminal chat client for coding work, built on Python 3.12, `textual`,
+VOX is a terminal chat client for coding work, built on Python 3.11+, `textual`,
 `rich` and the `openai` package. It talks to any OpenAI-compatible endpoint
 (Ollama, llama.cpp server, vLLM, LM Studio, a remote gateway) and is meant to
 run identically on Linux, macOS, Windows and Termux.
@@ -548,7 +548,7 @@ discovery suite binds real multicast and TLS sockets, so it runs only under
 
 A preflight installer makes `vox` a system command without administrator
 rights: `install.sh` for Linux, macOS and Termux, `install.ps1` for Windows.
-Each one verifies Python 3.12+, installs through pipx or a dedicated virtual
+Each one verifies Python 3.11+, installs through pipx or a dedicated virtual
 environment, puts a launcher on the user PATH and ends with `vox doctor`, which
 reports the interpreter, the dependencies, the configuration directory, the
 editor, the provider link and the active model.

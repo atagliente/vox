@@ -60,6 +60,37 @@ jobs:
       - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
       - run: pytest -q
 
+  security:
+    # Two different questions: is anything VOX depends on known to be
+    # vulnerable, and does VOX itself do something careless. Neither answers
+    # the other.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip && pip install pip-audit bandit
+      - name: Known vulnerabilities in the dependencies
+        run: pip-audit --strict --progress-spinner off .
+      - name: Careless patterns in the source
+        # Tests are excluded: they open sockets and run subprocesses on
+        # purpose, and a report full of those is a report nobody reads.
+        run: bandit -r vox_chat -ll
+      - name: The lock file still matches pyproject.toml
+        run: |
+          pip install pip-tools
+          pip-compile --generate-hashes --quiet             --output-file=/tmp/check.lock pyproject.toml
+          # Compare the pins, not the header comments.
+          grep -v '^#' requirements.lock | grep -v '^$' > /tmp/have.txt
+          grep -v '^#' /tmp/check.lock  | grep -v '^$' > /tmp/want.txt
+          diff /tmp/have.txt /tmp/want.txt || {
+            echo "requirements.lock is stale; regenerate it (see its header)."
+            exit 1
+          }
+
   coverage:
     # One run, on one interpreter: coverage is a number about the code, not
     # about the platform, and nine of them would cost eight minutes each.

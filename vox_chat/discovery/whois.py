@@ -248,7 +248,10 @@ class WhoisServer:
         self,
         descriptor: dict,
         identity: Identity,
-        host: str = "0.0.0.0",
+        # Every interface, deliberately: this is the port peers on the
+        # segment connect to, and it is protected by requiring a client
+        # certificate rather than by being hard to reach.
+        host: str = "0.0.0.0",  # nosec B104 - see the comment above
         port: int = 0,
         authorizer: Authorizer | None = None,
         ask_handler: AskHandler | None = None,

@@ -874,3 +874,16 @@ def test_the_prompt_says_the_searching_is_already_done() -> None:
     )
     assert "already been searched" in prompt
     assert "must not say that you are unable to" in prompt
+
+
+def test_only_http_and_https_are_ever_opened() -> None:
+    """Found by bandit. urlopen speaks file:, ftp: and data: too, and a URL
+    reaching the egress point from a model, a search result or an MCP server
+    is not one to hand those to: file:///etc/passwd is a valid URL."""
+    from vox_chat import http
+
+    for refused in ("file:///etc/passwd", "ftp://example.com/x", "data:text/plain,x"):
+        with pytest.raises(http.HttpError) as caught:
+            http.request(refused, timeout=1)
+        assert caught.value.kind == "protocol"
+        assert "http and https" in caught.value.message

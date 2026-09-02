@@ -44,9 +44,18 @@ def make_sender(
 
 
 def make_receiver(
-    group: str = DEFAULT_GROUP, port: int = DEFAULT_PORT, interface: str = "0.0.0.0"
+    group: str = DEFAULT_GROUP,
+    port: int = DEFAULT_PORT,
+    interface: str = "0.0.0.0",  # nosec B104 - see the docstring
 ) -> socket.socket:
-    """The receiving socket, joined to the multicast group."""
+    """The receiving socket, joined to the multicast group.
+
+    Bound to every interface on purpose, and not a slip: a multicast group is
+    joined on an interface, and which one a peer will announce on is not
+    something this can know in advance. The traffic does not leave the
+    segment, and nothing is trusted for having arrived on it — the mTLS
+    handshake in whois.py is what decides who a peer is.
+    """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     if hasattr(socket, "SO_REUSEPORT") and sys.platform != "win32":

@@ -29,7 +29,10 @@ from .storage import vox_home
 Status = Literal["OK", "FAIL", "WARN", "--"]
 
 _MIN_PYTHON = (3, 11)
-_REQUIRED = ("openai", "textual", "rich")
+# Every runtime dependency, checked. cryptography was missing from this
+# list while discovery/ imported it without a guard, so a machine without it
+# passed `vox doctor` and then failed at the first mesh command.
+_REQUIRED = ("openai", "textual", "rich", "cryptography")
 
 
 @dataclass

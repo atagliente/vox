@@ -1,10 +1,12 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "vox"
-version = "0.1.0"
+# Read from vox_chat/__init__.py, so there is one place the version lives.
+# It was written here as well, with nothing checking the two agreed.
+dynamic = ["version"]
 description = "VOX - retro terminal chat client for OpenAI-compatible providers"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -16,12 +18,17 @@ classifiers = [
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  # Added because CI runs the suite on it, not because it ought to work.
+  "Programming Language :: Python :: 3.13",
   "Topic :: Software Development",
 ]
 dependencies = [
-  "openai>=1.30",
-  "textual>=0.60",
-  "rich>=13.0",
+  # Upper bounds on the majors, because these are the surfaces VOX actually
+  # calls and 1.x and 2.x of the OpenAI SDK do not share one. ">=1.30" said
+  # a version this has never been run against would do.
+  "openai>=2.0,<3",
+  "textual>=8.0,<9",
+  "rich>=13.0,<16",
   "cryptography>=42",
 ]
 
@@ -45,15 +52,19 @@ vox = "vox_chat.__main__:main"
 [project.urls]
 Homepage = "https://github.com/atagliente/vox"
 
-[tool.setuptools.packages.find]
-include = ["vox_chat*"]
+[tool.hatch.version]
+path = "vox_chat/__init__.py"
 
-[tool.setuptools.package-data]
-# The demo authority, so a fresh download joins a mesh without provisioning.
-"vox_chat.demo_pki" = ["*.crt", "*.key", "*.md"]
-# The code is annotated throughout; the marker is what lets a type checker
-# downstream see any of it.
-"vox_chat" = ["py.typed"]
+[tool.hatch.build.targets.wheel]
+packages = ["vox_chat"]
+# The demo authority ships so a fresh download joins a mesh without
+# provisioning, and py.typed is what lets a type checker downstream see the
+# annotations. hatchling includes package data by default; these are named
+# because they are the two that would be missed if it did not.
+artifacts = ["vox_chat/py.typed", "vox_chat/demo_pki/*"]
+
+[tool.hatch.build.targets.sdist]
+include = ["vox_chat", "tests", "docs", "README.md", "LICENSE", "spec.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

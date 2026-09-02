@@ -111,6 +111,12 @@ class Reply:
         return self.body.decode(self.charset, errors)
 
 
+# The only schemes this will open. urlopen speaks file:, ftp: and data: too,
+# and a URL that reaches here from a model, a search result or an MCP server
+# is not one to hand those to: file:///etc/passwd is a perfectly good URL.
+ALLOWED_SCHEMES = frozenset({"http", "https"})
+
+
 def request(
     url: str,
     *,
@@ -127,6 +133,13 @@ def request(
     server sends: one extra byte is read past it so the caller can tell a
     body that fitted from one that was cut off.
     """
+    scheme = urllib.parse.urlparse(url).scheme.lower()
+    if scheme not in ALLOWED_SCHEMES:
+        raise HttpError(
+            "protocol",
+            f"{scheme or 'that'} is not a scheme VOX will open; only http and https",
+            url=url,
+        )
     sent = urllib.request.Request(
         url,
         data=data,
@@ -163,7 +176,9 @@ def _once(
     max_bytes: int | None,
 ) -> Reply:
     try:
-        with urllib.request.urlopen(sent, timeout=timeout) as response:
+        # nosec B310 - request() refuses every scheme but http and https
+        # before anything reaches here; that check is the answer to this.
+        with urllib.request.urlopen(sent, timeout=timeout) as response:  # nosec B310
             raw = response.read() if max_bytes is None else response.read(max_bytes + 1)
             headers = {k.lower(): v for k, v in response.headers.items()}
             content_type = (
