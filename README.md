@@ -202,6 +202,21 @@ switched on rather than assumed:
 | `AGENTS.md` | read automatically from the working directory, as the project's own notes. `CLAUDE.md`, `VOX.md` and `.vox.md` too |
 | `/image <path>` | attaches a picture for a vision model. Drawn inline on Kitty and iTerm2 |
 
+It works the other way round too. `vox mcp-serve` turns the workspace tools
+into an MCP server on stdin/stdout, so another client — including another VOX —
+can list and call them:
+
+```bash
+vox mcp-serve -w ~/project
+```
+
+Read-only by default: `list_files`, `read_file`, `search_text`, and nothing
+else. There is no operator on that side to confirm a write, so the
+confirmation is the command line itself — `--allow-write` adds the three tools
+that change files, `--allow-run` adds `run_command`, and they are separate
+switches because they are not the same risk. Every path is still resolved
+inside the workspace, and `agent.commands` still denies what it denies.
+
 `/set` shows and changes the sampling parameters actually being sent -
 `top_p`, `top_k`, `seed`, `stop`, `reasoning_effort`, `think` and the rest.
 Anything unset is not sent at all, so the provider's own default stands.

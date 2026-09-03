@@ -292,15 +292,23 @@ decision rather than work: whether to move to an async provider client
     the tool. Off and empty by default: starting somebody else's program is not
     something a default does. Connecting runs on a worker thread, and a server that
     will not start is reported once and left alone rather than retried every turn.
-  * `[to complete]` Exposing VOX **as** an MCP server. The workspace tools really are
-    the natural candidate — sandboxed, confined, already tested — but publishing them
-    means any MCP client on the machine can drive them, and the confinement was written
-    against a model VOX itself confirms for, not against an arbitrary caller. That is a
-    security decision about what VOX offers the rest of the machine, and it is yours.
-    What it would need, if you want it: a `vox mcp-serve` entry point speaking the same
-    JSON-RPC as `mcp/client.py` reads, `tools.TOOL_SCHEMAS` as the advertised list,
-    `tools.execute` behind it, and a decision about whether writes are refused outright
-    or confirmed by something — there is no operator at a keyboard on that side.
+  * `[done]` Exposing VOX **as** an MCP server: `vox mcp-serve`, in
+    `vox_chat/mcp/server.py`. The workspace tools were the natural candidate —
+    confined, already tested — and the open question was what to do about the
+    confirmation, because the confinement was written against a model VOX confirms
+    for and there is no operator at a keyboard on this side. The answer taken is not
+    to confirm but **not to offer**: `list_files`, `read_file` and `search_text` and
+    nothing else, unless the person starting the server says otherwise on the command
+    line. `--allow-write` adds the three that write, `--allow-run` adds
+    `run_command`, separately, because editing a file in a named directory and
+    running anything at all are not the same risk. A refusal comes back as a result
+    with `isError`, naming the switch that was missing, rather than as a protocol
+    error. Every advertised tool carries the `readOnlyHint` / `destructiveHint`
+    annotations VOX itself reads off other people's servers, so a client can apply
+    its own confirmation to what this one hands it, and `agent.commands` still denies
+    what it denied. `tests/test_mcp_server.py` runs `vox mcp-serve` as a real
+    subprocess and drives it with `McpClient` — VOX on both ends, which is the only
+    way to find out that neither side is quietly wrong.
 
 * **4.2 Modern generation parameters** — `[done]`
   * `[done]` `reasoning_effort` and `think`, in `vox_chat/sampling.py`. VOX could always

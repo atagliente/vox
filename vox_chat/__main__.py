@@ -107,6 +107,31 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("-w", "--workspace", metavar="PATH", default=None)
 
     subparsers.add_parser("config-path", help="Print the config file path and exit.")
+
+    serve = subparsers.add_parser(
+        "mcp-serve",
+        help="Speak MCP on stdin/stdout, offering VOX's workspace tools.",
+        description=(
+            "Offer this workspace's tools to an MCP client over stdio. "
+            "Read-only unless you say otherwise: there is no operator on "
+            "this side to confirm a write, so the confirmation is this "
+            "command line."
+        ),
+    )
+    serve.add_argument("-w", "--workspace", metavar="PATH", default=None)
+    serve.add_argument(
+        "--allow-write",
+        action="store_true",
+        help="Also offer write_file, edit_file and apply_patch.",
+    )
+    serve.add_argument(
+        "--allow-run",
+        action="store_true",
+        help=(
+            "Also offer run_command. The agent.commands deny list from the "
+            "configuration still applies."
+        ),
+    )
     return parser
 
 
@@ -119,6 +144,21 @@ def main(argv: list[str] | None = None) -> int:
         from .doctor import main as doctor_main
 
         return doctor_main(workspace=workspace, plain=args.plain, timeout=args.timeout)
+
+    if args.command == "mcp-serve":
+        from .config import load_config as _load
+        from .mcp.server import Server, build_offer
+
+        # Nothing may be printed on stdout but JSON-RPC: that stream is the
+        # protocol. Logging already goes to the VOX log file, and argparse
+        # errors have gone to stderr.
+        offer = build_offer(
+            workspace,
+            allow_write=args.allow_write,
+            allow_run=args.allow_run,
+            agent_config=_load(workspace).data.get("agent", {}),
+        )
+        return Server(offer).serve()
 
     if args.command == "config-path":
         from .storage import global_config_path

@@ -28,7 +28,9 @@ import pytest
 
 yaml = pytest.importorskip("yaml")
 
-WORKFLOWS = sorted((Path(__file__).resolve().parents[1] / ".github" / "workflows").glob("*.yml"))
+WORKFLOWS = sorted(
+    (Path(__file__).resolve().parents[1] / ".github" / "workflows").glob("*.yml")
+)
 
 # Keys evaluated before a job's matrix is expanded. A `${{ matrix.… }}` in one
 # of these is rejected when the workflow is parsed, not when the job runs.
