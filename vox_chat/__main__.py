@@ -73,6 +73,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use this model for this run.",
     )
     parser.add_argument(
+        "-a",
+        "--ask",
+        metavar="QUESTION",
+        help=(
+            "Answer one question on stdout and exit. No screen, no agent "
+            "tools, no mesh: for pipes and scripts."
+        ),
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Reopen the session that was last saved in this workspace.",
+    )
+    parser.add_argument(
         "--no-splash", action="store_true", help="Skip the boot banner."
     )
     parser.add_argument(
@@ -124,6 +138,11 @@ def main(argv: list[str] | None = None) -> int:
         loaded.data["active_provider"] = args.provider
     if args.model:
         loaded.data["active_model"] = args.model
+    if args.ask:
+        from .oneshot import ask
+
+        return ask(args.ask, loaded, workspace)
+
     if args.save and (args.provider or args.model):
         try:
             save_global_config(loaded.data)
@@ -134,6 +153,14 @@ def main(argv: list[str] | None = None) -> int:
     from .app import VoxApp
 
     app = VoxApp(loaded=loaded, workspace=workspace, show_splash=not args.no_splash)
+    if args.resume:
+        # Resolved before the screen exists, so a missing session is a line on
+        # stderr and a normal start rather than an error inside the TUI.
+        sessions = app.session_store.list()
+        if sessions:
+            app.resume_on_start = sessions[0].name
+        else:
+            print("vox: no saved session in this workspace", file=sys.stderr)
     app.run()
     return leave(0)
 

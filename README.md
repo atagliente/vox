@@ -58,6 +58,19 @@ vox
 
 Type, press `Enter` to send. `/help` lists every command.
 
+### Without the screen
+
+```bash
+vox --ask "what does this error mean: $(tail -1 build.log)"
+```
+
+One question, the answer on stdout and nothing else, errors on stderr and in
+the exit code. No agent tools, no mesh, no web: confirming a write needs
+somebody to confirm it, and in a pipe there is nobody.
+
+`vox --resume` reopens the last session saved in this directory. `NO_COLOR`
+is honoured, and `/theme` picks between the three colour schemes.
+
 ## Configuration
 
 `~/.vox/config.json` is written on first run:
@@ -521,7 +534,10 @@ to tell the other agents.
   usage figures, themes, reasoning, agent details
 - [vox_chat/discovery/README.md](vox_chat/discovery/README.md) — the mesh
   protocol and its security model
-- [spec.md](spec.md) — the specification the implementation follows
+- [spec.md](spec.md) — the contract: what VOX must do and must refuse to do.
+  When this README and the specification disagree, the specification wins
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to run the tests, how the code is
+  laid out, what a pull request is expected to carry
 - [SECURITY.md](SECURITY.md) — how to report something, and what VOX does and
   does not defend
 - [CHANGELOG.md](CHANGELOG.md) — what changed and when

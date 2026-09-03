@@ -121,6 +121,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
     ),
     CommandSpec("role", "/role [name]", "Show or switch the active role"),
     CommandSpec("roles", "/roles", "Open the role picker"),
+    CommandSpec("theme", "/theme [name]", "Show or change the colour theme"),
     CommandSpec("prompts", "/prompts", "Open the saved prompt picker"),
     CommandSpec("prompt", "/prompt <name>", "Load a prompt into the input"),
     CommandSpec("prompt-save", "/prompt-save <name>", "Save the input as a prompt"),

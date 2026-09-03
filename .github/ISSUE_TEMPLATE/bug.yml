@@ -1,0 +1,53 @@
+name: Something is broken
+description: A thing VOX does that it should not, or does not do that it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not report a security problem here — see
+        [SECURITY.md](../blob/main/SECURITY.md) for the private route.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, and what VOX did instead of what you expected.
+      placeholder: |
+        I ran /web on with a fresh config, asked a question, and the answer
+        arrived with no sources.
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: vox doctor
+      description: >
+        The output of `vox doctor`. It reports the interpreter, the
+        dependencies and the configuration directory, which is most of what
+        anyone would otherwise have to ask you for.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Terminal and operating system
+      description: >
+        The terminal matters more than you would think: several things here
+        are the way they are because a key or an escape sequence does not
+        reach every one of them.
+      placeholder: Windows Terminal on Windows 11 / kitty on Arch / Termux
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Anything in the log
+      description: >
+        `~/.vox/vox.log`. Secrets are redacted before they are written, but
+        have a look before pasting.
+      render: text

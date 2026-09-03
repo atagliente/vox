@@ -24,6 +24,7 @@ from .. import images, mcp, ollama, sampling, searchd
 from .. import report as reporting
 from .. import web as web_module
 from ..tools import ToolError
+from ..ui import branding
 from . import spec as commands
 
 if TYPE_CHECKING:
@@ -757,3 +758,41 @@ def cmd_plan(app: VoxApp, argument: str) -> None:
     for looking at it again without scrolling back.
     """
     app.write_system("PLAN\n\n" + app.todos.render())
+
+
+def cmd_theme(app: VoxApp, argument: str) -> None:
+    """Show or change the theme, and remember the choice.
+
+    The stylesheet is a class attribute Textual reads when the app is built,
+    so a change here needs the screen rebuilt to take effect — which is a
+    restart, and saying so is better than a theme that half-applies.
+    """
+    wanted = argument.strip().lower()
+    current = str(app.config.get("ui", {}).get("theme", "nasa"))
+    names = branding.theme_names()
+
+    if branding.no_color():
+        app.write_system(
+            "THEME - NO_COLOR is set, so VOX is choosing no colours at all. "
+            f"The saved theme is {current}; unset NO_COLOR to see it."
+        )
+        if not wanted:
+            return
+
+    if not wanted:
+        app.write_system(
+            f"THEME {current}\n  available: {', '.join(names)}\n  /theme <name>"
+        )
+        return
+    if wanted not in names:
+        app.write_error(f"THEME - unknown: {wanted}. Have: {', '.join(names)}")
+        return
+    if wanted == current:
+        app.write_system(f"THEME - already {wanted}")
+        return
+    app.config.setdefault("ui", {})["theme"] = wanted
+    app.persist_config()
+    app.write_system(
+        f"THEME {wanted} - saved. Textual reads the stylesheet when the app "
+        "is built, so it applies on the next start."
+    )

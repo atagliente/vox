@@ -1,0 +1,7 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/atagliente/vox/security/advisories/new
+    about: >
+      Report it privately. A public issue tells everyone at once, including
+      the people you would rather it did not.

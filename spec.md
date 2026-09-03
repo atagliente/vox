@@ -5,8 +5,23 @@ VOX is a terminal chat client for coding work, built on Python 3.11+, `textual`,
 (Ollama, llama.cpp server, vLLM, LM Studio, a remote gateway) and is meant to
 run identically on Linux, macOS, Windows and Termux.
 
-This document is the contract the implementation follows. It is the reference
-for anyone extending the project.
+## Which document says what
+
+Three files describe VOX and they overlapped enough to disagree, which is
+worse than any one of them being wrong. So:
+
+- **This file is the contract.** What VOX must do, what it must refuse to do,
+  and the shapes it commits to — configuration keys, the tool schema, the
+  wire format of the mesh. When the code and this file disagree, one of them
+  is a bug; which one is a conversation.
+- **[README.md](README.md) is the tour.** What VOX is, how to install it, and
+  what each thing is *for*. It shows; it does not enumerate. Where it needs a
+  complete list it links to one rather than repeating it.
+- **[docs/USAGE.md](docs/USAGE.md) is the manual.** Every option, every key,
+  every command, worked examples. The place to look something up.
+
+A change to behaviour belongs here first. A change to how behaviour is
+explained belongs in one of the other two, and only one.
 
 ## Goals
 

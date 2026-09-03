@@ -248,6 +248,8 @@ class VoxApp(App[None]):
         self.undo = UndoStack()
         # The plan the model says it is working to, shown as it changes.
         self.todos = TodoList()
+        # Set by --resume before the screen is mounted.
+        self.resume_on_start: str = ""
         self._inspect_screen: InspectScreen | None = None
         self._panel_mode = "code"
 
@@ -290,6 +292,12 @@ class VoxApp(App[None]):
             *self.history.warnings,
         ]:
             self.write_error(f"STORE: {warning}")
+        if self.resume_on_start:
+            # --resume: the last saved session in this workspace, reopened
+            # here rather than in __main__ so a failure is a line in the
+            # transcript instead of a traceback before the screen exists.
+            name, self.resume_on_start = self.resume_on_start, ""
+            self.load_session(name)
         self.check_connection()
 
     # ------------------------------------------------------------ transcript

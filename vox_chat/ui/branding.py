@@ -7,6 +7,8 @@ content, so a long endpoint can never break the alignment.
 
 from __future__ import annotations
 
+import os
+
 from .. import __version__
 
 SUBTITLE = "TERMINAL FOR LOCAL MODELS"
@@ -402,6 +404,71 @@ ModalScreen { align: center middle; }
 ListView { height: auto; max-height: 20; }
 """
 
+
+# NO_COLOR: the same layout with every colour declaration removed, so the
+# terminal's own palette is what shows. Not a "light theme" — the point is
+# that VOX chooses nothing, which is what was asked for.
+PLAIN_CSS = """
+Screen { }
+#header { height: auto; padding: 0 1; }
+#body { height: 1fr; }
+#transcript { height: 1fr; padding: 0 1; }
+#side-panel {
+    width: 34; display: none; padding: 0 1;
+}
+#side-panel.visible { display: block; }
+#side-panel.code { width: 58; max-width: 60%; }
+#side-title { text-style: bold; }
+#input-area { height: auto; max-height: 12; }
+#input { height: auto; min-height: 3; max-height: 10; }
+#status { height: 1; padding: 0 1; }
+#keybar { height: 1; padding: 0 1; }
+Screen.mesh-online { }
+UniverseScreen { }
+#universe-title { padding: 1 1 0 1; }
+#universe-summary { padding: 0 1 1 1; }
+#universe-header { padding: 0 1; }
+#universe-body { height: 1fr; padding: 0 1; }
+#universe-keys { height: 1; padding: 0 1; }
+#universe-legend {
+    display: none; height: auto; padding: 1 2; margin: 0 1;
+}
+#universe-legend.visible { display: block; }
+InspectScreen { }
+#inspect-title { padding: 1 1 0 1; }
+#inspect-summary { padding: 0 1 1 1; }
+#inspect-legend {
+    display: none; height: auto; padding: 1 2; margin: 0 1;
+}
+#inspect-legend.visible { display: block; }
+#inspect-header { padding: 0 1; }
+#inspect-body { height: 1fr; padding: 0 1; }
+#inspect-keys { height: 1; padding: 0 1; }
+.msg { margin-bottom: 1; }
+.msg-user { }
+.msg-assistant { }
+.msg-system { }
+.msg-tool { }
+.msg-error { }
+.msg-reasoning { text-style: italic; }
+.msg-peer { }
+.msg-web { }
+RoundScreen { }
+#round-title { padding: 1 1 0 1; }
+#round-question { padding: 0 1 1 1; }
+#round-body { height: 1fr; padding: 0 1; }
+#round-keys { height: 1; padding: 0 1; }
+ModalScreen { align: center middle; }
+#modal-box {
+    width: 82; max-width: 96%; height: auto; max-height: 90%;
+    padding: 1 2;
+}
+#modal-title { text-style: bold; margin-bottom: 1; }
+#modal-buttons { height: auto; align-horizontal: right; }
+#modal-hint { height: auto; margin-top: 1; text-style: dim; }
+ListView { height: auto; max-height: 20; }
+"""
+
 THEMES = {"nasa": NASA_CSS, "dark": DARK_CSS, "light": LIGHT_CSS}
 
 LEGACY_THEMES = {"wopr": "nasa"}
@@ -410,8 +477,31 @@ LEGACY_THEMES = {"wopr": "nasa"}
 LEGACY_LOGOS = {"norad": "frame"}
 
 
-def theme_css(name: str) -> str:
-    """Return the stylesheet for ``name``, falling back to the default theme."""
+def theme_names() -> list[str]:
+    """The themes that can be chosen, in a stable order."""
+    return sorted(THEMES)
+
+
+def no_color(environ: dict[str, str] | None = None) -> bool:
+    """Has the operator asked for no colour at all?
+
+    https://no-color.org: the variable being *present* is the request, whatever
+    it is set to, including the empty string. Reading it as a boolean is the
+    common way to get this wrong.
+    """
+    env = environ if environ is not None else os.environ
+    return "NO_COLOR" in env
+
+
+def theme_css(name: str, environ: dict[str, str] | None = None) -> str:
+    """Return the stylesheet for ``name``, falling back to the default theme.
+
+    ``NO_COLOR`` overrides the choice: somebody who asked for no colour asked
+    for it whatever their configuration file says, and a theme that ignored
+    it would make the setting useless in exactly the case it exists for.
+    """
+    if no_color(environ):
+        return PLAIN_CSS
     return THEMES.get(LEGACY_THEMES.get(name, name), NASA_CSS)
 
 
