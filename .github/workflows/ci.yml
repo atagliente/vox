@@ -166,7 +166,7 @@ jobs:
       - run: twine check dist/*
       # The marker is what makes the annotations reach anyone installing this.
       - run: python -c "import zipfile,glob;w=glob.glob('dist/*.whl')[0];assert 'vox_chat/py.typed' in zipfile.ZipFile(w).namelist(), 'py.typed missing from the wheel'"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
