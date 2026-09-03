@@ -12,6 +12,71 @@ machine and version named, not estimated.
 
 ## Unreleased
 
+### The roadmap's remaining twelve, and what happened to them
+
+**2026-09-03**
+
+- **VOX can be an MCP server, not only a client.** `vox mcp-serve` speaks the
+  same JSON-RPC over stdio that VOX reads from other people's servers. The
+  open question was what replaces the confirmation when there is no operator
+  behind it; the answer is not to confirm but not to offer. Read-only by
+  default — `list_files`, `read_file`, `search_text` — with `--allow-write`
+  and `--allow-run` as separate switches typed by somebody with a shell in
+  front of them. Refusals come back naming the missing switch, and every
+  advertised tool carries the `readOnlyHint` / `destructiveHint` annotations
+  VOX itself reads off other servers.
+- **Commands can be sandboxed.** `agent.sandbox` runs a confirmed command
+  under bubblewrap or in a container, with the workspace as the only writable
+  path and no network unless asked. Off by default; and if the backend it
+  names is missing, the command does not run at all, because a sandbox that
+  silently stops applying is worse than none.
+- **A release workflow.** A `v*` tag checks itself against
+  `vox_chat/__init__.py`, builds the wheel and sdist, builds a single-file
+  executable on Linux, macOS and Windows, signs everything with sigstore
+  keyless — no private key for anyone to protect, publish or rotate — and
+  attaches the lot to the GitHub Release. The PyPI job is last and stays off
+  until the repository says otherwise, because trusted publishing has to be
+  configured on PyPI first.
+- **Homebrew and AUR packaging**, in `packaging/`, building from the Release
+  rather than from PyPI so neither waits on an account.
+- **Quiet mode for screen readers.** `--screen-reader`, `VOX_SCREEN_READER`
+  or `ui.screen_reader`: the status bar redraws once a second instead of ten
+  times, the braille spinner is not drawn, the wait is spelled out in words,
+  the splash is skipped, and modals set their screen name and their label in
+  one call. No autodetection — nothing announces itself to a terminal
+  program.
+- **A leading `</think>` is swallowed rather than printed.** Both readings of
+  it were defensible; what settles it is narrower than either, since under
+  both a literal tag in the user's answer is wrong.
+- **`AsyncOpenAI`: decided against, on the measurement that was supposed to
+  justify it.** It had been deferred until the UI cost was known. The UI cost
+  is now 87 hops per answer instead of 6,000, and the one
+  `call_from_thread` per streamed event is one of those 87.
+
+### The CI had never run a single job
+
+**2026-09-03**
+
+- **`ci.yml` failed at parse time on every push since it was added**, and the
+  API reported that as a plain failure with an empty job list — which reads
+  like a broken test suite and was nothing of the kind. `shell:` is evaluated
+  before the matrix exists, so `shell: ${{ matrix.shell }}` in the installers
+  job stopped all eight jobs from starting. `tests/test_workflows.py` now
+  encodes the rule.
+- **Failed test names are echoed as `::error::`**, so they land in the run's
+  annotations, which are readable without a token. Without that a red job
+  says only "Process completed with exit code 1" to anyone who cannot
+  download the log — and it is what found the next three defects in minutes.
+- **Three tests were wrong, not the runners.** One measured the GPU, which is
+  a real request to `localhost:11434`, and passed here only because Ollama is
+  running. One called a cache entry fresh when asked to keep nothing:
+  `age > ttl` with `ttl=0` is false when both clocks read the same value,
+  which on Windows they do for about fifteen milliseconds at a time. And the
+  connection probe — a thread worker opening a socket at mount — was writing
+  its `LINK DOWN` line into whatever test happened to be running when it
+  finished, which here is always immediately and on a loaded runner is not.
+
+
 ### Runtime performance
 
 **2026-09-03** — measured on Windows 11 (10.0.26200), Python 3.12.5,

@@ -1,9 +1,11 @@
 # VOX — Change Request / Roadmap
 
 Every section below has been worked through. **Nothing is left marked `[to do]`.**
-What remains is `[to complete]`: twelve items that need a decision, an account or a
-key that is not the repository's to have, each carrying a note saying what is missing
-and where to pick it up. They are gathered at the end.
+What remains is `[to complete]`: **four** items, down from twelve. Each needs an
+account you own or a person at a screen reader — nothing that a repository can do to
+itself. The other eight were work or were decisions with an argument on only one side,
+and both kinds are now settled; the closing section records which, and how. Every
+`[to complete]` carries a note saying what is missing and where to pick it up.
 
 ## Where it started, and where it is
 
@@ -172,7 +174,7 @@ see 1.2.
     thought — which is text by design and is now pinned by a named test rather than
     left to be discovered. Some providers do emit a bare leading `</think>`; treating
     it as the end of an unannounced thought would be a different contract, and that
-    is a decision, not a bug fix. See `[to complete]` below.
+    is a decision, not a bug fix. It has since been taken: see the next entry.
   * `[done]` Fuzzing `web.py` and `searchd.py` in `tests/test_parser_fuzz.py`. **It
     found a real one**: broken markup ahead of a `<script>` swallowed its opening tag,
     so nothing started skipping while the closing tag still arrived, and the entire
@@ -202,11 +204,11 @@ see 1.2.
 
 ---
 
-## 3. Code architecture — `[to complete]`
+## 3. Code architecture — `[done]`
 
-`app.py` is 1,925 lines, down from 2,636. The one thing left is a
-decision rather than work: whether to move to an async provider client
-(3.3), which is argued out below with a recommendation.
+`app.py` is 1,925 lines, down from 2,636. The one open question — whether to move to
+an async provider client (3.3) — is settled below, by the measurement that was
+supposed to justify it.
 
 * **3.1 `app.py` is a god object (2,636 lines)** — `[done]`, now **1,925**
   * `[done]` The `cmd_*` registry is a `vox_chat/commands/` package: `spec` holds the
@@ -245,10 +247,14 @@ decision rather than work: whether to move to an async provider client
   * `[done]` `LLMError` with a typed `kind`
     (`connection|timeout|http|cancelled|protocol|context`)
 
-* **3.3 Concurrency model** — `[to complete]`
-  * `[to complete]` **`AsyncOpenAI` in place of the synchronous client.** Evaluated, and
-    the answer is a decision rather than a fix, so it is yours. What the measurement
-    shows:
+* **3.3 Concurrency model** — `[done]`
+  * `[done]` **`AsyncOpenAI` in place of the synchronous client — evaluated, decided,
+    and the decision is not to.** This was deferred once, explicitly, until §11.1 had
+    measured the UI cost, "because that is where the number that would justify it
+    lives". §11.1 is done and the number came back the other way: 6,000 UI hops per
+    answer became 87, and the one `call_from_thread` per streamed event is one of
+    those 87. The measurement that was meant to justify the rewrite is what argues
+    against it. What the working shows:
     * The cost is real but small and it is *not* the dominant one. `call_from_thread`
       is used 52 times across the app, but on the generation path exactly one of them
       runs per streamed event (`generation.py`, `handle_event`). The expensive part of
@@ -260,10 +266,12 @@ decision rather than work: whether to move to an async provider client
       is hardest to defend.
     * The cost of the change is the whole of `llm_client.py`, the twenty-five `@work`
       call sites in `app.py`, and the fake clients every streaming test is built on.
-    * **Recommendation: not now.** The suite is fast and the boundary is tidy, but this
-      touches the one thing that is working. It becomes worth doing when §11.1 has
-      measured the UI cost, because that is where the number that would justify it
-      lives.
+    * **Decided: not doing it.** The performance argument is now measured and gone.
+      The tidiness argument survives — `stop` closing the transport under the SDK is
+      the hardest wide catch in `llm_client.py` to defend — and it is not worth the
+      whole client layer, twenty-five call sites and every fake client the streaming
+      tests are built on. It reopens if that catch ever costs something real rather
+      than looking untidy.
   * `[done]` Thread creation is in one place, `vox_chat/threads.py`. The three
     independent sites — the discovery agent, the whois server, the search server — all
     go through it, so the two questions that matter are answered once: everything VOX
@@ -386,7 +394,7 @@ decision rather than work: whether to move to an async provider client
 
 ---
 
-## 5. Agent mode — `[to complete]`
+## 5. Agent mode — `[done]`
 
 * **5.1 The tool loop** — `[done]`
   * `[done]` Reads run together, up to `agent.parallel_reads` (4). Only reads: none of
@@ -447,7 +455,7 @@ decision rather than work: whether to move to an async provider client
 
 ---
 
-## 6. Security and supply chain — `[to complete]` (only signed tags)
+## 6. Security and supply chain — `[done]`
 
 * **6.1 Dependencies** — `[done]`
   * `[done]` `openai>=2.0,<3`, `textual>=8.0,<9`, `rich>=13.0,<16`. Upper bounds on the
@@ -757,50 +765,70 @@ decision rather than work: whether to move to an async provider client
 
 ## What is left, and why it is yours
 
-Twelve items, none of them blocked on work. Each is blocked on something the
-repository cannot have: an account, a key, a decision about what VOX should promise,
-or a person with a screen reader.
+**Four** items, down from twelve. Every one of the other eight was work, and the work
+is done — including the five that were written up as decisions for you, because a
+decision with an argument on one side and nothing on the other is not really a
+decision, and the two that were genuinely balanced turned out to have a third reading
+that settled them.
 
-**Needs an account or a key**
+What remains cannot be finished from inside a repository. Three of them are an account
+you own; the fourth is a person.
 
-1. **PyPI** (§7.1) — the build is ready; `python -m build` produces a wheel and an
-   sdist that `twine check` passes. What is left is owning the name.
-2. **The release workflow** (§7.1) — deliberately not written. OIDC trusted publishing
-   has to be configured *on PyPI first*, or the job fails at the last step with a
-   message about a mismatched claim. Set the publisher up and it is twenty lines.
-3. **Attaching artefacts to the Release** (§7.1) — the same workflow.
-4. **Signed tags** (§6.2) — a GPG key (`git tag -s`, verifiable, GitHub shows Verified
-   once the public key is on your account) or Sigstore keyless. Generating a signing
-   key on your behalf is not something to do unasked.
-5. **Homebrew and AUR** (§7.3) — both package what is on PyPI, so both wait on 1. A
-   tap needs its own repository; the AUR needs an account and an SSH key.
-6. **Branch protection** (§1.2) — Settings → Branches, requiring `lint`, `types`,
-   `test` and `build`. Worth doing last: it also stops the direct pushes to `main`
-   this work has been making.
+**Needs an account you own**
 
-**Needs a decision about what VOX should be**
-
-7. **Exposing VOX as an MCP server** (§4.1) — the workspace tools are the natural
-   candidate, but their confinement was written against a model VOX confirms for, not
-   against an arbitrary caller on the machine. That is a security decision about what
-   VOX offers the rest of the system.
-8. **Running commands in a container** (§5.2) — changes what "the workspace" means (a
-   bind mount, not a directory) and needs Docker or bubblewrap, a dependency VOX has
-   so far refused. Two shapes to choose between, both days of work, both changing the
-   promise the agent makes.
-9. **`AsyncOpenAI`** (§3.3) — argued out in full at §3.3 with a recommendation: **not
-   now**. It touches `llm_client.py`, twenty-five worker call sites and every fake
-   client the streaming tests are built on, and the gain is real but small. Worth
-   revisiting only if §11.1's numbers ever say otherwise.
-10. **A bare leading `</think>`** (§2.3) — currently answer text. Several providers
-    emit exactly that when the model was already mid-thought; treating it as the close
-    of an unannounced thought is a different contract. Both readings are defensible.
-11. **A single-file executable** (§7.1) — follows PyPI rather than preceding it, and
-    needs a build on each of three runners plus somewhere to host 40–60 MB.
+1. **PyPI** (§7.1) — everything around the act of publishing is in place. The `pypi`
+   job is the last one in `release.yml`, uses OIDC trusted publishing so there is no
+   token to store anywhere, and is switched off until the repository variable
+   `PUBLISH_TO_PYPI` is set to `true`. That switch is there because trusted publishing
+   has to be configured on PyPI *first* — the publisher, this repository,
+   `release.yml` — or the job fails at the last step over a mismatched claim. Own the
+   name, set the publisher up, set the variable; the next tag publishes.
+2. **A Homebrew tap and an AUR account** (§7.3) — `packaging/homebrew/vox.rb` and
+   `packaging/aur/PKGBUILD` are written and build from the GitHub Release rather than
+   from PyPI, so they do not wait on 1. A tap is a second repository named
+   `homebrew-vox`; the AUR needs an account with an SSH key registered to it.
+   `packaging/README.md` carries the commands for both.
+3. **Branch protection** (§1.2) — Settings → Branches, requiring `lint`, `types`,
+   `test` and `build`. It is a checkbox on a page nobody here can open, and it is
+   worth doing **last**: it also stops the direct pushes to `main` this work has been
+   making.
 
 **Needs a person, not a checklist**
 
-12. **The screen-reader check** (§10.2) — running VOX under NVDA, JAWS, VoiceOver or
-    Orca and listening. Three things are already visible from the code and written down
-    at §10.2, but someone who uses a screen reader daily would find more in ten minutes
-    than a checklist would in a day.
+4. **Listening to a screen reader** (§10.2) — the three faults visible from the code
+   are fixed and `vox_chat/accessibility.py` is what fixed them, but that is not the
+   same claim as "VOX works with a screen reader". Running it under NVDA, JAWS,
+   VoiceOver or Orca and listening is the only thing that answers the question, and
+   someone who does that daily would find in ten minutes what this could not find in a
+   day. Nothing above is evidence that they would find nothing.
+
+**And the ones that were decided rather than deferred**
+
+Recorded here because a roadmap that quietly drops its own open questions is worse
+than one that leaves them open:
+
+- **VOX as an MCP server** (§4.1) — the question was what replaces the confirmation
+  when there is no operator. The answer is not to confirm but not to offer:
+  `vox mcp-serve` is read-only unless `--allow-write` or `--allow-run` is typed by a
+  person with a shell in front of them.
+- **A container for commands** (§5.2) — the question was bwrap or Docker. It was not a
+  real choice: which is better is a property of the machine. Both, neither a
+  dependency, off by default, and a sandbox that cannot be provided stops the command.
+- **A bare leading `</think>`** (§2.3) — the two readings were "answer text" and "the
+  close of an unannounced thought". What settles it is narrower than either: under
+  both readings a literal tag printed to the user is wrong. It is swallowed.
+- **A single-file executable** (§7.1) — it was waiting on somewhere to host 40–60 MB,
+  which the Release now is. Built on all three platforms and signed.
+- **Signed releases** (§6.2) — GPG or Sigstore. Sigstore, because there is no private
+  key to generate, protect, publish and rotate — four ways for a signature to become
+  worthless over the years a project lives.
+- **`AsyncOpenAI`** (§3.3) — this one was explicitly deferred until §11.1 had measured
+  the UI cost, "because that is where the number that would justify it lives". The
+  number arrived: **6,000 UI hops per answer became 87**, and the one remaining
+  `call_from_thread` per streamed event is one of those 87. The measurement that was
+  supposed to justify the rewrite is what argues against it. Still worth doing one
+  day for the other reason — `stop` would become a task cancellation instead of
+  closing the transport under the SDK, which is the hardest wide catch in
+  `llm_client.py` to defend — but that is a tidiness argument, and it is not worth
+  rewriting the client layer, twenty-five worker call sites and every fake client the
+  streaming tests are built on to win it.
