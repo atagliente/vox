@@ -112,7 +112,13 @@ def splash(model: str, role: str, workspace: str = "") -> str:
     ]
     if workspace:
         lines.append(f"WORKSPACE  {workspace}")
-    lines.extend(["", "TYPE /help FOR THE COMMAND LIST."])
+    lines.extend(
+        [
+            "",
+            "CTRL+L    EVERY KEY AND EVERY COMMAND, ON SCREEN",
+            "          (F1 does the same, and /keys writes it here)",
+        ]
+    )
     return "\n".join(lines)
 
 

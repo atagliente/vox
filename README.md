@@ -110,16 +110,21 @@ has no authentication — only on a network you trust.
 | `F2` | coding-agent mode on / off | `F12` | pick a model, arrows only |
 | `F3` | join / leave the mesh | `F4` / `F5` | the universe / the round |
 | `F6` | web mode: answers researched first | `Ctrl+Q` | quit |
-| `Ctrl+Shift+L` / `F1` | this legend, on screen | | |
+| `Ctrl+L` / `F1` | every key and every command, on screen | | |
 
 The bottom row carries five of them - send, copy/paste, quit, stop, mode - and
 nothing else: a legend nobody can read at a glance is decoration.
 
-**`Ctrl+Shift+L` opens the whole legend**: every key first, then all
-forty-nine commands grouped by what they are for. Arrows scroll it, `Home`
-and `End` jump to either edge, `Esc` closes it. `F1` does the same, because
-`Ctrl+Shift+<letter>` is not delivered by every terminal, and `/keys` writes
-it into the transcript when neither key arrives.
+**`Ctrl+L` opens the whole legend**: every key first, then all forty-nine
+commands grouped by what they are for. Arrows scroll it, `Home` and `End`
+jump to either edge, `Esc` closes it.
+
+`Ctrl+L` rather than `Ctrl+Shift+L` because most terminals send the same byte
+for `Ctrl+Shift+<letter>` as for `Ctrl+<letter>` - the two are distinguishable
+only where the terminal speaks a modern keyboard protocol. Both are bound, and
+so is `F1`, and `/keys` writes the legend into the transcript when none of
+them arrives. `^L` is the first entry on the bottom row, because the one thing
+that has to be on screen is where everything else is written down.
 
 `/help` shows the same material with the commands first - somebody who typed
 a slash was looking for a command, somebody who pressed the key had not typed

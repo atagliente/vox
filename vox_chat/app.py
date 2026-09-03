@@ -157,11 +157,20 @@ class VoxApp(App[None]):
         Binding("f5", "open_round", "Round", priority=True),
         Binding("f6", "toggle_web_mode", "Web", priority=True),
         Binding("f12", "pick_model", "Models", priority=True),
-        # The legend asked for on ctrl+shift+l, and on f1 as well because
-        # ctrl+shift+<letter> is not delivered by every terminal (see the
-        # note above); /keys reaches it when neither key arrives.
-        Binding("ctrl+shift+l", "open_keys", "Keys", priority=True),
-        Binding("f1", "open_keys", "Keys", show=False, priority=True),
+        # The legend, on four keys, because a legend nobody can reach is
+        # worse than no legend. ctrl+l is the one that always arrives: most
+        # terminals send the same byte for ctrl+shift+<letter> as for
+        # ctrl+<letter>, so ctrl+shift+l is delivered as a distinct key only
+        # where the terminal speaks a modern keyboard protocol. It is also
+        # already what "legend" means on the inspect and universe screens.
+        # Deliberately not priority=True, unlike the rest of this list. The
+        # others need it because the input box binds the same keys; nothing
+        # binds these, so leaving them ordinary is what lets the inspect and
+        # universe screens keep ctrl+l for their own legends. A priority
+        # binding here would take the key off them.
+        Binding("ctrl+l", "open_keys", "Keys"),
+        Binding("ctrl+shift+l", "open_keys", "Keys", show=False),
+        Binding("f1", "open_keys", "Keys", show=False),
         Binding("ctrl+q", "request_quit", "Quit", priority=True),
         Binding("ctrl+c", "copy_selection", "Copy", priority=True),
         Binding("ctrl+v", "paste_clipboard", "Paste", priority=True),

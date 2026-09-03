@@ -250,8 +250,13 @@ class KeyBar(Static):
     """
 
     KEYS: tuple[tuple[str, str], ...] = (
-        # Five entries, deliberately: a legend nobody can read at a glance is
-        # decoration. Everything else is in /help, and on the function keys.
+        # Six entries. It was five, on the principle that a legend nobody can
+        # read at a glance is decoration — and that principle was costing
+        # more than it saved, because the one thing that has to be on screen
+        # is where everything else is written down. ^L goes first for that
+        # reason, and this row is dropped from the right, so it is also the
+        # entry a narrow terminal keeps.
+        ("^L", "all keys"),
         ("enter", "send"),
         ("^C/^V", "copy/paste"),
         ("^Q", "quit"),

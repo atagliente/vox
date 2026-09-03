@@ -132,6 +132,7 @@ class KeysModal(ModalScreen[None]):
     BINDINGS = [
         Binding("escape", "close", "Close", priority=True),
         Binding("q", "close", "Close", show=False, priority=True),
+        Binding("ctrl+l", "close", "Close", show=False, priority=True),
         Binding("f1", "close", "Close", show=False, priority=True),
         Binding("ctrl+shift+l", "close", "Close", show=False, priority=True),
         # It is a hundred lines now, so it has to actually scroll. Bound here

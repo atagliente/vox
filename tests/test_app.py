@@ -935,7 +935,7 @@ async def test_ctrl_shift_l_opens_the_key_legend(offline_app: VoxApp) -> None:
 
     async with offline_app.run_test() as pilot:
         await pilot.pause()
-        await pilot.press("ctrl+shift+l")
+        await pilot.press("ctrl+l")
         await pilot.pause()
         assert isinstance(offline_app.screen, KeysModal)
         shown = offline_app.screen.query_one("#keys-table")._Static__content
@@ -947,9 +947,34 @@ async def test_ctrl_shift_l_opens_the_key_legend(offline_app: VoxApp) -> None:
         assert shown.index("ctrl+shift+l") < shown.index("/session-save")
 
         # The same key closes it again, and so does escape.
-        await pilot.press("ctrl+shift+l")
+        await pilot.press("ctrl+l")
         await pilot.pause()
         assert not isinstance(offline_app.screen, KeysModal)
+
+
+def test_the_legend_keys_leave_the_screens_their_own() -> None:
+    """ctrl+l already meant "legend" on the inspect and universe screens
+    before it meant it here. A priority binding on the app would have taken
+    the key off them - and did, until this caught it."""
+    from vox_chat.ui.inspect_screen import InspectScreen
+    from vox_chat.ui.universe_screen import UniverseScreen
+
+    ours = [b for b in VoxApp.BINDINGS if b.action == "open_keys"]
+    assert [b.key for b in ours] == ["ctrl+l", "ctrl+shift+l", "f1"]
+    assert not any(b.priority for b in ours), (
+        "priority would beat the screen bindings below"
+    )
+
+    for screen in (InspectScreen, UniverseScreen):
+        keys = [b.key for b in screen.BINDINGS if b.action == "toggle_legend"]
+        assert "ctrl+l" in keys, f"{screen.__name__} still owns ctrl+l"
+
+
+def test_the_bottom_row_says_where_the_rest_is() -> None:
+    """A legend nobody can find is worse than a bar with six entries."""
+    from vox_chat.ui.widgets import KeyBar
+
+    assert KeyBar.KEYS[0] == ("^L", "all keys")
 
 
 async def test_a_legend_this_long_can_be_scrolled(offline_app: VoxApp) -> None:
@@ -987,7 +1012,10 @@ async def test_f1_reaches_the_legend_where_ctrl_shift_is_swallowed(
     actions: dict[str, list[str]] = {}
     for binding in VoxApp.BINDINGS:
         actions.setdefault(binding.action, []).append(binding.key)
-    assert actions["open_keys"] == ["ctrl+shift+l", "f1"]
+    # ctrl+l first: most terminals send the same byte for ctrl+shift+<letter>
+    # as for ctrl+<letter>, so ctrl+shift+l arrives as itself only where the
+    # terminal speaks a modern keyboard protocol.
+    assert actions["open_keys"] == ["ctrl+l", "ctrl+shift+l", "f1"]
 
     async with offline_app.run_test() as pilot:
         await pilot.pause()

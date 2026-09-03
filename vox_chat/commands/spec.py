@@ -71,8 +71,9 @@ KEY_GROUPS: tuple[tuple[str, tuple[KeyEntry, ...]], ...] = (
             # ctrl+shift+<letter> is not delivered by every terminal, so the
             # legend is on a function key as well. Neither is worth much if the
             # only way to find them is to already know them, hence /keys too.
-            KeyEntry("ctrl+shift+l", "this legend: every key, then every command"),
-            KeyEntry("f1", "open it where the terminal swallows ctrl+shift+l"),
+            KeyEntry("ctrl+l", "this legend: every key, then every command"),
+            KeyEntry("ctrl+shift+l", "the same, where the terminal tells them apart"),
+            KeyEntry("f1", "the same again, for terminals that swallow both"),
             KeyEntry("/keys", "the same legend, written into the transcript"),
             KeyEntry("up / down", "scroll it   ·   home / end jump to either edge"),
             KeyEntry("esc", "close it"),
