@@ -86,6 +86,10 @@ button.act:hover { border-color: var(--gold); color: var(--gold); }
   text-transform: uppercase; margin-bottom: .25rem;
 }
 .msg .body { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* /help and a tool's output are columns of spaces. Wrapping them tears the
+   columns apart, so those scroll sideways instead — the one place where a
+   horizontal scrollbar is the readable answer. */
+.msg.system .body, .msg.tool .body { white-space: pre; overflow-x: auto; }
 .msg.user .body {
   background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
   padding: .6rem .8rem;

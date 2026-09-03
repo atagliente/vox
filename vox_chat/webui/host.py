@@ -344,6 +344,167 @@ class WebHost(HostBase):
         """What the page has in its textarea, so /prompt-save can read it."""
         self._draft = text
 
+    # ------------------------------------------------- what a browser can do
+
+    # Everything a command asks for that is not simply data. The ones that are
+    # the same work in either host do it; the ones that are a screen say so.
+    # HostBase and the guard in run_command catch whatever is left, so a
+    # command growing a new call is a sentence in the transcript rather than a
+    # dead request.
+
+    def refresh_status(self, extra: str = "") -> None:
+        self.events.publish("state", state=self.state())
+
+    def refresh_panel(self) -> None:
+        self.events.publish("state", state=self.state())
+
+    def check_connection(self) -> None:
+        """Probe the provider on a thread, and say what came back."""
+
+        def probe() -> None:
+            if self.client is None:
+                self.write_error("NO PROVIDER CONFIGURED")
+                return
+            ok, detail = self.client.ping()
+            self.connected = ok
+            if ok:
+                self.write_system(f"LINK ESTABLISHED - {detail}")
+            else:
+                self.write_error(f"LINK DOWN - {detail}".replace(": http", " at http"))
+            self.refresh_status()
+
+        threads.start(probe, "vox-ui-connect")
+
+    def preload_model(self) -> None:
+        # Warming a model matters when a person is watching a spinner. Here
+        # the first message pays the same cost with the answer arriving after
+        # it, which is the honest place for the wait.
+        self.write_system(
+            "PRELOAD - not done in the browser; the first message warms it"
+        )
+
+    def wants_local_server(self, settings: Any) -> bool:
+        return settings.provider in (
+            "local",
+            "searxng",
+        ) and web_module.is_local_endpoint(settings.endpoint)
+
+    def ensure_search_server(self, settings: Any) -> bool:
+        if self.search_server.running:
+            return True
+        if searchd.answering(settings.endpoint):
+            return True
+        self.search_server.port = searchd.port_of(settings.endpoint)
+        try:
+            detail = self.search_server.start()
+        except searchd.SearchdError as exc:
+            self.write_error(f"SEARCH SERVER - {exc}")
+            return False
+        self.write_system(f"SEARCH SERVER - {detail}")
+        return True
+
+    def run_search(self, query: str, settings: Any) -> None:
+        def search() -> None:
+            try:
+                hits = web_module.search(query, settings)
+            except web_module.WebError as exc:
+                self.write_error(f"SEARCH - {exc}")
+                return
+            self.write_system(web_module.render_results(query, hits))
+
+        threads.start(search, "vox-ui-search")
+
+    def run_fetch(self, url: str, settings: Any) -> None:
+        def fetch() -> None:
+            try:
+                page = web_module.fetch(url, settings)
+            except web_module.WebError as exc:
+                self.write_error(f"FETCH - {exc}")
+                return
+            body = f"{page.title}\n{page.url}\n\n{page.text}"
+            self.write_message(Message(role="web", content=body))
+
+        threads.start(fetch, "vox-ui-fetch")
+
+    def connect_mcp(self) -> None:
+        def connect() -> None:
+            self.write_system("MCP - connecting...")
+            report = self.mcp.connect_all(self.config)
+            if not report:
+                self.write_error("MCP - nothing configured under mcp.servers")
+                return
+            working = sum(1 for status in report if status.connected)
+            tools = sum(status.tools for status in report)
+            self.write_system(f"MCP - {working}/{len(report)} servers, {tools} tools")
+            for status in report:
+                if not status.connected:
+                    self.write_error(f"MCP - {status.name}: {status.detail}")
+
+        threads.start(connect, "vox-ui-mcp")
+
+    def load_prompt(self, name: str) -> None:
+        prompt = self.prompt_store.get(name)
+        if prompt is None:
+            self.write_error(f"NO SUCH PROMPT: {name}")
+            return
+        self._draft = prompt.body
+        # The draft lives in the browser, so loading one has to travel there.
+        self.events.publish("draft", text=prompt.body)
+        self.write_system(f"PROMPT LOADED - {name}")
+
+    def copy_code_block(self, number: int) -> None:
+        # The clipboard belongs to the browser and a server cannot reach it.
+        # Saying so beats a command that looks like it worked.
+        self.write_error("COPY - select the block in the page instead")
+
+    def show_image(self, attachment: Any) -> None:
+        self.write_system(f"IMAGE - {attachment.describe()}")
+
+    def export_report(self, formats: tuple[str, ...] = ()) -> None:
+        self.write_error("REPORT IS NOT AVAILABLE IN THE BROWSER YET")
+
+    def edit_config_file(self) -> None:
+        # Suspending the screen and opening $EDITOR is a terminal's trick.
+        from ..storage import global_config_path
+
+        self.write_error(f"EDIT IT YOURSELF AND RESTART: {global_config_path()}")
+
+    def report_model_ctx(self, base_url: str, model: str) -> None:
+        self.write_error("MODEL CTX IS NOT AVAILABLE IN THE BROWSER YET")
+
+    def report_model_gpu(self, base_url: str, model: str) -> None:
+        self.write_error("MODEL GPU IS NOT AVAILABLE IN THE BROWSER YET")
+
+    def rounds_report(self) -> None:
+        self.write_error("ROUNDS IS NOT AVAILABLE IN THE BROWSER YET")
+
+    def _pick_provider(self, providers: list[str]) -> None:
+        self.write_system(
+            "PROVIDERS: " + ", ".join(providers) + "  ·  /provider <name>"
+        )
+
+    def _pick_model(self) -> None:
+        self.write_system("/model <name> to choose one")
+
+    def _set_provider(self, name: str) -> None:
+        self.config["active_provider"] = name
+        self.persist_config()
+        self.rebuild_client()
+        self.write_system(f"PROVIDER - {name}")
+        self.refresh_status()
+
+    def consensus_settings(self) -> dict[str, Any]:
+        block = self.config.get("consensus")
+        return block if isinstance(block, dict) else {}
+
+    def consensus_refusal(self) -> str | None:
+        return "CONSENSUS IS NOT AVAILABLE IN THE BROWSER YET"
+
+    def install_answer_hook(self) -> None:
+        # Answering for a peer needs a turn this host can run, and it can —
+        # but a round belongs to a screen this page does not have yet.
+        return None
+
     # ------------------------------------------------------------ the turn
 
     def run_command(self, text: str) -> None:
@@ -358,7 +519,24 @@ class WebHost(HostBase):
             )
             self.write_error(parsed.error.upper() + hint)
             return
-        result = dispatch.run(self, parsed)  # type: ignore[arg-type]
+        try:
+            result = dispatch.run(self, parsed)  # type: ignore[arg-type]
+        except AttributeError as exc:
+            # A command reaching for something this host has not grown yet.
+            # The protocol documents the surface; it does not enforce it, and
+            # a missing member must not take the request down with it.
+            log.info("/%s is not available here: %s", parsed.name, exc)
+            self.write_error(
+                f"/{parsed.name.upper()} IS NOT AVAILABLE IN THE BROWSER YET"
+            )
+            return
+        except Exception as exc:
+            # Wide on purpose. Forty-nine commands run through here and any
+            # of them failing should be a line in the transcript rather than
+            # a dead connection and a page that looks frozen.
+            log.exception("/%s failed", parsed.name)
+            self.write_error(f"/{parsed.name.upper()} FAILED - {exc}")
+            return
         if dispatch.is_async(result):
             # A handler that wants a modal flow returns a coroutine for the
             # TUI's worker to await. There is no such worker here, and the
@@ -451,7 +629,7 @@ class WebHost(HostBase):
                         result=event.tool_call.result or "",
                     )
                 elif event.type == "usage" and event.usage is not None:
-                    self.usage.record(event.usage)
+                    self.usage.add(event.usage)
                     self.events.publish(
                         "usage",
                         line=self.usage.status_line(self.context_window(), None),
@@ -461,6 +639,14 @@ class WebHost(HostBase):
         except LLMError as exc:
             log.warning("ui turn failed: %s", exc.kind)
             self._finish(exc.message, text, reasoning, produced)
+            return
+        except Exception as exc:
+            # Wide on purpose, and the reason is specific: this runs on its
+            # own thread, so anything escaping here kills the thread quietly,
+            # leaves `generating` set, and the page waits for a token that is
+            # never coming. A visible error beats a frozen page.
+            log.exception("ui turn crashed")
+            self._finish(f"the turn failed: {exc}", text, reasoning, produced)
             return
         self._finish(None, text, reasoning, produced)
 

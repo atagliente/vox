@@ -37,6 +37,20 @@ reading.
 
 **2026-09-03**
 
+- **Three defects the tests did not find, and opening the page did.** A
+  command reaching for `refresh_status`, which the browser host did not have,
+  wrote its message and then took the HTTP request down with it — from the
+  page it looked like the command had half worked, which is what it had done.
+  A turn whose thread died left `generating` set and the page waiting for a
+  token that was never coming. And `/help` wrapped its columns instead of
+  scrolling them.
+  The protocol documents the surface; it does not enforce it, and mypy does
+  not run over `webui/`. So the census that motivated the design is now a
+  test: every command is run straight through `dispatch`, under the guard
+  rather than behind it, and none of them may raise.
+
+**2026-09-03**
+
 - **`vox ui`** serves one page on `127.0.0.1` and opens it: the conversation
   streamed as it is written, the slash commands, the agent's confirmations
   with the diff, the session list. The layout is a chat client's; the colours

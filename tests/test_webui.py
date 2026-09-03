@@ -313,3 +313,80 @@ def test_the_module_constant_and_the_served_page_are_the_same(
     server: UiServer,
 ) -> None:
     assert get(server, "/").decode() == PAGE
+
+
+# ------------------------------------------- what the browser host is missing
+
+
+def test_every_command_reaches_an_answer_rather_than_a_traceback(
+    host: WebHost,
+) -> None:
+    """The test that the census should have been from the start.
+
+    `hosting.Host` documents the surface a command may touch, but a protocol
+    is documentation with a type checker behind it, and mypy does not run over
+    `webui/`. Nothing said a word when `/model` reached for `refresh_status`,
+    which `WebHost` did not have: the command wrote its message, raised, and
+    took the HTTP request down with it — from the page it looked like the
+    command had half worked, which is exactly what it had done.
+
+    So every command is run here with no argument. Most print their usage,
+    some do their work, a few say they are not available in the browser yet.
+    None of them may raise.
+    """
+    from vox_chat.commands import dispatch, parse
+    from vox_chat.commands.spec import COMMANDS
+
+    # Straight through dispatch, under the guard rather than behind it: the
+    # guard turns anything into a sentence, so a test that went through it
+    # would pass with every one of these members still missing.
+    #
+    # These reach the network or the provider even with no argument, and this
+    # test is about the shape of the calls rather than about what answers.
+    reaches_out = {"connect", "mcp", "index", "web", "mesh", "peers", "ask"}
+    failed: list[str] = []
+    for command in COMMANDS:
+        if command.name in reaches_out:
+            continue
+        try:
+            result = dispatch.run(host, parse("/" + command.name))
+            if dispatch.is_async(result):
+                result.close()
+        except Exception as exc:
+            failed.append(f"/{command.name}: {exc!r}")
+    assert not failed, "commands that raised instead of answering:\n" + "\n".join(
+        failed
+    )
+
+
+def test_a_command_the_browser_cannot_do_says_so_and_carries_on(
+    host: WebHost, monkeypatch
+) -> None:
+    # The guard, not the members: whatever a handler grows next, the page
+    # gets a sentence rather than a dead connection.
+    from vox_chat.commands import dispatch
+
+    def explode(app, parsed):
+        raise AttributeError("'WebHost' object has no attribute 'something_new'")
+
+    monkeypatch.setattr(dispatch, "run", explode)
+    host.run_command("/stats")
+    assert "NOT AVAILABLE IN THE BROWSER YET" in host.session.messages[-1].content
+
+
+def test_a_turn_that_crashes_says_so_instead_of_freezing(
+    host: WebHost, monkeypatch
+) -> None:
+    """A turn runs on its own thread. Anything escaping it used to kill the
+    thread quietly, leave `generating` set, and leave the page waiting for a
+    token that was never coming."""
+
+    def explode(**kwargs):
+        raise RuntimeError("the provider library changed under us")
+        yield  # pragma: no cover - never reached, makes this a generator
+
+    monkeypatch.setattr("vox_chat.webui.host.run_turn", explode)
+    host.session.messages.append(Message(role="user", content="a question"))
+    host._turn()
+    assert host.generating is False
+    assert "the turn failed" in host.session.messages[-1].content
