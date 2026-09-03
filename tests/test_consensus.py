@@ -744,6 +744,13 @@ async def test_a_message_sent_mid_round_is_refused(app: VoxApp) -> None:
     question's peer replies attached.
     """
     app.mesh = SlowMesh(answers=[answer("alpha", "It depends.")])
+    # The synthesis prompt is built for one turn and cleared when that turn
+    # finishes, so asserting on it after waiting for every worker was a race:
+    # it passed only while the generation had not run yet. What this test is
+    # about is the round, so the turn it starts is held here instead.
+    started: list[str] = []
+    app.start_generation = lambda: started.append(app._consensus_prompt)
+
     async with app.run_test() as pilot:
         await pilot.pause()
         app.input_area.insert("[CNS]FIRST[/CNS]")
@@ -764,8 +771,8 @@ async def test_a_message_sent_mid_round_is_refused(app: VoxApp) -> None:
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert app.mesh.asked == ["FIRST"]
-        assert app._consensus_prompt, "the round reconciles the question it asked"
-        assert "FIRST" in app._consensus_prompt
+        assert started, "the round reconciles what it asked, and starts a turn"
+        assert "FIRST" in started[0]
 
 
 async def test_a_round_can_be_abandoned(app: VoxApp) -> None:

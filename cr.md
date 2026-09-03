@@ -22,7 +22,7 @@ not estimated.
 | HTTP egress points | 17 | **1** |
 | Slash commands | 38 | 49 |
 
-Six defects were found along the way, all by a tool rather than by reading:
+Seven defects were found along the way, all by a tool rather than by reading:
 
 1. `discovery/agent.py` requeued the **wrong peer** — a `threading.Timer` lambda closing
    over a loop variable, five seconds after the loop had moved on. Found by `ruff`.
@@ -36,6 +36,11 @@ Six defects were found along the way, all by a tool rather than by reading:
 5. `active_provider` raises rather than returning `None`, so an unconfigured VOX would
    have handed a shell script **a traceback**. Found by writing `--ask`.
 6. The README advertised **`openai 3.3.1`**, a version that does not exist.
+7. `test_a_message_sent_mid_round_is_refused` asserted on state the next turn
+   **deliberately clears**, and passed only while the generation had not run yet — a
+   latent flake that would have fired on a slower or faster machine. Exposed by the
+   §11 timing change, and fixed by removing the dependency on the ordering rather
+   than by getting lucky again.
 
 And three of this document's own premises turned out to be wrong, which is worth as
 much as the fixes:

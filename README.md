@@ -136,8 +136,16 @@ apart.
 | `/web [on\|off]`, `/search <query>`, `/fetch <url>` | search the internet |
 | `/mesh [on\|off\|new-ca\|sample-ca]`, `/universe` | the agent mesh |
 | `/consensus [on\|off]`, `/round` | ask the other agents about `[CNS] … [/CNS]`, watch them answer |
-| `/agent on\|off`, `/workspace <path>` | coding-agent mode |
+| `/agent on\|off`, `/workspace <path>`, `/undo`, `/plan` | coding-agent mode |
+| `/mcp [on\|off\|list]` | tools from Model Context Protocol servers |
+| `/index [build\|on\|off]` | embed the workspace, pull the relevant files in |
+| `/image <path>` | attach a picture for a vision model |
+| `/set [name value]`, `/format [json\|<schema>]` | sampling parameters, structured output |
+| `/peers`, `/rounds`, `/revoke <agent-id>` | what the mesh has done, and refusing a peer |
+| `/theme [name]`, `/keys` | the colour scheme, and every key combination |
 | `/config`, `/settings`, `/connect`, `/stop` | configuration and connection |
+
+`/help` lists all forty-nine with their arguments.
 
 ## Code panel
 
