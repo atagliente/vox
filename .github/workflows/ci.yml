@@ -142,22 +142,25 @@ jobs:
   installers:
     # 23 KB of installer that nothing else exercises. Clean runners, so a
     # missing prerequisite shows up here rather than on someone's machine.
+    #
+    # Every step runs under bash, including on Windows, where the runner
+    # ships Git Bash and pwsh is a command it can call. The shell is not
+    # taken from the matrix because GitHub evaluates `shell:` before the
+    # matrix exists and refuses to start the whole run over it — which is
+    # what every failed run of this file was, before the tests ever ran.
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
-            shell: bash
             install: sh install.sh --yes
             uninstall: sh install.sh --uninstall --yes
           - os: macos-latest
-            shell: bash
             install: sh install.sh --yes
             uninstall: sh install.sh --uninstall --yes
           - os: windows-latest
-            shell: pwsh
-            install: ./install.ps1 -Yes
-            uninstall: ./install.ps1 -Uninstall -Yes
+            install: pwsh -File ./install.ps1 -Yes
+            uninstall: pwsh -File ./install.ps1 -Uninstall -Yes
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -165,11 +168,11 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        shell: ${{ matrix.shell }}
+        shell: bash
         run: ${{ matrix.install }}
       - name: Install again — it claims to be idempotent
-        shell: ${{ matrix.shell }}
+        shell: bash
         run: ${{ matrix.install }}
       - name: Uninstall
-        shell: ${{ matrix.shell }}
+        shell: bash
         run: ${{ matrix.uninstall }}
