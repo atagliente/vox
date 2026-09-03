@@ -19,8 +19,10 @@ written down here rather than assumed from the address.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import queue
+import signal
 import sys
 import threading
 import urllib.parse
@@ -272,18 +274,60 @@ class UiServer:
         log.info("ui stopped")
 
 
-def serve(host: WebHost, port: int = DEFAULT_PORT, open_browser: bool = True) -> int:
-    """Run until Ctrl+C. Returns the exit code."""
+# How often the main thread wakes to notice it has been asked to stop. Short
+# enough that ctrl+c feels immediate, long enough to cost nothing.
+WAKE = 0.25
+
+
+def install_stop_signals(stop: threading.Event) -> None:
+    """Make ctrl+c — and a polite kill — set ``stop``.
+
+    Without a handler, ctrl+c raises KeyboardInterrupt in the main thread,
+    which is fine on POSIX and is **not** how it behaves on Windows while
+    that thread is inside a lock: the exception is raised only once the wait
+    returns, and a server's wait does not return. Setting an event from a
+    handler works the same way everywhere.
+    """
+
+    def asked_to_stop(signum: int, frame: Any) -> None:
+        stop.set()
+
+    for name in ("SIGINT", "SIGTERM", "SIGBREAK"):
+        # SIGBREAK is Windows only and SIGTERM barely means anything there;
+        # whichever exist get the same answer, and a missing one is not a
+        # problem to report.
+        number = getattr(signal, name, None)
+        if number is None:
+            continue
+        with contextlib.suppress(ValueError, OSError):
+            signal.signal(number, asked_to_stop)
+
+
+def serve(
+    host: WebHost,
+    port: int = DEFAULT_PORT,
+    open_browser: bool = True,
+    stop: threading.Event | None = None,
+) -> int:
+    """Run until ctrl+c, or until ``stop`` is set. Returns the exit code."""
     server = UiServer(host, port)
     print(f"vox ui: {server.start()}")
     print("press ctrl+c to stop")
     if open_browser:
         _open(server.url)
+    stop = stop if stop is not None else threading.Event()
+    install_stop_signals(stop)
     try:
-        threading.Event().wait()
-    except KeyboardInterrupt:
-        print("")
+        # wait(WAKE) in a loop rather than wait(): a bare wait() parks the
+        # main thread in a lock the interpreter cannot interrupt to run a
+        # signal handler, so ctrl+c did nothing at all — the message above
+        # was a promise this did not keep.
+        while not stop.wait(WAKE):
+            pass
+    except KeyboardInterrupt:  # pragma: no cover - POSIX, before the handler
+        pass
     finally:
+        print("")
         server.stop()
         host.close()
     return 0

@@ -11,6 +11,10 @@ The provider is faked at `LLMClient`, so no test here reaches a network.
 from __future__ import annotations
 
 import json
+import os
+import signal
+import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -25,6 +29,7 @@ from vox_chat.models import Message
 from vox_chat.storage import global_config_path
 from vox_chat.webui import UiServer, WebHost
 from vox_chat.webui.page import PAGE
+from vox_chat.webui.server import install_stop_signals, serve
 
 # Port 0: the operating system picks a free one. A fixed number here is a
 # race as soon as the suite runs with -n auto, which it does by default.
@@ -413,3 +418,117 @@ def test_the_popup_and_the_legend_cannot_disagree(server: UiServer) -> None:
 
     served = {c["name"] for c in json.loads(get(server, "/api/commands"))["commands"]}
     assert served == {spec.name for spec in COMMANDS}
+
+
+# ------------------------------------------------------------ stopping it
+
+
+def test_serve_returns_and_tidies_up_when_it_is_asked_to_stop(
+    host: WebHost,
+) -> None:
+    """That `serve` ends and closes what it opened.
+
+    Worth saying what this does **not** prove: it passes against the broken
+    version too, because a bare `Event().wait()` does return when another
+    thread sets the event. What it could not return from was a signal, and
+    only the subprocess test below shows that.
+    """
+    stop = threading.Event()
+    returned: list[int] = []
+
+    thread = threading.Thread(
+        target=lambda: returned.append(
+            serve(host, port=0, open_browser=False, stop=stop)
+        ),
+        daemon=True,
+    )
+    thread.start()
+    time.sleep(0.6)
+    assert thread.is_alive(), "it should still be serving"
+    stop.set()
+    thread.join(timeout=5)
+    assert not thread.is_alive(), "setting the event has to end the wait"
+    assert returned == [0]
+
+
+def test_the_signals_that_exist_here_all_say_stop(monkeypatch) -> None:
+    installed: dict[int, object] = {}
+    monkeypatch.setattr(
+        "vox_chat.webui.server.signal.signal",
+        lambda number, handler: installed.__setitem__(number, handler),
+    )
+    stop = threading.Event()
+    install_stop_signals(stop)
+
+    assert signal.SIGINT in installed
+    installed[signal.SIGINT](signal.SIGINT, None)
+    assert stop.is_set(), "ctrl+c has to set the event, not raise into a lock"
+
+
+@pytest.mark.slow
+def test_a_real_interrupt_really_stops_a_real_process(tmp_path: Path) -> None:
+    """The only test that proves it, because the bug was in how the
+    interpreter delivers a signal and nothing short of a signal shows it.
+
+    The assertion that matters is the exit code. Windows terminates a process
+    that ignores a console control event, and that termination *also* ends
+    the process — so "it stopped" is true either way and proves nothing.
+    A clean 0 is only reachable through the handler, the loop and the
+    `finally` that closes the server.
+
+    Windows has no SIGINT to send another process; CTRL_BREAK_EVENT to a new
+    process group is the closest thing, and `serve` handles SIGBREAK for
+    exactly that reason.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    # The checkout has to reach a child whose working directory is somewhere
+    # else, the same way the mcp-serve tests do it.
+    environment = dict(
+        os.environ,
+        VOX_HOME=str(home),
+        PYTHONPATH=str(Path(__file__).resolve().parents[1]),
+    )
+    flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    child = subprocess.Popen(
+        # -u because the line below is read while the process is still alive,
+        # and a buffered pipe would never deliver it.
+        [sys.executable, "-u", "-m", "vox_chat", "ui", "--port", "0", "--no-browser"],
+        cwd=str(tmp_path),
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        creationflags=flags,
+        start_new_session=(flags == 0),
+    )
+    try:
+        # Wait for it to say it is listening rather than sleeping a guess.
+        # A fixed sleep raced startup on this machine and the signal arrived
+        # before the handler was installed, which looks exactly like the bug.
+        assert child.stdout is not None
+        first = _line_within(child.stdout, 30.0)
+        assert "listening on" in first, first
+        assert child.poll() is None
+
+        if sys.platform == "win32":
+            child.send_signal(signal.CTRL_BREAK_EVENT)
+        else:
+            child.send_signal(signal.SIGINT)
+        child.wait(timeout=20)
+    finally:
+        if child.poll() is None:  # pragma: no cover - only when it regresses
+            child.kill()
+            child.wait(timeout=10)
+    assert child.returncode == 0, (
+        f"exit code {child.returncode}: it was killed rather than asked to stop"
+    )
+
+
+def _line_within(stream, seconds: float) -> str:
+    """One line, or "" if the process never writes one."""
+    got: list[str] = []
+    reader = threading.Thread(target=lambda: got.append(stream.readline()), daemon=True)
+    reader.start()
+    reader.join(timeout=seconds)
+    return got[0] if got else ""

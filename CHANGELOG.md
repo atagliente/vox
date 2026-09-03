@@ -73,6 +73,15 @@ reading.
   closes. It reads the same table the legend is built from, which already
   fails at import if a command is in no group — so the popup cannot offer a
   command nobody wrote or miss one that exists.
+- **Ctrl+C stops it.** `serve` printed "press ctrl+c to stop" and then did
+  not: a bare `Event().wait()` parks the main thread in a lock the
+  interpreter cannot interrupt to run a signal handler, so on Windows the key
+  did nothing at all. It waits in short steps now and a handler sets the
+  event, which behaves the same everywhere. The test that shows it is a real
+  subprocess and a real signal, and the assertion is the **exit code**:
+  Windows also terminates a process that ignores a console control event, so
+  "it stopped" is true either way and proves nothing. A clean 0 is only
+  reachable through the handler.
 - **Localhost is an address, not a permission.** Any page in any browser can
   POST to `127.0.0.1:8899`; it cannot read the reply, which stops it learning
   anything but not from telling VOX to run a tool. A request from another
