@@ -58,7 +58,21 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
-      - run: pytest -q
+      # The failure names are echoed as ::error:: so they land in the run's
+      # annotations, which are readable without a token. Without this a red
+      # test job says only "Process completed with exit code 1" to anyone
+      # who cannot download the log.
+      - name: Tests
+        shell: bash
+        run: |
+          set +e
+          pytest -q -rf --tb=short > pytest.out 2>&1
+          code=$?
+          tail -n 300 pytest.out
+          grep -E '^(FAILED|ERROR) ' pytest.out | head -n 40 | while read -r line; do
+            echo "::error::$line"
+          done
+          exit $code
 
   security:
     # Two different questions: is anything VOX depends on known to be
@@ -111,7 +125,21 @@ jobs:
           cache-dependency-path: pyproject.toml
       - run: python -m pip install --upgrade pip && pip install -e ".[dev]"
       # The floor lives in pyproject.toml and only ever moves up.
-      - run: pytest -q --cov --cov-report=xml --cov-report=term-missing
+      # The failure names are echoed as ::error:: so they land in the run's
+      # annotations, which are readable without a token. Without this a red
+      # test job says only "Process completed with exit code 1" to anyone
+      # who cannot download the log.
+      - name: Tests, with coverage
+        shell: bash
+        run: |
+          set +e
+          pytest -q -rf --tb=short --cov --cov-report=xml --cov-report=term-missing > pytest.out 2>&1
+          code=$?
+          tail -n 300 pytest.out
+          grep -E '^(FAILED|ERROR) ' pytest.out | head -n 40 | while read -r line; do
+            echo "::error::$line"
+          done
+          exit $code
       - name: Post the figures on the pull request
         if: github.event_name == 'pull_request'
         uses: py-cov-action/python-coverage-comment-action@v3

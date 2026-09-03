@@ -1,0 +1,196 @@
+name: Release
+
+# A tag is the trigger, because a release is a decision and a tag is how that
+# decision gets written down. Nothing here runs on a push to main.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build a release from."
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The tag says v1.2.3; vox_chat/__init__.py is where the version actually
+  # lives. If they disagree, the release is wrong in a way nobody would notice
+  # until somebody installed it, so it is the first thing checked.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+      tag: ${{ steps.read.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - id: read
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          version=$(python -c "import re,pathlib;print(re.search(r'__version__\s*=\s*[\"\x27]([^\"\x27]+)', pathlib.Path('vox_chat/__init__.py').read_text()).group(1))")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [ "$tag" != "v$version" ]; then
+            echo "::error::tag $tag does not match vox_chat/__init__.py ($version)"
+            exit 1
+          fi
+
+  # The same two files that go to PyPI and to the Release, built once. Building
+  # them twice would be two chances to build them differently.
+  build:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip && pip install build twine
+      - run: python -m build
+      - run: twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # One executable per platform, for people who want to try VOX without
+  # meeting Python first. 40-60 MB each, which is why they live on the
+  # Release and not anywhere that gets downloaded by accident.
+  executables:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: vox-linux-x86_64
+          - os: macos-latest
+            asset: vox-macos-arm64
+          - os: windows-latest
+            asset: vox-windows-x86_64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip && pip install . pyinstaller
+      - name: Build
+        shell: bash
+        run: |
+          # --collect-all for textual and rich: both import their widgets and
+          # styles by name at runtime, which PyInstaller's static analysis
+          # cannot see. demo_pki is data the mesh reads off the filesystem.
+          # PyInstaller splits --add-data on os.pathsep, which is not the same
+          # character on Windows as it is everywhere else.
+          sep=":"; [ "${{ runner.os }}" = "Windows" ] && sep=";"
+          pyinstaller --onefile --name vox \
+            --collect-all textual --collect-all rich \
+            --add-data "vox_chat/demo_pki${sep}vox_chat/demo_pki" \
+            --console packaging/entry.py
+      - name: It starts
+        shell: bash
+        run: |
+          # Not a smoke test of the TUI — there is no terminal here. `--version`
+          # is enough to prove the bundle imports and the entry point resolves.
+          if [ "${{ runner.os }}" = "Windows" ]; then ./dist/vox.exe --version
+          else ./dist/vox --version; fi
+      - name: Name it after the platform
+        shell: bash
+        run: |
+          mkdir -p out
+          if [ "${{ runner.os }}" = "Windows" ]; then cp dist/vox.exe "out/${{ matrix.asset }}"
+          else cp dist/vox "out/${{ matrix.asset }}"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exe-${{ matrix.asset }}
+          path: out/
+
+  # Sigstore, keyless. The alternative was a GPG key, which means a private key
+  # somebody has to generate, protect, publish and eventually rotate; this
+  # signs with the workflow's own OIDC identity and puts the certificate in a
+  # public transparency log, so what a verifier checks is "GitHub Actions,
+  # this repository, this workflow" rather than "a key I found on a web page".
+  sign:
+    needs: [version, build, executables]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: staging
+      - name: Gather everything that ships
+        run: |
+          mkdir -p release
+          find staging -type f \( -name '*.whl' -o -name '*.tar.gz' -o -name 'vox-*' \) \
+            -exec cp {} release/ \;
+          ls -l release
+      - uses: sigstore/gh-action-sigstore-python@v3
+        with:
+          inputs: ./release/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed
+          path: release/
+
+  release:
+    needs: [version, sign]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: signed
+          path: release
+      - name: Publish the release with everything attached
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          # --notes-from-tag if the tag is annotated, --generate-notes if not:
+          # a release with no notes is a release nobody can read.
+          notes=--generate-notes
+          if git cat-file -t "$TAG" 2>/dev/null | grep -q tag; then
+            notes=--notes-from-tag
+          fi
+          gh release create "$TAG" release/* --title "$TAG" $notes \
+            || gh release upload "$TAG" release/* --clobber
+
+  # Last, and only when the repository says so. Trusted publishing has to be
+  # configured on PyPI *first* — the publisher, this repository, and this
+  # workflow's filename — or the job fails at the final step with a message
+  # about a mismatched claim. Rather than ship a file that looks finished and
+  # is not, this job is switched on by setting the repository variable
+  # PUBLISH_TO_PYPI to "true" once that configuration exists. Everything above
+  # it runs and the release is complete either way.
+  pypi:
+    needs: [version, build, release]
+    if: vars.PUBLISH_TO_PYPI == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/vox
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
