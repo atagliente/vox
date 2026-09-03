@@ -292,6 +292,21 @@ three in the morning. The rule matches the program however it is written:
 The memory and process limits are POSIX only, and `vox doctor` says so rather
 than pretending otherwise on Windows.
 
+Commands can also be sandboxed, which the path confinement is not: a command
+that is allowed to run can still write to your home directory or reach the
+network.
+
+```json
+"agent": { "sandbox": { "mode": "bwrap", "network": false } }
+```
+
+`bwrap` on Linux, `docker` anywhere Docker is, `off` by default. The workspace
+is the one writable path and the network is gone unless you ask for it. If the
+backend you name is not installed the command **does not run** — a sandbox
+that silently stops applying is worse than none — and it is a boundary against
+a mistake, not against an adversary. SECURITY.md is explicit about the
+difference.
+
 `/undo` takes back the last write. One step: it is not version control.
 
 ## Searching the internet

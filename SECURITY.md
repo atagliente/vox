@@ -58,10 +58,21 @@ Stated plainly, because a promise nobody made cannot be broken:
   repository so a fresh clone can join a mesh without provisioning. Anyone
   with a copy can mint a certificate it trusts. VOX warns every time it is in
   use; `consensus.allow_sample_ca: false` refuses instead.
-- **Agent commands run as you.** They are confined to the workspace by path
-  and confirmed by a human, but they are not sandboxed: a confirmed command
-  can do anything your account can. The `deny` list and the resource limits
-  narrow this; they do not close it.
+- **Agent commands run as you, unless you ask otherwise.** They are confined
+  to the workspace by path and confirmed by a human, but by default they are
+  not sandboxed: a confirmed command can do anything your account can. The
+  `deny` list and the resource limits narrow this; they do not close it.
+  `agent.sandbox` (`bwrap` on Linux, or `docker`) does close most of it — the
+  workspace is the only writable path and the network is gone unless asked
+  for — and if the backend it names is missing the command does not run at
+  all, because a sandbox that silently stops applying is worse than none.
+  **It is off by default**, because turning it on changes what a command can
+  reach and that is a decision, not a default.
+- **A sandbox here is a boundary against a mistake, not against an
+  adversary.** Neither bubblewrap nor a container stops a kernel exploit, and
+  Docker in particular is a daemon running as root that VOX asks to start
+  things. What they stop is a confirmed command doing more than anyone
+  intended.
 - **A model is not trusted, but it is powerful.** VOX confirms before acting.
   A confirmation nobody reads is not a confirmation.
 

@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .sandbox import SandboxError
+
 DEFAULT_MAX_OUTPUT = 8192
 _SKIP_DIRS = {".git", "__pycache__", ".venv", "venv", "node_modules", ".vox"}
 _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
@@ -436,11 +438,17 @@ def run_command(
     timeout_seconds: int = 60,
     max_output: int = DEFAULT_MAX_OUTPUT,
     limits: Any = None,
+    sandbox: Any = None,
 ) -> ToolResult:
     """Run a command inside the workspace. Callers must confirm beforehand.
 
     The command is split with :mod:`shlex` and executed without a shell, so
     redirections and chaining are not available to the model.
+
+    ``sandbox``, when it is on, wraps the whole thing in bubblewrap or a
+    container. If it was asked for and cannot be provided the command does
+    **not** run: see :mod:`vox_chat.sandbox` for why that is the only safe
+    way for the setting to fail.
     """
     if not command.strip():
         raise ToolError("empty command")
@@ -453,9 +461,15 @@ def run_command(
     directory = workspace.resolve(cwd, must_exist=True)
     if not directory.is_dir():
         raise ToolError(f"not a directory: {workspace.relative(directory)}")
+    launch = argv
+    if sandbox is not None and getattr(sandbox, "on", False):
+        try:
+            launch = sandbox.wrap(argv, directory, workspace.root)
+        except SandboxError as exc:
+            return ToolResult(False, str(exc))
     try:
         completed = subprocess.run(
-            argv,
+            launch,
             cwd=str(directory),
             capture_output=True,
             text=True,
@@ -474,7 +488,7 @@ def run_command(
             False, f"command timed out after {timeout_seconds}s: {command}"
         )
     except FileNotFoundError:
-        return ToolResult(False, f"command not found: {argv[0]}")
+        return ToolResult(False, f"command not found: {launch[0]}")
     except OSError as exc:
         return ToolResult(False, f"cannot run command: {exc}")
     parts = [
@@ -482,6 +496,11 @@ def run_command(
         f"cwd: {workspace.relative(directory)}",
         f"exit code: {completed.returncode}",
     ]
+    if launch is not argv:
+        # Worth a line: a command that behaves differently under a sandbox
+        # should say which one it was under, or the difference looks like
+        # the command being flaky.
+        parts.insert(2, f"sandbox: {sandbox.describe()}")
     if completed.stdout:
         parts.append("--- stdout ---\n" + completed.stdout.rstrip())
     if completed.stderr:
@@ -952,6 +971,7 @@ def execute(
     max_output: int = DEFAULT_MAX_OUTPUT,
     web_settings=None,
     limits: Any = None,
+    sandbox: Any = None,
 ) -> ToolResult:
     """Dispatch a confirmed tool call. Raises :class:`ToolError` on refusal."""
     if name in ("web_search", "fetch_url"):
@@ -1004,6 +1024,7 @@ def execute(
             command_timeout,
             max_output,
             limits,
+            sandbox,
         )
     raise ToolError(f"unknown tool: {name}")
 

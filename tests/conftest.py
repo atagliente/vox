@@ -65,3 +65,30 @@ def workspace(tmp_path: Path) -> Path:
     root = tmp_path / "project"
     root.mkdir()
     return root
+
+
+@pytest.fixture(autouse=True)
+def no_startup_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stop the connection probe from writing into somebody else's test.
+
+    `VoxApp.check_connection` is a thread worker started at mount that opens a
+    real socket to the configured provider. Every UI fixture here points at
+    127.0.0.1:1 to make that fail, and on this machine it fails in under a
+    millisecond — so its "LINK DOWN" line always landed before the test did
+    anything, and nobody noticed it was landing at all.
+
+    On CI it does not. A refused connection on a loaded macOS or Windows
+    runner can take long enough that the line arrives after the assertion —
+    which failed `test_mesh_without_an_argument_reports_the_state`, reading
+    the last transcript line — or after the app has torn down, which failed
+    `test_model_gpu_is_ollama_only` with NoMatches from inside a worker.
+    Two different tests, on two different runners, from one shared source of
+    nondeterminism.
+
+    No test asserts on the probe, so the fix is to not run it. Anything that
+    wants to test the probe itself can call `_connection_result` directly,
+    which is where the behaviour actually is.
+    """
+    from vox_chat.app import VoxApp
+
+    monkeypatch.setattr(VoxApp, "check_connection", lambda self: None)

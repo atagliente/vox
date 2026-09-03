@@ -412,7 +412,7 @@ decision rather than work: whether to move to an async provider client
   * `[done]` Workspace confinement: `..`, symlinks pointing outside and shell operators
     refused, commands run under a timeout
 
-* **5.2 Isolation** — `[to complete]` (only the container)
+* **5.2 Isolation** — `[done]`
   * `[done]` `allow` / `ask` / `deny` per command in `agent.commands`. One switch for
     both `ls` and `rm -rf` meant both got turned off, which is the worst outcome
     available. A denied command is refused **without a dialog**, on purpose: the value
@@ -425,14 +425,25 @@ decision rather than work: whether to move to an async provider client
     timeout does not help with a command that allocates without bound: the machine is
     gone long before it fires. **POSIX only, and it says so** rather than being a
     setting that quietly does nothing on Windows.
-  * `[to complete]` Running commands in a container or namespace. This is a real
-    decision rather than a missing function: it changes what "the workspace" means (a
-    bind mount, not a directory), what a command can reach (no host network, no host
-    tools), and it needs Docker or bubblewrap present, which is a dependency VOX has so
-    far refused to have. Two shapes worth choosing between — `bwrap` on Linux, which is
-    light and needs no daemon but is Linux-only; or Docker, which works everywhere and
-    is a large thing to require. Both are days of work and both change the promise the
-    agent makes, so the choice is yours.
+  * `[done]` Running commands in a container or namespace: `vox_chat/sandbox.py`,
+    `agent.sandbox`. The choice between `bwrap` and Docker turned out not to be a
+    choice — the reason to prefer either is a property of the machine, not of VOX — so
+    **both** are there and neither is a dependency: the setting is `off` by default and
+    names a backend when it is not. bubblewrap is light and needs no daemon and is
+    Linux-only; Docker works wherever Docker does and costs an image and a container
+    start per command. In both, the workspace is the one writable path and the network
+    is gone unless `network: true`.
+    The rule that keeps this from being decoration: **a sandbox that was asked for and
+    cannot be provided stops the command.** Falling back to an unsandboxed run would
+    mean the setting silently stops applying on exactly the machine where it mattered,
+    which is how a security feature becomes a lie — and it is the same reason
+    `sandbox: bwarp` is a configuration error rather than a quiet `off`. There is no
+    autodetection either: "docker is installed, so you probably meant it" is a program
+    taking your decision.
+    It also applies to `vox mcp-serve`, since a client on the other end of a pipe is
+    no more entitled to an unsandboxed shell than the model in front of you is. What
+    it is **not** is a boundary against an adversary, and SECURITY.md says so rather
+    than leaving it implied.
 
 ---
 

@@ -19,6 +19,7 @@ from typing import Any, Literal
 from .authorisation import Limits, Policy
 from .llm_client import LLMClient, LLMError, StreamEvent, supports_tools_error
 from .models import Message, ToolCall, utc_now
+from .sandbox import Sandbox
 from .tools import (
     COMMAND_TOOLS,
     PARALLEL_SAFE,
@@ -486,6 +487,7 @@ def _run_tool(
             max_output,
             web_settings,
             Limits.from_config(agent_config),
+            Sandbox.from_config(agent_config),
         )
         call.result = result.as_text()
     except ToolError as exc:

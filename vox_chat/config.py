@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import authorisation, sampling
+from . import authorisation, sampling, sandbox
 from .storage import (
     ReadResult,
     global_config_path,
@@ -393,6 +393,7 @@ def validate_config(data: Any) -> list[str]:
             if not isinstance(agent.get(key, False), bool):
                 errors.append(f"agent.{key} must be a boolean")
         errors.extend(authorisation.errors_in(agent))
+        errors.extend(sandbox.errors_in(agent))
         for key in ("memory_limit_mb", "max_processes"):
             value = agent.get(key, 0)
             if not isinstance(value, int) or isinstance(value, bool) or value < 0:

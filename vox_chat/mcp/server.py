@@ -38,6 +38,7 @@ from typing import Any, TextIO
 
 from ..authorisation import Limits, Policy
 from ..logging_setup import get_logger
+from ..sandbox import Sandbox
 from ..tools import (
     COMMAND_TOOLS,
     TOOL_SCHEMAS,
@@ -248,6 +249,10 @@ class Server:
                 ),
                 max_output=int(self.offer.agent_config.get("max_output_bytes", 8192)),
                 limits=Limits.from_config(self.offer.agent_config),
+                # The same sandbox the TUI would use. A client on the other
+                # end of a pipe is no more entitled to an unsandboxed shell
+                # than the model in front of the operator is.
+                sandbox=Sandbox.from_config(self.offer.agent_config),
             )
         except ToolError as exc:
             return self._ok(request_id, _content(str(exc), is_error=True))
