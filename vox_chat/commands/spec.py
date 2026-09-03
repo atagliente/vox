@@ -71,9 +71,10 @@ KEY_GROUPS: tuple[tuple[str, tuple[KeyEntry, ...]], ...] = (
             # ctrl+shift+<letter> is not delivered by every terminal, so the
             # legend is on a function key as well. Neither is worth much if the
             # only way to find them is to already know them, hence /keys too.
-            KeyEntry("ctrl+shift+l", "open this legend"),
+            KeyEntry("ctrl+shift+l", "this legend: every key, then every command"),
             KeyEntry("f1", "open it where the terminal swallows ctrl+shift+l"),
             KeyEntry("/keys", "the same legend, written into the transcript"),
+            KeyEntry("up / down", "scroll it   ·   home / end jump to either edge"),
             KeyEntry("esc", "close it"),
         ),
     ),
@@ -193,6 +194,119 @@ for _spec in COMMANDS:
         _BY_NAME[_alias] = _spec
 
 
+# The commands, in the order a legend should read them: what you reach for
+# most often first, what you configure once last. Forty-nine of them in one
+# alphabetical list is a list nobody finishes.
+COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("THE CONVERSATION", ("new", "clear", "stats", "code", "panel", "export")),
+    (
+        "SESSIONS, ROLES AND PROMPTS",
+        (
+            "sessions",
+            "session-save",
+            "session-load",
+            "session-delete",
+            "role",
+            "roles",
+            "prompts",
+            "prompt",
+            "prompt-save",
+            "prompt-delete",
+        ),
+    ),
+    (
+        "THE MODEL",
+        (
+            "provider",
+            "model",
+            "model-ctx",
+            "model-gpu",
+            "set",
+            "format",
+            "inspect",
+            "warm",
+            "connect",
+        ),
+    ),
+    ("CODING AGENT", ("agent", "workspace", "plan", "undo", "mcp", "index", "image")),
+    ("THE INTERNET", ("web", "search", "fetch")),
+    (
+        "THE MESH",
+        ("mesh", "universe", "consensus", "round", "rounds", "peers", "revoke"),
+    ),
+    ("SETTINGS AND HELP", ("config", "settings", "theme", "help", "keys")),
+    ("LEAVING", ("stop", "exit")),
+)
+
+
+def _grouped_commands() -> tuple[tuple[str, tuple[CommandSpec, ...]], ...]:
+    """The command table arranged into the groups above.
+
+    Checked rather than trusted: a command added to ``COMMANDS`` and forgotten
+    here, or named here and never added, fails at import. The same guarantee
+    ``dispatch`` gives about handlers, and for the same reason — a legend that
+    quietly omits a command is worse than no legend at all.
+    """
+    by_name = {spec.name: spec for spec in COMMANDS}
+    listed = [name for _title, names in COMMAND_GROUPS for name in names]
+    problems = [
+        *(f"{name} is in no group" for name in sorted(set(by_name) - set(listed))),
+        *(
+            f"{name} is grouped but does not exist"
+            for name in sorted(set(listed) - set(by_name))
+        ),
+        *(
+            f"{name} is in more than one group"
+            for name in sorted({n for n in listed if listed.count(n) > 1})
+        ),
+    ]
+    if problems:
+        raise RuntimeError(
+            "the command legend disagrees with the table: " + "; ".join(problems)
+        )
+    return tuple(
+        (title, tuple(by_name[name] for name in names))
+        for title, names in COMMAND_GROUPS
+    )
+
+
+def commands_text(indent: str = "  ") -> str:
+    """Every command, grouped, usage in a fixed column."""
+    width = max(len(spec.usage) for spec in COMMANDS)
+    lines: list[str] = []
+    for title, group in _grouped_commands():
+        if lines:
+            lines.append("")
+        lines.append(title)
+        lines.extend(f"{indent}{s.usage.ljust(width)}   {s.help}" for s in group)
+    return "\n".join(lines)
+
+
+def legend_text() -> str:
+    """What Ctrl+Shift+L shows: the keys, then every command.
+
+    Keys first, as asked, and it is also the right order: a command can be
+    found by typing a slash and reading the completions, while a key that is
+    written down nowhere is a key nobody finds.
+    """
+    return "\n".join(
+        [
+            keys_text(),
+            "",
+            f"COMMANDS ({len(COMMANDS)})",
+            "",
+            commands_text(),
+            "",
+            "CONSENSUS",
+            "  Mark part of a message with [CNS] … [/CNS] and it is answered by",
+            "  the other agents on the mesh. Only the marked text leaves this",
+            "  machine. /consensus shows who would be asked.",
+            "",
+            "  Start a message with // to send text that begins with a slash.",
+        ]
+    )
+
+
 @dataclass
 class ParsedCommand:
     """The result of parsing one input line."""
@@ -260,21 +374,27 @@ def complete(prefix: str) -> list[str]:
 
 
 def help_text() -> str:
-    """The full command reference, rendered for the transcript."""
-    width = max(len(spec.usage) for spec in COMMANDS)
-    lines = ["AVAILABLE COMMANDS", ""]
-    lines.extend(f"  {spec.usage.ljust(width)}   {spec.help}" for spec in COMMANDS)
-    lines.extend(["", "KEYS", ""])
-    lines.extend(keys_text().splitlines())
-    lines.extend(
+    """The full reference, rendered for the transcript.
+
+    The same material ctrl+shift+l shows, in the other order: somebody who
+    typed ``/help`` was looking for a command, and somebody who pressed the
+    key had not typed anything.
+    """
+    return "\n".join(
         [
+            f"AVAILABLE COMMANDS ({len(COMMANDS)})",
+            "",
+            commands_text(),
+            "",
+            "KEYS",
+            "",
+            keys_text(),
             "",
             "CONSENSUS",
             "  Mark part of a message with [CNS] … [/CNS] and it is answered by",
             "  the other agents on the mesh. Only the marked text leaves this",
             "  machine. /consensus shows who would be asked.",
             "",
-            "Start a message with // to send text that begins with a slash.",
+            "  Start a message with // to send text that begins with a slash.",
         ]
     )
-    return "\n".join(lines)

@@ -112,6 +112,46 @@ def test_the_legend_is_written_down_once() -> None:
     assert all(line[16] == " " and line[17] != " " for line in entries)
 
 
+def test_the_legend_carries_every_command_as_well_as_every_key() -> None:
+    """Ctrl+Shift+L shows both. Keys first: a command can be found by typing a
+    slash and reading the completions, a key written down nowhere cannot."""
+    legend = commands.legend_text()
+    keys_at = legend.index("WRITING")
+    commands_at = legend.index("COMMANDS (")
+    assert keys_at < commands_at, "keys first"
+    for spec in commands.COMMANDS:
+        assert spec.usage in legend, f"{spec.name} is missing from the legend"
+
+
+def test_a_command_in_no_group_is_an_error_at_import() -> None:
+    """A legend that quietly omits a command is worse than no legend. Same
+    guarantee dispatch gives about handlers, for the same reason."""
+    from vox_chat.commands import spec as spec_module
+
+    saved = spec_module.COMMAND_GROUPS
+    try:
+        spec_module.COMMAND_GROUPS = tuple(
+            group for group in saved if group[0] != "LEAVING"
+        )
+        with pytest.raises(RuntimeError, match="is in no group"):
+            spec_module.commands_text()
+
+        spec_module.COMMAND_GROUPS = (*saved, ("MADE UP", ("not-a-command",)))
+        with pytest.raises(RuntimeError, match="does not exist"):
+            spec_module.commands_text()
+
+        spec_module.COMMAND_GROUPS = (*saved, ("AGAIN", ("help",)))
+        with pytest.raises(RuntimeError, match="more than one group"):
+            spec_module.commands_text()
+    finally:
+        spec_module.COMMAND_GROUPS = saved
+
+
+def test_every_command_appears_exactly_once() -> None:
+    listed = [name for _title, names in commands.spec.COMMAND_GROUPS for name in names]
+    assert sorted(listed) == sorted(spec.name for spec in commands.COMMANDS)
+
+
 def test_arguments_are_also_exposed_as_a_list() -> None:
     parsed = commands.parse("/prompt-save alpha beta")
     assert parsed.args == ["alpha", "beta"]

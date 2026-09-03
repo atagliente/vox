@@ -13,7 +13,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, ListItem, ListView, Static, TextArea
 
-from ..commands import keys_text
+from ..commands import legend_text
 
 _DIFF_STYLES = (
     ("+++ ", "bold"),
@@ -118,11 +118,15 @@ class ConfirmModal(ModalScreen[bool]):
 
 
 class KeysModal(ModalScreen[None]):
-    """The whole key legend, on ctrl+shift+l.
+    """Every key and every command, on ctrl+shift+l.
 
     The bar at the bottom of the screen carries five keys because a legend
     nobody can read at a glance is decoration. This is where the rest lives,
     one keystroke away instead of buried in /help.
+
+    Keys first, then the forty-nine commands. That order is not only what was
+    asked for: a command can be found by typing a slash and reading the
+    completions, while a key written down nowhere is a key nobody finds.
     """
 
     BINDINGS = [
@@ -130,14 +134,38 @@ class KeysModal(ModalScreen[None]):
         Binding("q", "close", "Close", show=False, priority=True),
         Binding("f1", "close", "Close", show=False, priority=True),
         Binding("ctrl+shift+l", "close", "Close", show=False, priority=True),
+        # It is a hundred lines now, so it has to actually scroll. Bound here
+        # rather than relying on the scroll container having focus, because
+        # whether it does is a Textual detail and arrow keys that do nothing
+        # are worse than a legend that is too long.
+        Binding("down", "scroll(3)", "Down", show=False, priority=True),
+        Binding("up", "scroll(-3)", "Up", show=False, priority=True),
+        Binding("pagedown", "scroll(20)", "Page down", show=False, priority=True),
+        Binding("pageup", "scroll(-20)", "Page up", show=False, priority=True),
+        Binding("home", "to_end(False)", "Top", show=False, priority=True),
+        Binding("end", "to_end(True)", "Bottom", show=False, priority=True),
     ]
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal-box"):
-            yield Label("KEYS", id="modal-title")
-            with VerticalScroll():
-                yield Static(keys_text(), id="keys-table")
-            yield Static("esc close", id="modal-hint")
+            yield Label("KEYS AND COMMANDS", id="modal-title")
+            with VerticalScroll(id="keys-scroll"):
+                yield Static(legend_text(), id="keys-table")
+            yield Static("↑ ↓ scroll   ·   esc close", id="modal-hint")
+
+    @property
+    def _scroller(self) -> VerticalScroll:
+        return self.query_one("#keys-scroll", VerticalScroll)
+
+    def action_scroll(self, lines: int) -> None:
+        self._scroller.scroll_relative(y=lines, animate=False)
+
+    def action_to_end(self, bottom: bool) -> None:
+        scroller = self._scroller
+        if bottom:
+            scroller.scroll_end(animate=False)
+        else:
+            scroller.scroll_home(animate=False)
 
     def action_close(self) -> None:
         self.dismiss(None)

@@ -18,10 +18,12 @@ from .spec import (
     CommandSpec,
     KeyEntry,
     ParsedCommand,
+    commands_text,
     complete,
     help_text,
     is_command,
     keys_text,
+    legend_text,
     parse,
 )
 
@@ -31,9 +33,11 @@ __all__ = [
     "CommandSpec",
     "KeyEntry",
     "ParsedCommand",
+    "commands_text",
     "complete",
     "help_text",
     "is_command",
     "keys_text",
+    "legend_text",
     "parse",
 ]

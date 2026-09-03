@@ -31,16 +31,21 @@ machine and version named, not estimated.
   person perceives as delay, and well over any local model's per-token
   interval. Anything that is not text flushes the waiting text first, so a
   tool result can never arrive before the sentence that led to it.
-- **What `/inspect` costs, at last with a figure — and it is not where it was
-  said to be.** Assembling a stream carrying logprobs runs at 105k–128k
-  tokens/s against a fake provider, the same as one without it to within
-  noise, and which of the two comes out ahead varies run to run. The
-  description "several times heavier" was true of the feature and wrong about
-  the location: the weight is the provider sending a distribution per token
-  over the wire, and the inspect screen redrawing a table that grows by a row
-  per token. Neither is in `consume_stream`, which is where the description
-  would have sent anyone looking. `tests/test_performance.py` keeps the
-  measurement honest.
+- **What `/inspect` costs, at last with a figure: about 1.6x on the assembly
+  path.** 272k tokens/s plain against 173k with logprobs, best of five passes
+  against a fake provider — steady across runs and steadily in the same
+  direction. One `TokenSample` and its alternatives per token, which is real
+  and bounded.
+  Getting there took two attempts, and the first was wrong in both
+  directions. It compared two single passes while fifteen other test
+  processes ran, so it measured the scheduler: 3.4x on one run, 0.8x on the
+  next, and a conclusion of "within noise" that was itself noise. Best-of-N
+  is what a microbenchmark needs when the suite owns every core.
+  1.6x is still not "several times", so the original description overstates
+  *this* path. The rest of the weight is where a fake provider cannot see it:
+  the real provider sending a distribution per token over the wire, and the
+  inspect screen redrawing a table that grows by a row per token.
+  `tests/test_performance.py` keeps the number honest.
 
 ### The GPU
 

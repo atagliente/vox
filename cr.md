@@ -49,9 +49,10 @@ much as the fixes:
   `VOX_TEST_MESH=1`**. That time was never being paid.
 - `cryptography` was **already** imported lazily. The startup cost was the `openai`
   SDK, 1,674 ms of 2,566.
-- `/inspect` being "several times heavier" is true of the feature and **false of
-  `consume_stream`**, which is exactly where the phrase would send someone trying to
-  fix it.
+- `/inspect` being "several times heavier" overstates the assembly path, which
+  measures **1.6x** — real and bounded, but not several. The rest is in the wire and
+  in the inspect screen's redraw, neither of which is `consume_stream`, where the
+  phrase would send someone trying to fix it.
 
 Status legend: `[to do]` still to be done · `[doing]` in progress (dirty working tree
 or partially covered) · `[done]` already in the repo and verifiable ·
@@ -664,15 +665,18 @@ decision rather than work: whether to move to an async provider client
     Anything that is not text flushes the waiting text before it goes, because a tool
     result arriving before the sentence that led to it would be a transcript nobody
     could read.
-  * `[done]` Measured, and **the description was wrong about where the weight is**.
-    Assembling a stream carrying logprobs runs at 105k–128k tokens/s against a fake
-    provider — the same as one without, to within noise, and which comes out ahead
-    varies run to run. So "several times heavier" is true of the feature and false of
-    `consume_stream`, which is exactly where the phrase would have sent someone
-    optimising it. The weight is the provider sending a distribution per token over the
-    wire and the inspect screen redrawing a table that grows by a row per token. Both
-    figures are in `CHANGELOG.md` with the machine they were taken on, and
-    `tests/test_performance.py` keeps them honest.
+  * `[done]` Measured: **about 1.6x on the assembly path** — 272k tokens/s plain
+    against 173k with logprobs, best of five passes. Real, bounded, and rather less
+    than "several times", so the original description overstates this path; the rest
+    of the weight is where a fake provider cannot see it, in the wire and in the
+    inspect screen's redraw.
+    Worth recording how the number was arrived at, because the first attempt was wrong
+    in **both** directions. It compared two single passes while fifteen other test
+    processes ran, so it reported the scheduler: 3.4x on one run, 0.8x on the next, and
+    a conclusion of "within noise" that was itself noise. That wrong conclusion was
+    written into `CHANGELOG.md` and into this file, and stood until the flakiness
+    surfaced and corrected it. Best-of-N is what a microbenchmark needs when the suite
+    owns every core.
   * `[done]` GPU fill measured with `nvidia-smi` rather than inferred, with the real
     numbers on an MX150
 

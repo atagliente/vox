@@ -942,11 +942,39 @@ async def test_ctrl_shift_l_opens_the_key_legend(offline_app: VoxApp) -> None:
         shown = shown.plain if hasattr(shown, "plain") else str(shown)
         assert "ctrl+shift+l" in shown
         assert "ctrl+q" in shown
+        # And the commands, under the keys.
+        assert "/session-save" in shown and "/revoke" in shown
+        assert shown.index("ctrl+shift+l") < shown.index("/session-save")
 
         # The same key closes it again, and so does escape.
         await pilot.press("ctrl+shift+l")
         await pilot.pause()
         assert not isinstance(offline_app.screen, KeysModal)
+
+
+async def test_a_legend_this_long_can_be_scrolled(offline_app: VoxApp) -> None:
+    """It is a hundred lines now. Arrow keys that do nothing would be worse
+    than a legend that is too long."""
+    from textual.containers import VerticalScroll
+
+    from vox_chat.ui.modals import KeysModal
+
+    async with offline_app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("ctrl+shift+l")
+        await pilot.pause()
+        assert isinstance(offline_app.screen, KeysModal)
+        scroller = offline_app.screen.query_one("#keys-scroll", VerticalScroll)
+        assert scroller.scroll_offset.y == 0
+
+        await pilot.press("end")
+        await pilot.pause()
+        at_bottom = scroller.scroll_offset.y
+        assert at_bottom > 0, "the whole legend does not fit, so end must move"
+
+        await pilot.press("home")
+        await pilot.pause()
+        assert scroller.scroll_offset.y == 0
 
 
 async def test_f1_reaches_the_legend_where_ctrl_shift_is_swallowed(

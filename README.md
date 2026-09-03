@@ -113,12 +113,18 @@ has no authentication — only on a network you trust.
 | `Ctrl+Shift+L` / `F1` | this legend, on screen | | |
 
 The bottom row carries five of them - send, copy/paste, quit, stop, mode - and
-nothing else: a legend nobody can read at a glance is decoration. The rest is
-one keystroke away on `Ctrl+Shift+L`, which opens the whole table over the
-conversation. `F1` does the same, because `Ctrl+Shift+<letter>` is not
-delivered by every terminal, and `/keys` writes it into the transcript when
-neither key arrives. All three read from the same table, so they cannot drift
-apart.
+nothing else: a legend nobody can read at a glance is decoration.
+
+**`Ctrl+Shift+L` opens the whole legend**: every key first, then all
+forty-nine commands grouped by what they are for. Arrows scroll it, `Home`
+and `End` jump to either edge, `Esc` closes it. `F1` does the same, because
+`Ctrl+Shift+<letter>` is not delivered by every terminal, and `/keys` writes
+it into the transcript when neither key arrives.
+
+`/help` shows the same material with the commands first - somebody who typed
+a slash was looking for a command, somebody who pressed the key had not typed
+anything. All of them read from the same two tables, and a command that is in
+neither fails at import rather than quietly going missing from the legend.
 
 ## Commands
 
