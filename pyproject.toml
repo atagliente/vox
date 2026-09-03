@@ -43,7 +43,7 @@ dev = [
   "ruff>=0.16",
   "mypy>=1.11",
   "nox>=2024.4",
-  "pre-commit>=3.7",
+  "pre-commit>=4.6.2",
   # Only the workflow test reads YAML. It is here rather than in the
   # runtime dependencies because VOX itself never parses any.
   "pyyaml>=6.0",
