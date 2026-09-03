@@ -116,6 +116,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("config-path", help="Print the config file path and exit.")
 
+    ui = subparsers.add_parser(
+        "ui",
+        help="Serve VOX as a page on 127.0.0.1 and open it.",
+        description=(
+            "The same VOX in a browser: one conversation, streamed, with the "
+            "slash commands and the agent's confirmations. Bound to "
+            "127.0.0.1 and nothing else - from another device, use a tunnel."
+        ),
+    )
+    ui.add_argument("-w", "--workspace", metavar="PATH", default=None)
+    ui.add_argument(
+        "--port", type=int, default=8899, help="Port to listen on (default: 8899)."
+    )
+    ui.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Print the address instead of opening it.",
+    )
+
     serve = subparsers.add_parser(
         "mcp-serve",
         help="Speak MCP on stdin/stdout, offering VOX's workspace tools.",
@@ -152,6 +171,23 @@ def main(argv: list[str] | None = None) -> int:
         from .doctor import main as doctor_main
 
         return doctor_main(workspace=workspace, plain=args.plain, timeout=args.timeout)
+
+    if args.command == "ui":
+        from .webui import WebHost
+        from .webui import serve as serve_ui
+
+        try:
+            loaded_ui = load_config(workspace)
+        except ConfigError as exc:
+            print(f"vox: {exc}; run vox doctor", file=sys.stderr)
+            return 2
+        host = WebHost(loaded_ui, workspace)
+        try:
+            return serve_ui(host, args.port, open_browser=not args.no_browser)
+        except OSError as exc:
+            print(f"vox: {exc}", file=sys.stderr)
+            host.close()
+            return 2
 
     if args.command == "mcp-serve":
         from .config import load_config as _load

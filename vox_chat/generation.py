@@ -288,7 +288,9 @@ class GenerationController:
         for _ in range(3):
             produced = False
             try:
-                turn = run_turn(
+                # Not `turn`: this module now imports a module by that name,
+                # and a local that shadows it is a trap for the next edit.
+                events = run_turn(
                     client=app.client,
                     messages=messages,
                     model=model,
@@ -314,7 +316,7 @@ class GenerationController:
                 # One hop to the UI thread per frame rather than per token.
                 # The cost was never the hop: it was the transcript refresh
                 # and re-layout it caused at the far end, once per token.
-                for batch in coalesce.coalesce(turn):
+                for batch in coalesce.coalesce(events):
                     produced = True
                     if batch.is_text:
                         app.call_from_thread(self.append_text, batch.text)

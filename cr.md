@@ -763,6 +763,41 @@ supposed to justify it.
 
 ---
 
+## 12. A second face — `[done]`
+
+Not in the original roadmap; asked for after it closed, and it belongs here
+because of what it found.
+
+* **12.1 `vox ui`** — `[done]`
+  * `[done]` VOX in a browser: `vox_chat/webui/`, served on `127.0.0.1`. The
+    layout of a chat client, the palette `report.py` already used. No dependency
+    was added — `http.server`, Server-Sent Events, and the page in one Python
+    constant. It loads nothing from anywhere and the server enforces that with a
+    `Content-Security-Policy` rather than leaving it to good intentions.
+  * `[done]` **Localhost is an address, not a permission.** Any page in any
+    browser can POST to `127.0.0.1:8899`. It cannot read the reply, which stops
+    it learning anything — but "run this command" needs no reply. A request from
+    another origin is refused, and `tests/test_webui.py` says so.
+  * `[done]` A confirmation nobody answers is a refusal, after a timeout. A tab
+    can be closed with a diff on screen, and whatever the timeout does is what
+    happens when nobody read the confirmation.
+
+* **12.2 What the commands were actually tied to** — `[done]`
+  * `[done]` `vox_chat/hosting.py`. Every handler is annotated `app: VoxApp`,
+    which looked like forty-nine commands tied to Textual. Counting says
+    otherwise: of 224 uses of `app.` in `handlers.py`, 56 are `write_system`, 33
+    `write_error`, 22 `config`, 12 `persist_config` — and **fifteen call sites in
+    the whole file are about a screen**, all of one shape. They are tied to a
+    *host*, not to a terminal.
+    So the fifteen became `open_view("sessions")` and the other two hundred and
+    nine did not change at all. That is the difference between a port and a
+    protocol, and it was a measurement rather than a design instinct that found
+    it — which is the same way every other finding in this document arrived.
+  * `[done]` `vox_chat/turn.py`. What to send is not a drawing decision, and it
+    lived inside the controller that owns the assistant's message box.
+
+---
+
 ## What is left, and why it is yours
 
 **Four** items, down from twelve. Every one of the other eight was work, and the work

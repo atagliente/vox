@@ -42,7 +42,11 @@ lives beside it:
 | `generation.py` | one turn, from the send key to the last token |
 | `consensus_flow.py` | a mesh round, and answering when another agent asks |
 | `agent.py`, `tools.py` | the tool loop, and the tools it may call |
-| `mcp/` | talking to Model Context Protocol servers |
+| `mcp/` | talking to Model Context Protocol servers, and `server.py` for being one |
+| `hosting.py` | what a command may ask of the thing running it |
+| `turn.py` | what gets sent, for whichever host is asking |
+| `webui/` | `vox ui`: the browser host, the server and the page |
+| `sandbox.py` | running a confirmed command somewhere it can do less harm |
 | `http.py` | the only place VOX makes an HTTP request |
 | `threads.py` | the only place VOX starts a thread of its own |
 | `discovery/` | the mesh: multicast announcements, mTLS, the whois server |
@@ -50,6 +54,11 @@ lives beside it:
 The controllers hold the application rather than inheriting from it. Textual's
 `@work` decorators stay on `VoxApp`, because putting something on a thread is
 the framework's business and belongs with the widget.
+
+A command is written against `hosting.Host`, not against `VoxApp`. If you need
+something from the application that the protocol does not have, add it there
+and answer it in both hosts — a command that only works in the terminal is a
+command that quietly does nothing in the browser.
 
 ## What a pull request is expected to carry
 

@@ -12,6 +12,57 @@ machine and version named, not estimated.
 
 ## Unreleased
 
+Nothing yet.
+
+---
+
+## 0.2.0 — 2026-09-03
+
+The release the roadmap was for. `cr.md` opened with eleven macro activities
+and closed with four items left, none of them work: three are an account only
+the owner can hold, and the fourth is a person with a screen reader.
+
+What is new to use: **VOX in a browser** (`vox ui`), **VOX as an MCP server**
+(`vox mcp-serve`), **sandboxed commands** (`agent.sandbox`), **quiet mode**
+for screen readers, and a **release workflow** that signs everything with
+sigstore and attaches a single-file executable for each of the three
+platforms.
+
+What is new underneath: a CI that runs at all — it had never started a single
+job — a test suite that went from 511 tests in 8m 24s to 848 in 1m 51s, and
+ten defects found along the way, every one of them by a tool rather than by
+reading.
+
+### VOX in a browser
+
+**2026-09-03**
+
+- **`vox ui`** serves one page on `127.0.0.1` and opens it: the conversation
+  streamed as it is written, the slash commands, the agent's confirmations
+  with the diff, the session list. The layout is a chat client's; the colours
+  are the ones `report.py` already used, because a page from `/report` and
+  this page came from the same program and should look like it.
+- **No dependency was added for it.** `http.server`, Server-Sent Events — one
+  GET that stays open, which is what SSE is for and, unlike WebSockets, is in
+  the standard library at both ends — and the page in one Python constant with
+  no build step. It loads nothing from anywhere, and the server says so with a
+  `Content-Security-Policy` so that is enforced rather than merely intended.
+- **Forty-nine commands work there unchanged.** They were annotated
+  `app: VoxApp`, which looked like forty-nine functions tied to Textual.
+  Counting said otherwise: of 224 uses of `app.` in `handlers.py`, 56 are
+  `write_system`, 33 `write_error`, 22 `config` — and fifteen call sites in
+  the whole file are about a screen. `hosting.py` writes that surface down as
+  a protocol; the fifteen became `open_view("sessions")`, which a terminal and
+  a browser answer differently and nothing else has to.
+- **Localhost is an address, not a permission.** Any page in any browser can
+  POST to `127.0.0.1:8899`; it cannot read the reply, which stops it learning
+  anything but not from telling VOX to run a tool. A request from another
+  origin is refused, and there is a test that says so.
+- **A confirmation nobody answers is a refusal.** A tab can be closed with a
+  diff on screen. Whatever the timeout does is what happens when nobody read
+  the confirmation, and a timeout that authorised would be a confirmation
+  nobody read — which `SECURITY.md` already says is not one.
+
 ### The roadmap's remaining twelve, and what happened to them
 
 **2026-09-03**
@@ -720,8 +771,9 @@ Termux. 44 files, 8594 lines.
 ## Conventions
 
 - **Tests never need a server.** Streaming, the agent loop and the measurements
-  are exercised with fake clients; 272 tests at the time of writing, one of
-  which is skipped on Windows because it needs symlink rights.
+  are exercised with fake clients. 848 tests at 0.2.0, run on three
+  operating systems and three interpreters; the handful that bind a real
+  socket say so with the `slow` marker.
 - **Findings live in the commit message.** Where a change was driven by a
   measurement — a latency, a refused parameter, an alias table — the number and
   its source are recorded, so the reasoning does not have to be reconstructed.

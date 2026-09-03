@@ -18,13 +18,16 @@ import itertools
 from dataclasses import dataclass, field
 from typing import Any
 
+from .. import __version__
 from ..logging_setup import get_logger
 from .transport import DEFAULT_TIMEOUT, McpError, Transport
 
 log = get_logger("mcp")
 
 PROTOCOL_VERSION = "2025-06-18"
-CLIENT_INFO = {"name": "vox", "version": "0.1.0"}
+# Read from the package, not written again here: a second copy of a
+# version is a second version, and this one was already wrong.
+CLIENT_INFO = {"name": "vox", "version": __version__}
 
 
 @dataclass

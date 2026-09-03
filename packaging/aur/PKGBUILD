@@ -10,13 +10,13 @@
 #     git clone ssh://aur@aur.archlinux.org/vox.git
 #     cp PKGBUILD .SRCINFO vox.git/ && cd vox.git
 #     updpkgsums && makepkg --printsrcinfo > .SRCINFO
-#     git commit -am "vox 0.1.0" && git push
+#     git commit -am "vox 0.2.0" && git push
 #
 # `updpkgsums` fills in the sha256 below; it is SKIP here rather than a wrong
 # number, because a wrong number fails loudly and a plausible one does not.
 
 pkgname=vox
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Retro terminal chat client for OpenAI-compatible providers"
 arch=('any')

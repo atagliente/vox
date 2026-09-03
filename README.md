@@ -63,6 +63,29 @@ vox
 
 Type, press `Enter` to send. `/help` lists every command.
 
+### In a browser
+
+```bash
+vox ui
+```
+
+The same VOX as a page on `127.0.0.1:8899`, opened for you: one conversation
+streamed as it is written, the slash commands, the agent's confirmations with
+the diff. The session list is on the left, `Enter` sends and `Shift+Enter` is
+a newline.
+
+It binds the loopback address and nothing else, and it asks for no password —
+the machine is yours and the page is yours, and an authentication that is not
+needed is one more thing to get wrong. From another device, forward the port
+over SSH rather than opening it to the network.
+
+The page loads nothing from anywhere: no CDN, no fonts, no analytics. That is
+a promise the server enforces with a `Content-Security-Policy` rather than one
+you have to take on trust, and a test checks it.
+
+Being on localhost is an address, not a permission — any page in any browser
+can post to it — so a request from another origin is refused.
+
 ### Without the screen
 
 ```bash
@@ -574,6 +597,9 @@ beside it:
 | Module | What it holds |
 | --- | --- |
 | `commands/` | the slash commands: `spec` the vocabulary, `handlers` what each one does, `dispatch` the table joining them |
+| `hosting.py` | what a command may ask of the thing running it - the surface `VoxApp` and the browser both answer |
+| `turn.py` | what gets sent, for whichever host is asking |
+| `webui/` | `vox ui`: the host, the server and the page |
 | `generation.py` | one turn, from the send key to the last token |
 | `consensus_flow.py` | a mesh round, and answering when another agent asks |
 | `http.py` | the only place VOX makes an HTTP request |

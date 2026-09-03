@@ -24,7 +24,7 @@ class Vox < Formula
 
   desc "Retro terminal chat client for OpenAI-compatible providers"
   homepage "https://github.com/atagliente/vox"
-  url "https://github.com/atagliente/vox/archive/refs/tags/v0.1.0.tar.gz"
+  url "https://github.com/atagliente/vox/archive/refs/tags/v0.2.0.tar.gz"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
   license :cannot_represent # PolyForm Noncommercial 1.0.0 — not an SPDX id Homebrew knows
   head "https://github.com/atagliente/vox.git", branch: "main"
