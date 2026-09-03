@@ -77,3 +77,36 @@ def test_no_step_takes_its_shell_from_the_matrix(path: Path) -> None:
                         f"{key!r}, which GitHub evaluates before the matrix "
                         "exists. The run will not start."
                     )
+
+
+@pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
+def test_every_action_is_pinned_to_something_that_exists(path: Path) -> None:
+    """Not every publisher keeps a floating major tag.
+
+    GitHub's own actions do, so `actions/checkout@v5` resolves and it is easy
+    to assume the convention is universal. `sigstore/gh-action-sigstore-python`
+    tags only exact versions, so `@v3` resolved to nothing — and a job whose
+    action cannot be resolved fails at "Set up job", before a single step
+    runs, with no annotation that says why.
+
+    Checking against GitHub would make this test need a network and a token.
+    What can be checked offline is the rule that would have caught it: a
+    third-party action is pinned to an exact version, and only the `actions/`
+    organisation gets a bare major.
+    """
+    for job in load(path).get("jobs", {}).values():
+        for step in job.get("steps") or []:
+            uses = step.get("uses")
+            if not isinstance(uses, str) or "@" not in uses:
+                continue
+            repo, _, ref = uses.partition("@")
+            if repo.startswith("actions/") or ref.startswith("release/"):
+                continue
+            # Two components is enough to be a real version; some publishers
+            # use v4.3 rather than v4.3.0. A bare major is what this rejects.
+            assert re.fullmatch(r"v\d+\.\d+(\.\d+)?", ref) or len(ref) == 40, (
+                f"{path.name}: {uses} is a third-party action pinned to "
+                f"{ref!r}. Pin an exact version or a commit sha: not every "
+                "publisher keeps a floating major tag, and one that does not "
+                "fails the job before it starts."
+            )

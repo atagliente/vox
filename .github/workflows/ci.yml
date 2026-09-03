@@ -142,7 +142,11 @@ jobs:
           exit $code
       - name: Post the figures on the pull request
         if: github.event_name == 'pull_request'
-        uses: py-cov-action/python-coverage-comment-action@v3
+        # Pinned exactly, like every third-party action here: not every
+        # publisher keeps a floating major tag, and the one that did not
+        # failed a job before it started. v3.41 rather than v4: a major
+        # bump is a change to make deliberately, not while fixing a release.
+        uses: py-cov-action/python-coverage-comment-action@v3.41
         with:
           GITHUB_TOKEN: ${{ github.token }}
           MINIMUM_GREEN: 85

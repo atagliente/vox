@@ -137,7 +137,11 @@ jobs:
           find staging -type f \( -name '*.whl' -o -name '*.tar.gz' -o -name 'vox-*' \) \
             -exec cp {} release/ \;
           ls -l release
-      - uses: sigstore/gh-action-sigstore-python@v3
+      # Pinned to an exact version because this action publishes no
+      # floating major tag: `@v3` resolves to nothing, and a job whose action
+      # cannot be resolved fails at "Set up job" before a single step runs,
+      # which is how the first attempt at this release died.
+      - uses: sigstore/gh-action-sigstore-python@v3.5.0
         with:
           inputs: ./release/*
       - uses: actions/upload-artifact@v4
