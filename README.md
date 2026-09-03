@@ -128,8 +128,10 @@ jump to either edge, `Esc` closes it.
 for `Ctrl+Shift+<letter>` as for `Ctrl+<letter>` - the two are distinguishable
 only where the terminal speaks a modern keyboard protocol. Both are bound, and
 so is `F1`, and `/keys` writes the legend into the transcript when none of
-them arrives. `^L` is the first entry on the bottom row, because the one thing
-that has to be on screen is where everything else is written down.
+them arrives. `F1/^L` is the first entry on the bottom row, because the one
+thing that has to be on screen is where everything else is written down - and
+both keys are named there, F1 first, since F1 is what people reach for when
+they want help.
 
 `/help` shows the same material with the commands first - somebody who typed
 a slash was looking for a command, somebody who pressed the key had not typed

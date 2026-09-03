@@ -467,12 +467,16 @@ async def test_a_built_window_becomes_the_active_model(
 def test_the_key_bar_leads_with_where_everything_else_is() -> None:
     """It carried five entries on the principle that a legend nobody can read
     at a glance is decoration. That was costing more than it saved: the one
-    thing that has to be on screen is where the rest is written down, so ^L
+    thing that has to be on screen is where the rest is written down, so it
     is first — and the row is dropped from the right, so it is also the entry
-    a narrow terminal keeps."""
+    a narrow terminal keeps.
+
+    Both keys are named, F1 first: F1 is what people reach for when they want
+    help, and one that works while being written down nowhere is one nobody
+    finds."""
     labels = [label for _key, label in KeyBar.KEYS]
     assert labels == ["all keys", "send", "copy/paste", "quit", "stop", "mode"]
-    assert KeyBar.KEYS[0][0] == "^L"
+    assert KeyBar.KEYS[0][0] == "F1/^L"
     assert dict(KeyBar.KEYS)["F2"] == "mode"
 
 

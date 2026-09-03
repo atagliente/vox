@@ -258,10 +258,14 @@ class KeyBar(Static):
         # Six entries. It was five, on the principle that a legend nobody can
         # read at a glance is decoration — and that principle was costing
         # more than it saved, because the one thing that has to be on screen
-        # is where everything else is written down. ^L goes first for that
+        # is where everything else is written down. It goes first for that
         # reason, and this row is dropped from the right, so it is also the
         # entry a narrow terminal keeps.
-        ("^L", "all keys"),
+        #
+        # Both keys are named, F1 first. ^L alone was not enough: F1 is what
+        # people try when they want help, and a key that works but is written
+        # down nowhere is a key nobody finds.
+        ("F1/^L", "all keys"),
         ("enter", "send"),
         ("^C/^V", "copy/paste"),
         ("^Q", "quit"),
