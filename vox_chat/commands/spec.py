@@ -167,12 +167,15 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("universe", "/universe", "Agents on the mesh, with their category"),
     CommandSpec(
         "web",
-        "/web [on|off|start|stop|status]",
+        "/web [on|off|start|stop|status|cache]",
         "Internet search on or off; start or stop the local engine",
     ),
     CommandSpec("search", "/search <query>", "Search the internet"),
     CommandSpec("fetch", "/fetch <url>", "Read one web page into the conversation"),
     CommandSpec("round", "/round", "The live log of the current consensus round"),
+    CommandSpec("rounds", "/rounds", "Every round this session, and what was said"),
+    CommandSpec("peers", "/peers", "What each mesh peer has done"),
+    CommandSpec("revoke", "/revoke [allow] <agent-id>", "Refuse a peer from now on"),
     CommandSpec(
         "consensus",
         "/consensus [on|off]",

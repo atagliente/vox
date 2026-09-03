@@ -120,6 +120,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "answer_requests": True,
         "answer_max_tokens": 512,
         "quorum": 2,
+        # A round is as slow as its slowest peer. Past this many seconds what
+        # has come back is the answer, and the rest are reported as still
+        # thinking rather than silently waited for. 0 means no cap.
+        "round_budget_seconds": 120.0,
+        # Count what each peer has done, mark an answer nobody else gave, and
+        # let a long record of standing alone count for slightly less in a
+        # vote. Bounded so it can break a tie and never overturn a majority.
+        "weigh_by_record": True,
         # The sample authority is public, so a round on it is readable by
         # anyone on the segment running VOX. Allowed, and said out loud every
         # time; set this to false to refuse instead.
@@ -141,6 +149,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "auto_results": 5,
         "auto_fetch": 2,
         "auto_max_chars": 6000,
+        # A site asking crawlers to stay out is a request, not a fence. VOX
+        # honours it because a tool that reads pages on your behalf, from
+        # servers paying for the bandwidth, should behave the way it would
+        # want one reading from it to behave. Turn it off for your own sites.
+        "respect_robots": True,
+        # How long a search is reused for. Asking the same index the same
+        # question twice in five minutes is how a session meets a captcha.
+        "cache_seconds": 900,
+        # Rank and deduplicate the results before choosing which to read.
+        "rerank": True,
     },
     # The workspace index: embeddings computed locally by Ollama, so the
     # relevant files can be put in front of a question instead of the model

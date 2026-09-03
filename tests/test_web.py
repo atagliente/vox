@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from vox_chat import web
+from vox_chat import robots, web, webcache
 from vox_chat.app import VoxApp
 from vox_chat.config import default_config, load_config, validate_config
 from vox_chat.storage import global_config_path
@@ -73,13 +73,18 @@ def engine(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture
-def wire(monkeypatch: pytest.MonkeyPatch):
+def wire(monkeypatch: pytest.MonkeyPatch, tmp_path):
     """Records every request, and answers with whatever the test queued."""
     calls: list = []
     answers: list = []
 
     def urlopen(request, timeout=None):
         calls.append((request.full_url, dict(request.headers), timeout))
+        # A polite client asks for robots.txt before it reads a page, so a
+        # stand-in for the web has to answer that too. Permissive unless a
+        # test queues its own: what is under test here is the fetching.
+        if request.full_url.endswith("/robots.txt"):
+            return FakeResponse(b"User-agent: *\nDisallow:", "text/plain")
         if not answers:
             raise AssertionError(f"unexpected request to {request.full_url}")
         return answers.pop(0)
@@ -87,6 +92,10 @@ def wire(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(web.urllib.request, "urlopen", urlopen)
     # Every host looks public unless a test says otherwise.
     monkeypatch.setattr(web, "_is_private", lambda host: False)
+    # A fresh cache and a fresh robots reader per test: one test priming the
+    # next one's answers is the kind of coupling that only shows up in CI.
+    monkeypatch.setattr(web, "CACHE", webcache.WebCache(tmp_path / "webcache"))
+    monkeypatch.setattr(web, "ROBOTS", robots.RobotsCache())
     return type("Wire", (), {"calls": calls, "answers": answers})()
 
 

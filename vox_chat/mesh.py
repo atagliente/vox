@@ -364,6 +364,10 @@ class MeshController:
         self.answer_hook = None
         self.last_error: str | None = None
         self.identity = None
+        # Peers refused by hand, before their certificates expire. Local to
+        # this process, and deliberately not persisted: a refusal that
+        # outlives the reason for it is one nobody remembers making.
+        self.revoked: set[str] = set()
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------- lifecycle
@@ -477,6 +481,7 @@ class MeshController:
         timeout: float = 90.0,
         on_event=None,
         conversation: str = "",
+        round_budget: float = 0.0,
     ) -> list[PeerAnswer]:
         """Ask every matching peer the same question, in parallel.
 
@@ -484,7 +489,7 @@ class MeshController:
         than vanishing: a silent agent and an agent that refused are different
         things, and the operator should see which happened.
         """
-        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
         from .consensus import PeerAnswer
         from .discovery import whois
@@ -531,8 +536,73 @@ class MeshController:
                 elapsed=reply.get("elapsed") or (time.monotonic() - started),
             )
 
+        # A round is as slow as its slowest peer, and one machine paging in a
+        # model can hold up four that already answered. The budget is the cap
+        # on the round rather than on each request: what has come back by then
+        # is the answer, and the peers still thinking are reported as such.
+        budget = float(round_budget or 0) or (timeout * len(targets))
+        deadline = time.monotonic() + budget
+        results: list[PeerAnswer] = []
         with ThreadPoolExecutor(max_workers=max(1, len(targets))) as pool:
-            return list(pool.map(one, targets))
+            futures = {pool.submit(one, peer): peer for peer in targets}
+            for future in as_completed(futures, timeout=None):
+                results.append(future.result())
+                if time.monotonic() >= deadline:
+                    break
+            waiting = [peer for future, peer in futures.items() if not future.done()]
+            for peer in waiting:
+                results.append(
+                    PeerAnswer(
+                        agent_id=peer.agent_id,
+                        name=peer.name or peer.agent_id,
+                        error=f"still thinking when the {budget:.0f}s round ended",
+                        elapsed=budget,
+                    )
+                )
+            # The threads are left to finish on their own rather than joined:
+            # a peer that is slow should not also make leaving slow, and
+            # nothing is waiting on what they return.
+            pool.shutdown(wait=False, cancel_futures=True)
+        # Back into the order the peers were asked in, so two rounds against
+        # the same mesh read the same way.
+        order = {peer.agent_id: index for index, peer in enumerate(targets)}
+        results.sort(key=lambda answer: order.get(answer.agent_id, len(order)))
+        return results
+
+    def revoke(self, agent_id: str) -> str:
+        """Refuse this peer from now on, without waiting for its certificate.
+
+        Certificates last a day, which is short enough to be the practical
+        form of revocation and far too long to be the only one: a peer found
+        to be compromised at noon should not be answered until midnight.
+
+        This is local. There is no revocation list on the network and no way
+        to tell the other agents — saying so is better than implying a reach
+        this does not have. Every VOX that wants this peer gone has to be
+        told, and the effect lasts as long as this process does.
+        """
+        agent = self.agent
+        if agent is None:
+            return "the mesh is offline; there is nothing to revoke from"
+        known = {peer.agent_id: peer for peer in agent.registry.snapshot()}
+        agent._rejected.add(agent_id)
+        agent.registry.forget(agent_id)
+        self.revoked.add(agent_id)
+        where = known.get(agent_id)
+        name = (where.name if where else "") or agent_id
+        return (
+            f"{name} is refused from now on: dropped from the registry, and "
+            "its announcements are ignored. This machine only — the other "
+            "agents have not been told, and cannot be."
+        )
+
+    def unrevoke(self, agent_id: str) -> str:
+        """Take a peer off the local refusal list."""
+        agent = self.agent
+        self.revoked.discard(agent_id)
+        if agent is not None:
+            agent._rejected.discard(agent_id)
+        return f"{agent_id} may announce itself again"
 
     def set_answer_hook(self, hook) -> None:
         """Install (or remove) what answers other agents' questions."""

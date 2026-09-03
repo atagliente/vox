@@ -476,11 +476,84 @@ def hackernews(query: str, limit: int = 3) -> list[Hit]:
 
 
 # The general index first, then the ones that always answer.
+# Two more general indexes, both keyless and both run by people who are not
+# in the surveillance business. They matter because the DuckDuckGo HTML
+# endpoint is the one pillar here that is scraped rather than offered, and it
+# answers with a captcha under load. Three general indexes means a rate limit
+# is a slower search rather than no search.
+MOJEEK = "https://www.mojeek.com/search"
+MARGINALIA = "https://old-search.marginalia.nu/search"
+
+_MOJEEK_RESULT = re.compile(
+    r'<a[^>]+class="[^"]*ob[^"]*"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
+    re.IGNORECASE | re.DOTALL,
+)
+_MOJEEK_ANCHOR = re.compile(
+    r'<h2>\s*<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>\s*</h2>',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _get_html(url: str, params: dict[str, str]) -> str:
+    """A GET that returns markup, or says why it did not."""
+    full = url + "?" + urllib.parse.urlencode(params)
+    try:
+        return http.request(
+            full,
+            headers={"User-Agent": BROWSER_UA},
+            timeout=UPSTREAM_TIMEOUT,
+            retry=http.OPEN_WEB,
+            max_bytes=2_000_000,
+        ).text()
+    except http.HttpError as exc:
+        if exc.kind == "http":
+            raise SearchdError(f"HTTP {exc.status}") from exc
+        raise SearchdError(exc.message) from exc
+
+
+def mojeek(query: str, limit: int = 10) -> list[Hit]:
+    """An independent index with its own crawler. No key, no rate limit worth
+    the name, and markup that has stayed the same for years."""
+    page = _get_html(MOJEEK, {"q": query})
+    found = _MOJEEK_ANCHOR.findall(page) or _MOJEEK_RESULT.findall(page)
+    hits = [
+        Hit(title=_clean(title), url=_direct(href))
+        for href, title in found
+        if href.startswith("http")
+    ]
+    if not hits:
+        raise SearchdError("returned nothing readable")
+    return hits[:limit]
+
+
+def marginalia(query: str, limit: int = 5) -> list[Hit]:
+    """A small index of the non-commercial web.
+
+    Deliberately last and deliberately few: it finds things the big indexes
+    bury, and finds nothing at all for most ordinary queries. Worth asking,
+    not worth waiting on.
+    """
+    page = _get_html(MARGINALIA, {"query": query})
+    hits = [
+        Hit(title=_clean(title), url=_direct(href))
+        for href, title in _MOJEEK_ANCHOR.findall(page)
+        if href.startswith("http")
+    ]
+    if not hits:
+        raise SearchdError("returned nothing readable")
+    return hits[:limit]
+
+
+# Asked in order, and the search stops once it has enough. DuckDuckGo first
+# because it is the broadest; the other two general indexes are what make a
+# captcha from it a slower answer rather than no answer.
 UPSTREAMS = (
     ("web", duckduckgo),
     ("wikipedia", wikipedia),
+    ("mojeek", mojeek),
     ("stackoverflow", stackexchange),
     ("hackernews", hackernews),
+    ("marginalia", marginalia),
 )
 
 

@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 from .. import consensus as cns
 from .. import images, mcp, ollama, sampling, searchd
 from .. import report as reporting
+from .. import web as web_module
 from ..tools import ToolError
 from . import spec as commands
 
@@ -302,8 +303,16 @@ def cmd_web(app: VoxApp, argument: str) -> None:
         if reason:
             app.write_error(f"NOT USABLE YET - {reason}")
         return
+    if value == "cache":
+        app.write_system(f"WEB CACHE - {web_module.CACHE.describe()}")
+        return
+    if value in ("cache-clear", "uncache"):
+        removed = web_module.CACHE.clear()
+        web_module.ROBOTS.forget()
+        app.write_system(f"WEB CACHE - {removed} entr(y/ies) dropped")
+        return
     if value:
-        app.write_error("USAGE: /web [on|off|start|stop|status]")
+        app.write_error("USAGE: /web [on|off|start|stop|status|cache|cache-clear]")
         return
     state = "ON" if settings.enabled else "OFF"
     lines = [f"WEB SEARCH IS {state} - {settings.describe()}"]
@@ -401,8 +410,55 @@ def cmd_mesh(app: VoxApp, argument: str) -> None:
     app.action_toggle_mesh()
 
 
+def cmd_revoke(app: VoxApp, argument: str) -> None:
+    """Refuse a peer from now on, without waiting for its certificate.
+
+    Certificates last a day, which is short enough to be the practical form
+    of revocation and far too long to be the only one.
+    """
+    agent_id = argument.strip()
+    if not agent_id:
+        refused = sorted(app.mesh.revoked)
+        app.write_system(
+            "REVOKED - "
+            + (", ".join(refused) if refused else "nobody")
+            + "\n  /revoke <agent-id>   ·   /revoke allow <agent-id>"
+        )
+        return
+    if agent_id.startswith("allow "):
+        app.write_system("MESH - " + app.mesh.unrevoke(agent_id[6:].strip()))
+        return
+    app.write_system("MESH - " + app.mesh.revoke(agent_id))
+
+
+def cmd_peers(app: VoxApp, argument: str) -> None:
+    """What each peer has done: answered, how fast, how often alone."""
+    records = sorted(
+        app.reputation.peers.values(), key=lambda r: (-r.asked, r.name or r.agent_id)
+    )
+    if not records:
+        app.write_system("PEERS - no round has been run yet")
+        return
+    width = max(len(r.name or r.agent_id) for r in records)
+    lines = ["PEERS - what each has done, across every round on this machine", ""]
+    lines += [
+        f"  {(r.name or r.agent_id).ljust(width)}   {r.describe()}" for r in records
+    ]
+    lines += [
+        "",
+        "A record, not a judgement: VOX cannot tell which of two disagreeing "
+        "peers is right, and does not claim to.",
+    ]
+    app.write_system("\n".join(lines))
+
+
 def cmd_universe(app: VoxApp, argument: str) -> None:
     app.action_open_universe()
+
+
+def cmd_rounds(app: VoxApp, argument: str) -> None:
+    """Every consensus round this session, and what each peer said."""
+    app.write_system(app.rounds_report())
 
 
 def cmd_round(app: VoxApp, argument: str) -> None:

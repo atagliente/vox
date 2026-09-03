@@ -17,6 +17,7 @@ import time
 from typing import TYPE_CHECKING
 
 from . import consensus as cns
+from . import reputation
 from .logging_setup import get_logger
 from .models import Message
 
@@ -125,15 +126,46 @@ class ConsensusController:
             message = Message(role="peer", content=body, name=label)
             app.session.messages.append(message)
             app.write_message(message)
+        app.remember_round(question, answers)
         app.write_system(f"CONSENSUS - {cns.describe(answers)}")
         if app.config.get("ui", {}).get("code_panel", True):
             app._panel_mode = "consensus"
             app.query_one("#side-panel").set_class(True, "visible")
             app.refresh_panel()
 
-        kind, winner, clusters = cns.verdict(
-            answers, quorum=int(settings.get("quorum", cns.DEFAULT_QUORUM))
-        )
+        quorum = int(settings.get("quorum", cns.DEFAULT_QUORUM))
+        kind, winner, clusters = cns.verdict(answers, quorum=quorum)
+
+        # Fold the round into the record, and name whoever stood alone. Marked
+        # rather than hidden: an outlier is sometimes the only one who read
+        # the question properly.
+        if settings.get("weigh_by_record", True):
+            alone = app.reputation.note_round(answers, clusters)
+            app.save_reputation()
+            if alone:
+                names = ", ".join(
+                    next(
+                        (a.name or a.agent_id for a in answers if a.agent_id == one),
+                        one,
+                    )
+                    for one in alone
+                )
+                app.write_system(
+                    f"CONSENSUS - {names} said something nobody else did. "
+                    "Shown above, and counted: VOX has no way to tell which "
+                    "of them is right."
+                )
+            weighted, weighted_winner, margin = reputation.weighted_verdict(
+                answers, clusters, app.reputation, quorum
+            )
+            if weighted != kind or weighted_winner != winner:
+                # The weights only ever break a tie, so a disagreement here is
+                # worth a line rather than a silent override.
+                app.write_system(
+                    f"CONSENSUS - the record breaks a tie (margin {margin}); "
+                    f"taking the {weighted} route"
+                )
+                kind, winner = weighted, weighted_winner
         if kind == "vote":
             agreed = len(clusters[0][1])
             usable = sum(len(members) for _, members in clusters)

@@ -458,45 +458,98 @@ decision rather than work: whether to move to an async provider client
 
 ---
 
-## 8. Web search
+## 8. Web search — `[done]`
 
-* **8.1 Source robustness**
-  * `[to do]` The `local` backend rests on scraping DuckDuckGo's HTML, which rate-limits
-    and sometimes answers with a captcha: add further keyless, stable backends
-    (Marginalia, Mojeek, Startpage's API) as additional pillars
-  * `[to do]` An on-disk cache of searches and pages with a TTL, so the same query is not
-    repeated within a session
-  * `[to do]` Honour `robots.txt` in `fetch`, with an option to override it
-  * `[to do]` Main-content extraction (readability-style) instead of raw text — `to_text`
-    currently keeps navigation and footers too
+* **8.1 Source robustness** — `[done]`
+  * `[done]` Mojeek and Marginalia added, both keyless, both with their own crawlers.
+    Three general indexes rather than one means a captcha from DuckDuckGo is a slower
+    search rather than no search. Marginalia is asked last and asked for few: it finds
+    what the big indexes bury and nothing at all for most ordinary queries — worth
+    asking, not worth waiting on. (Startpage was left out: its API needs a key, which
+    is the thing these backends exist to avoid.)
+  * `[done]` `vox_chat/webcache.py`, on disk under VOX's home, fifteen minutes for a
+    search and an hour for a page. On disk rather than in memory because the next
+    session an hour later asking the same thing is repetition too. Short by default
+    because an answer built on yesterday's cache while claiming to be current is worse
+    than a slow one — so an entry records when it was taken and a cached page says its
+    age. `/web cache` and `/web cache-clear`.
+  * `[done]` `robots.txt` honoured on `fetch` and not on search: a search endpoint is
+    being used the way it is meant to be, a page fetch is this program reading somebody's
+    site. Anything that goes wrong answers **yes** — treating an unreachable file as a
+    refusal would make an outage look like a policy. `web.respect_robots: false` for
+    your own sites.
+  * `[done]` Main-content extraction. `to_text` drops the furniture it can name, but a
+    modern page is mostly `div` and its sidebar survives that. `main_region` takes the
+    part the markup says is the article — `<main>`, `<article>`, Wikipedia's own
+    wrapper, `role="main"` — and the whole page when it says none of them. **Not a
+    readability implementation**: no scoring, no link density, no heuristics to tune,
+    because those need tuning against a corpus nobody here has.
   * `[done]` The search server runs inside VOX on `127.0.0.1:8888`, no install, no key
   * `[done]` Three documented APIs as the safety net when the general index falls over
   * `[done]` Query language inferred and Wikipedia asked in the right language
 
-* **8.2 Answer quality**
-  * `[to do]` Re-rank results by relevance before choosing which to read in full
-  * `[to do]` Multi-round search: the model refines the query when the sources fall short
-  * `[to do]` Deduplicate sources that repeat the same content
+* **8.2 Answer quality** — `[done]`
+  * `[done]` `vox_chat/ranking.py` scores on term overlap, weighted towards the title,
+    with a nudge for a source that has earned one — a nudge and not an override, or it
+    would be a bookmark list rather than a ranking. Ties keep the index's own order,
+    because where the arithmetic has nothing to say the index's judgement beats none.
+    No embeddings: this runs before anything has been fetched and has to cost nothing.
+  * `[done]` A second search when the first came back with nothing. The refinement is
+    **arithmetic, not a model call**: asking the model to rewrite the query costs a whole
+    turn of latency for a case that is usually the index having a bad minute. It drops
+    the least useful words, then quotes the two most distinctive.
+    The trigger is deliberately hard to satisfy, and the first version of it was wrong.
+    "Nothing scores against the question" fails on exactly the case that matters: ask
+    about *ring buffers* and the right answer is titled *Circular buffer*, which shares
+    not one word with the question — retrying there throws away the correct result and
+    pays a round trip for the privilege. So the count comes first: no results is a
+    failed search, a handful that mention nothing asked about is a failed search, and
+    ten results using different words is a search that worked.
+  * `[done]` Deduplication three ways: the same URL once normalised (scheme, `www.`,
+    trailing slash and tracking parameters removed), the same host and title, or
+    snippets made of largely the same words. The third is what catches a mirror, and it
+    is why this is not simply a set of URLs — a Stack Overflow answer, its mirror and a
+    site that scraped both are three URLs and one answer.
 
 ---
 
-## 9. Mesh and CONSENSUS
+## 9. Mesh and CONSENSUS — `[done]`
 
-* **9.1 Protocol**
-  * `[to do]` The README states plainly that there is no Byzantine tolerance and that a
-    lying member is believed: consider a weighted quorum or flagging outlier answers,
-    without promising what is not there
-  * `[to do]` A round is as slow as its slowest peer: add a per-round time budget with a
-    partial result
-  * `[to do]` Explicit revocation of a compromised peer before the 24h expiry
+* **9.1 Protocol** — `[done]`
+  * `[done]` `vox_chat/reputation.py`, and it is careful about exactly the thing this
+    item warns of. **The README stays true: VOX has no Byzantine tolerance**, and nothing
+    here claims to have added any. What it does is count — how often a peer answered, how
+    fast, and how often it was alone against everybody else — and *mark* an answer nobody
+    else gave. Marked, not hidden: an outlier is sometimes the only one who read the
+    question properly. The weights are bounded between 0.6 and 1.0, which is wide enough
+    to break a tie between two equal clusters and never wide enough to overturn a
+    majority — a reputation system that could decide a vote on its own would be one worth
+    attacking. A peer with fewer than four rounds counts fully, because suspicion is not
+    the default and a new peer is not a suspect.
+  * `[done]` `consensus.round_budget_seconds`, default 120. What has come back by then is
+    the answer; peers still thinking are reported as such rather than silently waited
+    for, and the results are put back into the order the peers were asked in so two
+    rounds against the same mesh read the same way. The threads are left to finish
+    rather than joined: a slow peer should not also make leaving slow.
+  * `[done]` `/revoke <agent-id>` drops a peer from the registry and ignores its
+    announcements from then on. **Local, and it says so**: there is no revocation list on
+    the network and no way to tell the other agents, and stating that is better than
+    implying a reach this does not have. Not persisted either — a refusal that outlives
+    the reason for it is one nobody remembers making.
   * `[done]` mTLS with per-agent certificates, `caps_digest` and `incarnation`
   * `[done]` Only the marked `[CNS]…[/CNS]` span leaves the machine, and a test holds that boundary
   * `[done]` A warning every time the sample CA is in use, with `consensus.allow_sample_ca`
     to refuse instead
 
-* **9.2 Mesh observability**
-  * `[to do]` Per-peer metrics (latency, response rate, disagreement) on the universe screen
-  * `[to do]` A round history readable after the session
+* **9.2 Mesh observability** — `[done]`
+  * `[done]` The universe screen carries a column per peer: answered over asked, mean
+    seconds, and how many rounds it stood alone. The state column says whether a peer is
+    reachable; this says whether it has been useful, which is the question an operator
+    asks second. `/peers` shows the same thing with room to read it, and says in as many
+    words that it is a record rather than a judgement.
+  * `[done]` `/rounds` prints every round of the session with what each peer said and how
+    long it took. Kept in the session rather than on disk, because a round belongs to the
+    conversation that caused it — and the session is what gets saved.
 
 ---
 

@@ -207,6 +207,8 @@ class FakeMesh:
         timeout=90.0,
         on_event=None,
         conversation="",
+        # A stand-in for the mesh has to tolerate what the real one takes.
+        **kwargs,
     ):
         self.asked.append(question)
         self.conversations.append(conversation)
@@ -725,6 +727,8 @@ class SlowMesh(FakeMesh):
         timeout=90.0,
         on_event=None,
         conversation="",
+        # A stand-in for the mesh has to tolerate what the real one takes.
+        **kwargs,
     ):
         import time
 

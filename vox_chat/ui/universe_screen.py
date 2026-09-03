@@ -40,9 +40,13 @@ class UniverseScreen(Screen[None]):
         Binding("question_mark", "toggle_legend", "Legend", show=False),
     ]
 
-    def __init__(self, controller: MeshController) -> None:
+    def __init__(self, controller: MeshController, reputation=None) -> None:
         super().__init__()
         self.controller = controller
+        # What each peer has done across rounds, or None when there is no
+        # record to show. The state column says whether a peer is reachable;
+        # this says whether it has been useful.
+        self.reputation = reputation
         self.legend_open = False
         self._timer = None
 

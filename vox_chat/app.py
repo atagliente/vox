@@ -28,6 +28,7 @@ from . import (
     indexing,
     ollama,
     project,
+    reputation,
     searchd,
 )
 from . import consensus as cns
@@ -224,6 +225,9 @@ class VoxApp(App[None]):
         self._consensus_running = False
         self._consensus_round = 0
         self.consensus_log = cns.RoundLog()
+        # What each peer has done across rounds, and the rounds themselves.
+        self.reputation = reputation.Reputation.load(self.reputation_file())
+        self.round_history: list[dict[str, Any]] = []
         self._round_screen: RoundScreen | None = None
         self.inspection = self._new_inspection()
         self.generation = GenerationController(self)
@@ -1790,6 +1794,7 @@ class VoxApp(App[None]):
             timeout=float(settings.get("ask_timeout_seconds", 90.0)),
             on_event=relay,
             conversation=self.session.id,
+            round_budget=float(settings.get("round_budget_seconds", 0.0) or 0.0),
         )
         self.call_from_thread(
             self.consensus_answered, question, answers, settings, round_number
@@ -1841,6 +1846,54 @@ class VoxApp(App[None]):
         """The red border is the standing reminder that we are announcing."""
         with contextlib.suppress(IndexError):  # pragma: no cover - no screen yet
             self.screen_stack[0].set_class(online, "mesh-online")
+
+    # ------------------------------------------------------------ the mesh
+
+    def reputation_file(self) -> Path:
+        return vox_home() / "peers.json"
+
+    def save_reputation(self) -> None:
+        self.reputation.save(self.reputation_file())
+
+    def remember_round(self, question: str, answers: list) -> None:
+        """Keep one round, so it can be read after the fact.
+
+        In the session rather than on disk: a round belongs to the
+        conversation that caused it, and the session is what gets saved.
+        """
+        self.round_history.append(
+            {
+                "question": question,
+                "answers": [
+                    {
+                        "agent_id": answer.agent_id,
+                        "name": answer.name,
+                        "model": answer.model,
+                        "answer": answer.answer,
+                        "error": answer.error,
+                        "elapsed": round(float(answer.elapsed or 0.0), 2),
+                    }
+                    for answer in answers
+                ],
+            }
+        )
+
+    def rounds_report(self) -> str:
+        """Every round this session, and what each peer said."""
+        if not self.round_history:
+            return "ROUNDS - none in this session yet"
+        lines = [f"ROUNDS - {len(self.round_history)} this session", ""]
+        for index, round_ in enumerate(self.round_history, start=1):
+            lines.append(f"{index}. {round_['question'][:120]}")
+            for answer in round_["answers"]:
+                who = answer["name"] or answer["agent_id"]
+                if answer["error"]:
+                    lines.append(f"     {who}: no answer ({answer['error']})")
+                else:
+                    body = " ".join(answer["answer"].split())[:100]
+                    lines.append(f"     {who} ({answer['elapsed']}s): {body}")
+            lines.append("")
+        return "\n".join(lines)
 
     # ----------------------------------------------------------------- index
 

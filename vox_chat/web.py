@@ -34,10 +34,15 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Any
 
-from . import http
+from . import http, ranking, robots, webcache
 from .logging_setup import get_logger
 
 log = get_logger("web")
+
+# One cache and one robots.txt reader for the process. Both are caches
+# with their own expiry, and both degrade to doing nothing.
+CACHE = webcache.WebCache()
+ROBOTS = robots.RobotsCache()
 
 USER_AGENT = "vox/0.1 (+https://github.com/atagliente/vox)"
 PROVIDERS = ("local", "searxng", "brave")
@@ -82,6 +87,9 @@ class WebSettings:
     auto_results: int = 5
     auto_fetch: int = 2
     auto_max_chars: int = 6000
+    respect_robots: bool = True
+    cache_seconds: int = 900
+    rerank: bool = True
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> WebSettings:
@@ -110,6 +118,9 @@ class WebSettings:
             auto_results=int(section.get("auto_results", defaults.auto_results)),
             auto_fetch=int(section.get("auto_fetch", defaults.auto_fetch)),
             auto_max_chars=int(section.get("auto_max_chars", defaults.auto_max_chars)),
+            respect_robots=bool(section.get("respect_robots", defaults.respect_robots)),
+            cache_seconds=int(section.get("cache_seconds", defaults.cache_seconds)),
+            rerank=bool(section.get("rerank", defaults.rerank)),
         )
 
     def unusable(self) -> str | None:
@@ -465,6 +476,44 @@ _CODE_ELEMENTS = re.compile(
 )
 
 
+# Where an article actually lives. Checked in order: the first one that
+# holds enough text wins, and if none does the whole body is used.
+_MAIN_REGIONS = (
+    r"<main(?:\s[^>]*)?>(.*?)</main>",
+    r"<article(?:\s[^>]*)?>(.*?)</article>",
+    r'<div[^>]+(?:id|class)="[^"]*(?:mw-parser-output|post-?content|article-?body|entry-?content|markdown-body)[^"]*"[^>]*>(.*?)</div>',
+    r'<div[^>]+role="main"[^>]*>(.*?)</div>',
+)
+
+# Below this a "main" region is a navigation stub that happens to be named
+# main, and using it would lose the page.
+_MIN_MAIN_CHARS = 400
+
+
+def main_region(html: str) -> str:
+    """The article, if the page says where it is. Otherwise the page.
+
+    `to_text` drops the furniture it can name — script, nav, footer — but a
+    modern page is mostly `div`, and its sidebar, its cookie banner and its
+    "related articles" all survive that. Where the markup says which part is
+    the article, taking that part first is worth more than any amount of
+    cleverness afterwards.
+
+    Not a readability implementation: no scoring, no link density, no
+    heuristics that need tuning. Just the handful of ways a page says "the
+    content is here", tried in order, and the whole page when it says none of
+    them.
+    """
+    for pattern in _MAIN_REGIONS:
+        for match in re.finditer(pattern, html, re.IGNORECASE | re.DOTALL):
+            region = match.group(1)
+            # Measure the text, not the markup: a div full of SVG is large
+            # and says nothing.
+            if len(re.sub(r"<[^>]+>", " ", region).strip()) >= _MIN_MAIN_CHARS:
+                return region
+    return html
+
+
 def to_text(html: str) -> tuple[str, str]:
     """``(title, text)`` from a page's source."""
     # Cut the code elements out before the parser sees them. Chasing this in
@@ -475,12 +524,21 @@ def to_text(html: str) -> tuple[str, str]:
     # and the extractor still handles the well-formed case for everything
     # else it skips.
     parser = _TextExtractor()
+    # The title lives in <head>, which the main region does not contain, so
+    # it is read from the whole page and the body from the article.
+    title_parser = _TextExtractor()
     try:
-        parser.feed(_CODE_ELEMENTS.sub(" ", html))
+        title_parser.feed(_CODE_ELEMENTS.sub(" ", html[:20_000]))
+        title_parser.close()
+    except Exception:  # pragma: no cover - a title is not worth failing over
+        pass
+    try:
+        parser.feed(_CODE_ELEMENTS.sub(" ", main_region(html)))
         parser.close()
     except Exception as exc:  # pragma: no cover - malformed beyond the parser
         raise WebError(f"could not read that page: {exc}") from exc
-    return " ".join(parser.title.split()), parser.text()
+    title = parser.title or title_parser.title
+    return " ".join(title.split()), parser.text()
 
 
 @dataclass
@@ -489,6 +547,8 @@ class Page:
     title: str
     text: str
     truncated: bool = False
+    from_cache: str = ""
+    """How old the cached copy was, when it came from the cache."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -505,6 +565,21 @@ def fetch(url: str, settings: WebSettings) -> Page:
         raise WebError("web access is off - /web on")
     if not settings.allow_fetch:
         raise WebError("web.allow_fetch is off; only search results are available")
+    if settings.respect_robots and not ROBOTS.allows(url, settings.timeout_seconds):
+        raise WebError(
+            f"{urllib.parse.urlparse(url).netloc} asks crawlers not to read that "
+            "page (robots.txt). Set web.respect_robots to false if it is yours."
+        )
+    cached = CACHE.get("page", url, float(settings.cache_seconds) * 4)
+    if cached is not None:
+        stored = cached.value
+        return Page(
+            url=str(stored["url"]),
+            title=str(stored["title"]),
+            text=str(stored["text"]),
+            truncated=bool(stored["truncated"]),
+            from_cache=cached.describe_age(),
+        )
 
     reply = _open(url, settings, max_bytes=settings.fetch_max_bytes)
     content_type = reply.content_type
@@ -527,7 +602,18 @@ def fetch(url: str, settings: WebSettings) -> Page:
                 "no readable text; raise web.fetch_max_bytes"
             )
         raise WebError(f"nothing readable at {final_url}")
-    return Page(url=final_url, title=title, text=text, truncated=truncated)
+    page = Page(url=final_url, title=title, text=text, truncated=truncated)
+    CACHE.put(
+        "page",
+        url,
+        {
+            "url": page.url,
+            "title": page.title,
+            "text": page.text,
+            "truncated": page.truncated,
+        },
+    )
+    return page
 
 
 # --------------------------------------------------------------------- output
@@ -605,6 +691,37 @@ def query_for(message: str, limit: int = 300) -> str:
     return text[:limit].strip()
 
 
+def _search_key(settings: WebSettings, query: str) -> str:
+    """One cache key. The provider is part of it: the same words asked of a
+    different index are a different search."""
+    return f"{settings.provider}|{query}"
+
+
+def cached_search(
+    query: str, settings: WebSettings, notes: list[str] | None = None
+) -> list[Result]:
+    """A search, from the cache when it is young enough to be honest.
+
+    Asking the same index the same question twice in five minutes is how a
+    session meets a captcha, and the answer would have been the same.
+    """
+    ttl = float(settings.cache_seconds)
+    if ttl > 0:
+        entry = CACHE.get("search", _search_key(settings, query), ttl)
+        if entry is not None:
+            if notes is not None:
+                notes.append(f"from cache, {entry.describe_age()}")
+            return [Result(**item) for item in entry.value]
+    results = search(query, settings, notes)
+    if ttl > 0:
+        CACHE.put(
+            "search",
+            _search_key(settings, query),
+            [item.to_dict() for item in results],
+        )
+    return results
+
+
 def gather(question: str, settings: WebSettings) -> Sources:
     """Search, then read the first few results. Raises only if the search does.
 
@@ -613,9 +730,25 @@ def gather(question: str, settings: WebSettings) -> Sources:
     """
     query = query_for(question)
     sources = Sources(query=query)
-    sources.results = search(query, settings, sources.notes)[
-        : max(1, settings.auto_results)
-    ]
+    tried = [query]
+    found = cached_search(query, settings, sources.notes)
+
+    # One more try when the first came back with nothing that looks like an
+    # answer. Arithmetic, not a model call: a second search that needs the
+    # model to write it costs a whole turn of latency for a case that is
+    # usually the index having a bad minute.
+    if settings.rerank and ranking.thin(found, question):
+        second = ranking.refine(question, tried)
+        if second:
+            sources.notes.append(f"nothing close; also searched {second!r}")
+            tried.append(second)
+            found += cached_search(second, settings, sources.notes)
+
+    if settings.rerank:
+        # Deduplicate first: ranking a mirror above the original wastes the
+        # slot either way, and there is no point scoring the same page twice.
+        found = ranking.rank(ranking.deduplicate(found), question)
+    sources.results = found[: max(1, settings.auto_results)]
 
     if not settings.allow_fetch:
         return sources

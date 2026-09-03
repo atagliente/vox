@@ -313,6 +313,25 @@ so "read this URL" cannot be turned into a way to read your router's admin page,
 your model server, or a cloud metadata endpoint from inside your network.
 `web.allow_private_addresses` lifts that when you mean it.
 
+### How a search is spent
+
+Ten links come back and only two get read, so which two matters. VOX
+deduplicates first - the same URL written differently, the same host and
+title, or two snippets made of the same words, which is how a mirror is
+caught - then ranks what is left by how much it overlaps the question, with
+the title counting for more than the snippet. When nothing scores, it tries
+one more query built from the question's own distinctive words rather than
+asking the model to write one.
+
+Searches and pages are cached for fifteen minutes and an hour. A page from
+the cache says how old it is. `/web cache` shows what is kept, `/web
+cache-clear` empties it.
+
+`robots.txt` is honoured when fetching a page and ignored when searching: a
+search endpoint is being used the way it is meant to be, a page fetch is this
+program reading somebody's site. `web.respect_robots: false` turns it off for
+sites that are yours.
+
 ## The mesh
 
 `F3` puts VOX on the local agent mesh: the border turns red, the header reads
@@ -481,6 +500,20 @@ beside it:
 The controllers hold the application rather than inheriting from it. Textual's
 `@work` decorators stay on `VoxApp`, because putting something on a thread is
 the framework's business and belongs with the widget.
+
+### What the mesh does not promise
+
+There is no Byzantine tolerance. A peer that authenticates and then lies is
+believed: mTLS answers *who is this*, not *is this true*. VOX counts what each
+peer has done - `/peers` - and marks an answer nobody else gave, but marking
+is all it does, because it cannot tell which of two disagreeing peers is
+right. An outlier is sometimes the only one who read the question properly.
+
+`/revoke <agent-id>` refuses a peer before its certificate expires. It is
+local to this machine: there is no revocation list on the network and no way
+to tell the other agents.
+
+`/rounds` prints every round of the session and what each peer said.
 
 ## More
 
