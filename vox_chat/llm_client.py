@@ -13,13 +13,13 @@ import threading
 import time
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
-
-import openai
-from openai import OpenAI
+from typing import TYPE_CHECKING, Any, Literal
 
 from .models import Message, ToolCall
 from .reasoning import ThinkSplitter
+
+if TYPE_CHECKING:  # the SDK is loaded lazily; see _openai()
+    from openai import OpenAI
 from .usage import TokenUsage
 
 ErrorKind = Literal["connection", "timeout", "http", "cancelled", "protocol", "context"]
@@ -222,6 +222,24 @@ def consume_stream(
     yield StreamEvent("done", finish_reason=finish_reason)
 
 
+def _openai():
+    """The SDK, imported the first time something actually needs it.
+
+    Measured: importing ``openai`` is 1.67s of VOX's 2.6s startup, which is
+    most of the wait between typing `vox` and seeing a screen. Nothing needs
+    it until a provider is contacted — the parser, the transcript, the
+    configuration and every command are indifferent to it — so it is loaded
+    on the first construction of a client instead of on the way in.
+
+    Cached by ``sys.modules``, so this is a dictionary lookup after the first
+    call. Nothing here is on a hot path anyway: it runs once per client and
+    once per exception.
+    """
+    import openai
+
+    return openai
+
+
 def to_api_messages(messages: Sequence[Message]) -> list[dict[str, Any]]:
     """Render conversation messages for the chat completions endpoint."""
     payload: list[dict[str, Any]] = []
@@ -248,7 +266,7 @@ class LLMClient:
         self.logprobs_refused = False
         """Set when the provider rejected a request carrying logprobs."""
         self._api_key = api_key or "not-needed"
-        self._client = OpenAI(
+        self._client = _openai().OpenAI(
             base_url=base_url, api_key=self._api_key, timeout=self.timeout
         )
         self._stream_lock = threading.Lock()
@@ -257,7 +275,7 @@ class LLMClient:
 
     def _new_request_client(self) -> OpenAI:
         """Return a disposable client so an in-flight request can be aborted."""
-        return OpenAI(
+        return _openai().OpenAI(
             base_url=self.base_url,
             api_key=self._api_key,
             timeout=self.timeout,
@@ -313,20 +331,20 @@ class LLMClient:
                 temperature=0.0,
                 extra_body=self.extra_body or None,
             )
-        except openai.APITimeoutError as exc:
+        except _openai().APITimeoutError as exc:
             waited = time.monotonic() - started
             raise LLMError(
                 "timeout",
                 f"the model did not load within {waited:.0f}s",
                 str(exc),
             ) from exc
-        except openai.APIConnectionError as exc:
+        except _openai().APIConnectionError as exc:
             raise LLMError(
                 "connection", f"cannot reach provider: {self.base_url}", str(exc)
             ) from exc
-        except openai.APIStatusError as exc:
+        except _openai().APIStatusError as exc:
             raise _status_error(exc) from exc
-        except openai.OpenAIError as exc:
+        except _openai().OpenAIError as exc:
             raise LLMError("protocol", f"preload failed: {exc}", str(exc)) from exc
         return time.monotonic() - started
 
@@ -345,19 +363,19 @@ class LLMClient:
             if timeout is not None:
                 client = client.with_options(timeout=timeout)
             response = client.models.list()
-        except openai.APITimeoutError as exc:
+        except _openai().APITimeoutError as exc:
             raise LLMError(
                 "timeout", f"provider timed out: {self.base_url}", str(exc)
             ) from exc
-        except openai.APIConnectionError as exc:
+        except _openai().APIConnectionError as exc:
             raise LLMError(
                 "connection", f"cannot reach provider: {self.base_url}", str(exc)
             ) from exc
-        except openai.APIStatusError as exc:
+        except _openai().APIStatusError as exc:
             raise LLMError(
                 "http", f"provider returned HTTP {exc.status_code}", str(exc)
             ) from exc
-        except openai.OpenAIError as exc:
+        except _openai().OpenAIError as exc:
             raise LLMError("protocol", f"provider error: {exc}", str(exc)) from exc
         return sorted(model.id for model in response.data)
 
@@ -439,7 +457,7 @@ class LLMClient:
             try:
                 try:
                     stream = request_client.chat.completions.create(**payload)
-                except openai.APIStatusError as exc:
+                except _openai().APIStatusError as exc:
                     retried = False
                     if top_logprobs and _rejects_logprobs(exc):
                         payload.pop("logprobs", None)
@@ -452,24 +470,24 @@ class LLMClient:
                     if not retried:
                         raise
                     stream = request_client.chat.completions.create(**payload)
-            except openai.APITimeoutError as exc:
+            except _openai().APITimeoutError as exc:
                 if cancel is not None and cancel.is_set():
                     yield StreamEvent("cancelled")
                     return
                 raise LLMError("timeout", "request timed out", str(exc)) from exc
-            except openai.APIConnectionError as exc:
+            except _openai().APIConnectionError as exc:
                 if cancel is not None and cancel.is_set():
                     yield StreamEvent("cancelled")
                     return
                 raise LLMError(
                     "connection", f"cannot reach provider: {self.base_url}", str(exc)
                 ) from exc
-            except openai.APIStatusError as exc:
+            except _openai().APIStatusError as exc:
                 if cancel is not None and cancel.is_set():
                     yield StreamEvent("cancelled")
                     return
                 raise _status_error(exc) from exc
-            except openai.OpenAIError as exc:
+            except _openai().OpenAIError as exc:
                 if cancel is not None and cancel.is_set():
                     yield StreamEvent("cancelled")
                     return
@@ -494,22 +512,22 @@ class LLMClient:
 
             try:
                 yield from consume_stream(stream, cancel)
-            except openai.APITimeoutError as exc:
+            except _openai().APITimeoutError as exc:
                 if cancel is not None and cancel.is_set():
                     yield StreamEvent("cancelled")
                     return
                 raise LLMError("timeout", "stream timed out", str(exc)) from exc
-            except openai.APIConnectionError as exc:
+            except _openai().APIConnectionError as exc:
                 if cancel is not None and cancel.is_set():
                     yield StreamEvent("cancelled")
                     return
                 raise LLMError("connection", "stream interrupted", str(exc)) from exc
-            except openai.APIStatusError as exc:
+            except _openai().APIStatusError as exc:
                 if cancel is not None and cancel.is_set():
                     yield StreamEvent("cancelled")
                     return
                 raise _status_error(exc) from exc
-            except openai.OpenAIError as exc:
+            except _openai().OpenAIError as exc:
                 if cancel is not None and cancel.is_set():
                     yield StreamEvent("cancelled")
                     return
@@ -555,7 +573,7 @@ def _unwrap_message(text: str) -> str:
     return text
 
 
-def _status_detail(exc: openai.APIStatusError) -> str:
+def _status_detail(exc: _openai().APIStatusError) -> str:
     """Best-effort human text out of an HTTP error body."""
     body = getattr(exc, "body", None)
     if isinstance(body, dict):
@@ -586,7 +604,7 @@ def context_overflow(text: str) -> tuple[int, int] | None:
     return None
 
 
-def _status_error(exc: openai.APIStatusError) -> LLMError:
+def _status_error(exc: _openai().APIStatusError) -> LLMError:
     """The failure, named as precisely as the body allows."""
     detail = _status_detail(exc)
     room = context_overflow(detail) or context_overflow(str(exc))
@@ -601,14 +619,14 @@ def _status_error(exc: openai.APIStatusError) -> LLMError:
     return LLMError("http", f"provider returned HTTP {exc.status_code}", detail)
 
 
-def _rejects_logprobs(exc: openai.APIStatusError) -> bool:
+def _rejects_logprobs(exc: _openai().APIStatusError) -> bool:
     """True when the provider refused the measurement, not the request."""
     if exc.status_code not in (400, 404, 422, 501):
         return False
     return "logprob" in f"{exc} {_status_detail(exc)}".lower()
 
 
-def _rejects_stream_options(exc: openai.APIStatusError) -> bool:
+def _rejects_stream_options(exc: _openai().APIStatusError) -> bool:
     """True when the provider refused the usage option rather than the call."""
     if exc.status_code not in (400, 404, 422):
         return False

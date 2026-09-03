@@ -12,6 +12,36 @@ machine and version named, not estimated.
 
 ## Unreleased
 
+### Runtime performance
+
+**2026-09-03** — measured on Windows 11 (10.0.26200), Python 3.12.5,
+`openai 2.41.1`, `textual 8.2.8`.
+
+- **Startup: 2,566 ms → 806 ms.** `python -X importtime` said where it went:
+  importing the `openai` SDK was 1,674 ms of it, most of the wait between
+  typing `vox` and seeing a screen. Nothing needs the SDK until a provider is
+  contacted, so it is imported on the first client rather than on the way in.
+  `cryptography` was already lazy — the roadmap assumed it was not, and
+  measuring first is what showed that.
+- **One handover to the UI thread per frame, not per token.** A 6,000-token
+  answer crossed `call_from_thread` 6,000 times; it now crosses **87**. The
+  cost was never the hop: it was the transcript refresh and re-layout it
+  caused at the far end, once per token. Text is gathered on the worker
+  thread for 50 ms or 400 characters, whichever comes first — under what a
+  person perceives as delay, and well over any local model's per-token
+  interval. Anything that is not text flushes the waiting text first, so a
+  tool result can never arrive before the sentence that led to it.
+- **What `/inspect` costs, at last with a figure — and it is not where it was
+  said to be.** Assembling a stream carrying logprobs runs at 105k–128k
+  tokens/s against a fake provider, the same as one without it to within
+  noise, and which of the two comes out ahead varies run to run. The
+  description "several times heavier" was true of the feature and wrong about
+  the location: the weight is the provider sending a distribution per token
+  over the wire, and the inspect screen redrawing a table that grows by a row
+  per token. Neither is in `consume_stream`, which is where the description
+  would have sent anyone looking. `tests/test_performance.py` keeps the
+  measurement honest.
+
 ### The GPU
 
 **2026-09-02**

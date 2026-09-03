@@ -610,19 +610,38 @@ decision rather than work: whether to move to an async provider client
 
 ---
 
-## 11. Runtime performance
+## 11. Runtime performance — `[done]`
 
-* **11.1 The generation path**
-  * `[to do]` Rate-limit transcript refreshes: every delta currently crosses
-    `call_from_thread`, which is the dominant UI-side cost on long answers
-  * `[to do]` Measure and record in `CHANGELOG.md` the tokens/s with and without
-    `/inspect` — it is already described as "several times heavier" without a figure
+* **11.1 The generation path** — `[done]`
+  * `[done]` `vox_chat/coalesce.py`. A 6,000-token answer crossed
+    `call_from_thread` **6,000 times; it now crosses 87**. The cost was never the hop
+    itself: it was the transcript refresh and re-layout it caused at the far end, once
+    per token. Text is gathered on the worker thread for 50 ms or 400 characters,
+    whichever comes first — under the ~100 ms where a person starts to perceive delay,
+    and well over any local model's per-token interval, so it still reads as streaming.
+    Anything that is not text flushes the waiting text before it goes, because a tool
+    result arriving before the sentence that led to it would be a transcript nobody
+    could read.
+  * `[done]` Measured, and **the description was wrong about where the weight is**.
+    Assembling a stream carrying logprobs runs at 105k–128k tokens/s against a fake
+    provider — the same as one without, to within noise, and which comes out ahead
+    varies run to run. So "several times heavier" is true of the feature and false of
+    `consume_stream`, which is exactly where the phrase would have sent someone
+    optimising it. The weight is the provider sending a distribution per token over the
+    wire and the inspect screen redrawing a table that grows by a row per token. Both
+    figures are in `CHANGELOG.md` with the machine they were taken on, and
+    `tests/test_performance.py` keeps them honest.
   * `[done]` GPU fill measured with `nvidia-smi` rather than inferred, with the real
     numbers on an MX150
 
-* **11.2 Startup**
-  * `[to do]` Measure startup time and import `cryptography` and the mesh modules lazily
-    when the mesh is off (which is the default)
+* **11.2 Startup** — `[done]`
+  * `[done]` Measured first, which is what showed the item's premise was out of date:
+    **`cryptography` was already lazy** — nothing imports it until the mesh is switched
+    on. `python -X importtime` named the real cost instead: the `openai` SDK, **1,674 ms
+    of a 2,566 ms startup**. Nothing needs it until a provider is contacted — the
+    parser, the transcript, the configuration and every command are indifferent to it —
+    so it is imported on the first client rather than on the way in.
+    **2,566 ms → 806 ms**, three times faster to a screen.
   * `[done]` Model preload on the server, with a timeout and cancellation
 
 ---

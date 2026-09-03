@@ -15,7 +15,7 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
-from . import compaction, fitting, indexing, sampling
+from . import coalesce, compaction, fitting, indexing, sampling
 from .agent import AgentEvent, run_turn
 from .llm_client import LLMError, context_overflow
 from .logging_setup import get_logger
@@ -139,6 +139,27 @@ class GenerationController:
             ConfirmModal(f"AUTHORIZE {name.upper()}?", description),
         )
         return bool(result)
+
+    def append_text(self, text: str) -> None:
+        """A batch of streamed text, on the UI thread.
+
+        The same work ``handle_event`` does for a text event, done once for
+        several of them: one refresh, one scroll, one look for a fence.
+        """
+        app = self.app
+        app.clear_thinking()
+        if app.live_meter is not None:
+            app.live_meter.add_text(text)
+        if app._assistant_box is None:
+            app._assistant_box = app.write_message(
+                Message(role="assistant", content="")
+            )
+        app._assistant_box.append_text(text)
+        app.transcript.scroll_end(animate=False)
+        # Re-parsing on every batch would still be wasteful; a fence or a
+        # line break is the only thing that can change the blocks.
+        if any(marker in text for marker in ("`", "~", "\n")):
+            app.refresh_code_blocks(app._assistant_box.message.content)
 
     def handle_event(self, event: AgentEvent) -> None:
         app = self.app
@@ -336,7 +357,7 @@ class GenerationController:
         for _ in range(3):
             produced = False
             try:
-                for event in run_turn(
+                turn = run_turn(
                     client=app.client,
                     messages=messages,
                     model=model,
@@ -358,9 +379,16 @@ class GenerationController:
                     response_format=app.response_format,
                     undo=app.undo,
                     todos=app.todos,
-                ):
+                )
+                # One hop to the UI thread per frame rather than per token.
+                # The cost was never the hop: it was the transcript refresh
+                # and re-layout it caused at the far end, once per token.
+                for batch in coalesce.coalesce(turn):
                     produced = True
-                    app.call_from_thread(self.handle_event, event)
+                    if batch.is_text:
+                        app.call_from_thread(self.append_text, batch.text)
+                    else:
+                        app.call_from_thread(self.handle_event, batch.event)
             except LLMError as exc:
                 if app._shutting_down:
                     return
