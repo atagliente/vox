@@ -446,7 +446,7 @@ decision rather than work: whether to move to an async provider client
   * `[done]` The README sample output said `openai 3.3.1`, which is a version that does
     not exist. It now shows what is actually installed, cryptography included.
 
-* **6.2 Project posture** — `[to complete]` (only signed tags)
+* **6.2 Project posture** — `[done]`
   * `[done]` `SECURITY.md`: private reporting through GitHub advisories, and — the part
     worth more than the procedure — **what VOX defends and what it does not**. The mesh
     has no Byzantine tolerance, the sample CA is not a secret, a confirmed command runs
@@ -459,13 +459,18 @@ decision rather than work: whether to move to an async provider client
     `file:///etc/passwd`. One egress point means one place to refuse it, and it does now.
     The two remaining findings are deliberate binds to every interface, and say why
     where the scanner looks.
-  * `[to complete]` Signed release tags. Needs a key that is yours, published somewhere
-    people can check it against, and a decision about which: a GPG key (`git tag -s`,
-    checkable with `git verify-tag`, and GitHub shows Verified once the public key is on
-    your account) or Sigstore's keyless signing (nothing to keep safe, but ties the tag
-    to a GitHub identity rather than to you). Neither can be set up from inside the
-    repository, and generating a signing key on your behalf is not something to do
-    without being asked.
+  * `[done]` Signed releases, in `.github/workflows/release.yml`. The choice was
+    between a GPG key and Sigstore, and Sigstore won on the thing that matters over
+    years rather than at the first release: **there is no private key**. A GPG key has
+    to be generated, protected, published somewhere people can check it against, and
+    eventually rotated — four ways for a signature to become worthless, and generating
+    one on somebody's behalf is not a thing to do unasked. Sigstore signs with the
+    workflow's own OIDC identity and records the certificate in a public transparency
+    log, so what a verifier checks is "GitHub Actions, this repository, this workflow"
+    rather than "a key I found on a web page". Every artefact on the Release — both
+    distributions and all three executables — is signed. What this does *not* give you
+    is a `Verified` badge on the tag itself: that is `git tag -s` and a GPG key on your
+    account, and it is still yours if you want it.
   * `[done]` Secrets redacted in the logs (`RedactingFilter`)
   * `[done]` Private and loopback addresses refused *after* name resolution, not on the string
   * `[done]` Fetched content labelled as data, not instructions, before it reaches the model
@@ -477,25 +482,32 @@ decision rather than work: whether to move to an async provider client
 
 ## 7. Distribution and packaging — `[to complete]`
 
-* **7.1 Publishing** — `[to complete]`
+* **7.1 Publishing** — `[to complete]` (only the PyPI account)
   * `[to complete]` Publishing to **PyPI**. Needs an account, the project name reserved
-    on it, and a decision about who owns it. The build side is ready — `python -m build`
-    produces a wheel and an sdist that `twine check` passes — so what is left is the act
-    of publishing, which is yours.
-  * `[to complete]` The release workflow. Deliberately not written: a workflow that
-    publishes to an account that does not exist yet is a file that looks finished and is
-    not, and OIDC trusted publishing has to be configured **on PyPI first** (the
-    publisher, the repository, the workflow filename) or the job fails at the last step
-    with a message about a mismatched claim. Set the publisher up, then it is twenty
-    lines.
-  * `[to complete]` Attaching the artefacts to the GitHub Release — the same workflow.
+    on it, and a decision about who owns it. Everything around that act is now in
+    place: the `pypi` job is the last one in `release.yml`, uses OIDC trusted
+    publishing so there is no token to store, and is **switched off** until the
+    repository variable `PUBLISH_TO_PYPI` is set to `true`. That switch exists because
+    trusted publishing has to be configured on PyPI *first* — the publisher, this
+    repository, `release.yml` — or the job fails at the last step over a mismatched
+    claim; a job that cannot work should not look like it can. Set the publisher up,
+    set the variable, and the next tag publishes.
+  * `[done]` The release workflow. A tag matching `v*` checks itself against
+    `vox_chat/__init__.py` before anything else — a release whose version disagrees
+    with its tag is wrong in a way nobody notices until they install it — then builds
+    the wheel and sdist once, signs everything, and makes the Release.
+  * `[done]` Attaching the artefacts to the GitHub Release — the same workflow, with
+    the sigstore bundles beside them.
   * `[done]` One version, in `vox_chat/__init__.py`, read from there by the build.
     `pyproject.toml` carried a second copy with nothing checking they agreed.
-  * `[to complete]` A single-file executable. Worth saying why this is not a quick job:
-    `pyinstaller` would have to be taught about `demo_pki`, the Textual CSS and the
-    `cryptography` binary wheel, the result is per-platform so it needs a build on each
-    of the three runners, and it is 40-60 MB that somebody has to host — which is the
-    Release, which is the workflow above. It follows PyPI rather than preceding it.
+  * `[done]` A single-file executable, one per platform, built by the same workflow
+    and attached to the Release. The Textual CSS turned out to be a non-problem —
+    `branding.py` holds it in Python, so there was never a data file to find — but the
+    other three were real: `--collect-all textual --collect-all rich` for the widgets
+    and styles those import by name at runtime, `--add-data` for `demo_pki`, and
+    `os.pathsep` differing on Windows, which makes that flag two different flags. Each
+    build proves the bundle imports by running `--version`; there is no terminal on a
+    runner, so that is as far as a smoke test can honestly go.
 
 
 
@@ -510,13 +522,18 @@ decision rather than work: whether to move to an async provider client
     installers and `doctor.py` all said 3.11. The three that are executable were right;
     the prose was wrong, and now says 3.11+.
 
-* **7.3 Installation** — `[to complete]`
+* **7.3 Installation** — `[to complete]` (only the accounts)
   * `[done]` Exercised in CI on clean Linux, macOS and Windows runners, twice each to
     hold them to the idempotence they claim, then uninstalled. See 1.2.
-  * `[to complete]` Homebrew and AUR. Both package what is on PyPI, so both wait on 7.1.
-    A Homebrew formula also wants its own tap repository, and an AUR package needs an
-    AUR account and an SSH key registered with it — neither is something to create on
-    somebody's behalf.
+  * `[to complete]` Homebrew and AUR — **the files are written**, in
+    `packaging/homebrew/vox.rb` and `packaging/aur/PKGBUILD`, and neither waits on
+    PyPI any more: both build from the GitHub Release tarball, which now exists. What
+    is left is publishing them, and that is an account in both cases — a tap
+    repository called `homebrew-vox` under your name, and an AUR account with an SSH
+    key registered to it. `packaging/README.md` has the commands for each. Neither
+    file carries an invented checksum: Homebrew's is the zero placeholder
+    `brew audit --strict` complains about, the AUR's is `SKIP` for `updpkgsums`,
+    because a plausible wrong number installs the wrong thing quietly.
   * `[done]` Idempotent POSIX and PowerShell installers, no administrator rights needed
   * `[done]` `vox doctor` with distinct exit codes (0/1/2)
 

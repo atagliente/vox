@@ -1,0 +1,55 @@
+# Maintainer: atagliente <atagliente1988@gmail.com>
+#
+# AUR package for VOX. It builds from the GitHub Release tarball rather than
+# from PyPI, so it does not depend on a PyPI account existing.
+#
+# Publishing it needs an AUR account with an SSH key registered against it —
+# that is the part nobody can do on somebody else's behalf. Once you have
+# one:
+#
+#     git clone ssh://aur@aur.archlinux.org/vox.git
+#     cp PKGBUILD .SRCINFO vox.git/ && cd vox.git
+#     updpkgsums && makepkg --printsrcinfo > .SRCINFO
+#     git commit -am "vox 0.1.0" && git push
+#
+# `updpkgsums` fills in the sha256 below; it is SKIP here rather than a wrong
+# number, because a wrong number fails loudly and a plausible one does not.
+
+pkgname=vox
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Retro terminal chat client for OpenAI-compatible providers"
+arch=('any')
+url="https://github.com/atagliente/vox"
+license=('custom:PolyForm-Noncommercial-1.0.0')
+depends=(
+  'python>=3.11'
+  'python-openai'
+  'python-textual'
+  'python-rich'
+  'python-cryptography'
+)
+makedepends=('python-build' 'python-installer' 'python-hatchling' 'python-wheel')
+checkdepends=('python-pytest' 'python-pytest-asyncio' 'python-pytest-xdist' 'python-hypothesis')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname-$pkgver"
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  # The suite binds loopback sockets and starts subprocesses; it does not
+  # reach the network. Every test gets its own VOX_HOME from conftest.py, so
+  # nothing here touches the build user's real configuration.
+  python -m pytest -q -n auto
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}
