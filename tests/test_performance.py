@@ -79,9 +79,10 @@ def test_what_inspection_costs_on_the_assembly_path() -> None:
     """Inspection has been called "several times heavier" without a figure.
 
     Here is one: assembling a stream that carries logprobs runs at about
-    **1.6x the cost** of one that does not — steady across runs, and steadily
-    in the same direction. One `TokenSample` and its alternatives per token,
-    which is real and is bounded.
+    **1.6x the cost** of one that does not on Python 3.12, and about 1.8x on
+    3.13 — steady across runs on a quiet machine, and steadily in the same
+    direction. One `TokenSample` and its alternatives per token, which is
+    real and is bounded.
 
     Getting this number took two attempts and the first was wrong in both
     directions. It compared two single passes while fifteen other test
@@ -100,32 +101,50 @@ def test_what_inspection_costs_on_the_assembly_path() -> None:
     print(f"\n  plain    {plain:>10,.0f} tokens/s")
     print(f"  inspect  {measured:>10,.0f} tokens/s   ({ratio:.2f}x)")
     assert measured > 0
-    # Around 1.6x, with room for a slower or faster machine. Tight enough
-    # that turning the per-token bookkeeping into something quadratic would
-    # trip it, loose enough not to fail on a shared runner.
-    assert 1.0 < ratio < 2.6, (
+    # The bound is far wider than the figure, on purpose. Quiet, this reads
+    # 1.5-1.7x on 3.12 and 1.74-1.82x on 3.13; under a suite that owns every
+    # core it has read past 3x, because best-of-N narrows contention without
+    # removing it. A bound tight enough to be interesting is a bound that
+    # fails on a shared runner, and a test that only passes on an idle
+    # machine gets deleted rather than believed. What this catches is the
+    # regression worth catching: per-token bookkeeping turning quadratic,
+    # which is an order of magnitude and not a factor.
+    assert 0.5 < ratio < 6, (
         f"the assembly path is {ratio:.2f}x with logprobs; it has measured "
-        "1.5-1.7x, so something in consume_stream changed"
+        "1.5-1.8x quiet, so something in consume_stream changed shape"
     )
 
 
 def test_recording_a_token_is_constant_work() -> None:
     """The inspection run holds every token of an answer. If adding the
-    thousandth cost more than adding the tenth, a long answer would slow
-    down as it went."""
-    run = InspectionRun(
-        model="m", provider="p", top_k=5, criteria=criteria_from_config({})
+    thousandth cost more than adding the tenth, a long answer would slow down
+    as it went — and the slowing would arrive exactly when an answer is long
+    enough to be worth inspecting.
+
+    Best of three, for the same reason as `rate` above: two single passes
+    under a suite that owns every core measure the scheduler. This test
+    caught that on Python 3.13 and nowhere else, which is what a flaky
+    threshold looks like from the outside.
+    """
+    best_first = best_later = float("inf")
+    for _ in range(3):
+        run = InspectionRun(
+            model="m", provider="p", top_k=5, criteria=criteria_from_config({})
+        )
+
+        def add(count: int, run: InspectionRun = run) -> float:
+            started = time.perf_counter()
+            for index in range(count):
+                run.add(f"t{index}", -0.5, [], "answer")
+            return time.perf_counter() - started
+
+        best_first = min(best_first, add(2000))
+        best_later = min(best_later, add(2000))
+
+    assert best_later < best_first * 4, (
+        f"adding to a long run took {best_later / best_first:.1f}x adding to a "
+        "short one; that is the shape of quadratic bookkeeping"
     )
-
-    def add(count: int) -> float:
-        started = time.perf_counter()
-        for index in range(count):
-            run.add(f"t{index}", -0.5, [], "answer")
-        return time.perf_counter() - started
-
-    first = add(2000)
-    later = add(2000)
-    assert later < first * 4, "adding to a long run costs the same as to a short one"
 
 
 def test_batching_the_ui_hops_costs_nothing() -> None:

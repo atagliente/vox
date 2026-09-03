@@ -80,16 +80,20 @@ jobs:
         # purpose, and a report full of those is a report nobody reads.
         run: bandit -r vox_chat -ll
       - name: The lock file still matches pyproject.toml
+        # uv, not pip-compile: pip-tools resolves for the machine it runs on,
+        # so a lock made on Windows and checked on Linux differs by
+        # colorama every single time. --universal emits the markers instead,
+        # which makes the file correct everywhere and this check meaningful.
         run: |
-          pip install pip-tools
-          pip-compile --generate-hashes --quiet             --output-file=/tmp/check.lock pyproject.toml
+          pip install uv
+          uv pip compile --universal --generate-hashes --quiet             --python-version 3.11             --output-file /tmp/check.lock pyproject.toml
           # Compare the pins, not the header comments.
           grep -v '^#' requirements.lock | grep -v '^$' > /tmp/have.txt
-          grep -v '^#' /tmp/check.lock  | grep -v '^$' > /tmp/want.txt
-          diff /tmp/have.txt /tmp/want.txt || {
+          grep -v '^#' /tmp/check.lock   | grep -v '^$' > /tmp/want.txt
+          if ! diff -u /tmp/have.txt /tmp/want.txt; then
             echo "requirements.lock is stale; regenerate it (see its header)."
             exit 1
-          }
+          fi
 
   coverage:
     # One run, on one interpreter: coverage is a number about the code, not

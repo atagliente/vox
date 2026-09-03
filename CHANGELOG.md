@@ -32,10 +32,10 @@ machine and version named, not estimated.
   interval. Anything that is not text flushes the waiting text first, so a
   tool result can never arrive before the sentence that led to it.
 - **What `/inspect` costs, at last with a figure: about 1.6x on the assembly
-  path.** 272k tokens/s plain against 173k with logprobs, best of five passes
-  against a fake provider — steady across runs and steadily in the same
-  direction. One `TokenSample` and its alternatives per token, which is real
-  and bounded.
+  path** on Python 3.12, and 1.8x on 3.13. 272k tokens/s plain against 173k
+  with logprobs, best of five passes against a fake provider — steady across
+  runs on a quiet machine and steadily in the same direction. One
+  `TokenSample` and its alternatives per token, which is real and bounded.
   Getting there took two attempts, and the first was wrong in both
   directions. It compared two single passes while fifteen other test
   processes ran, so it measured the scheduler: 3.4x on one run, 0.8x on the

@@ -132,8 +132,31 @@ def test_an_unclosed_comment_does_not_leak_the_rest_of_the_page() -> None:
     assert "Real prose." in text
     assert "alert(1)" not in text, "the script body is furniture, not prose"
     assert "<script" not in text, "and neither is the markup around it"
-    # What follows the script is ordinary content again, and stays.
-    assert "hidden" in text
+    # And nothing after it, on every interpreter. Python 3.11 and 3.12 read an
+    # unclosed comment differently — to the end of the document, or up to the
+    # first ">" and then carry on — so this used to pass on 3.12 and fail on
+    # 3.11. web.close_at_unterminated_comment settles it the way 3.11 and a
+    # browser do, rather than leaving it to whichever interpreter is running.
+    assert "hidden" not in text
+
+
+def test_a_closed_comment_does_not_swallow_the_page() -> None:
+    """The cut is for comments nobody closed. An ordinary one is just a
+    comment, and everything after it is still the page."""
+    _title, text = web.to_text(
+        "<html><body><p>A</p><!-- a note --><p>B</p></body></html>"
+    )
+    assert "A" in text and "B" in text
+
+
+def test_several_comments_are_walked_not_guessed() -> None:
+    """Two closed comments and then an open one: the cut belongs at the third,
+    not at the first."""
+    assert (
+        web.close_at_unterminated_comment("a<!--x-->b<!--y-->c<!--never closed")
+        == "a<!--x-->b<!--y-->c"
+    )
+    assert web.close_at_unterminated_comment("no comments here") == "no comments here"
 
 
 def test_entities_and_odd_markup_survive() -> None:

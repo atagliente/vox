@@ -23,6 +23,8 @@ import re
 import urllib.parse
 from dataclasses import dataclass
 
+from . import urls
+
 WORD = re.compile(r"[\w']+", re.UNICODE)
 
 # Words that appear in every question and rank nothing.
@@ -115,10 +117,7 @@ def normalise(url: str) -> str:
     dropped, host lowercased and stripped of ``www.``. Two links that differ
     only in those are one page, and reading both spends a fetch on nothing.
     """
-    try:
-        parsed = urllib.parse.urlparse(url)
-    except ValueError:  # pragma: no cover - urlparse is forgiving
-        return url
+    parsed = urls.split(url)
     host = parsed.netloc.lower().removeprefix("www.")
     query = [
         (key, value)

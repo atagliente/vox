@@ -22,7 +22,8 @@ not estimated.
 | HTTP egress points | 17 | **1** |
 | Slash commands | 38 | 49 |
 
-Seven defects were found along the way, all by a tool rather than by reading:
+Ten defects were found along the way, all by a tool rather than by reading — the
+last three by actually running the interpreter matrix instead of trusting it:
 
 1. `discovery/agent.py` requeued the **wrong peer** — a `threading.Timer` lambda closing
    over a loop variable, five seconds after the loop had moved on. Found by `ruff`.
@@ -41,6 +42,18 @@ Seven defects were found along the way, all by a tool rather than by reading:
    latent flake that would have fired on a slower or faster machine. Exposed by the
    §11 timing change, and fixed by removing the dependency on the ordering rather
    than by getting lucky again.
+8. `requirements.lock` was **resolved for Windows**, so it demanded `colorama`
+   everywhere and the CI check comparing it against a Linux resolution could never
+   pass. The lock is now universal, with markers, which also makes it correct on the
+   two platforms where it was quietly wrong.
+9. `to_text` behaved **differently on Python 3.11 and 3.12**: an unclosed `<!--` runs
+   to the end of the document on 3.11 and stops at the first `>` on 3.12. One
+   document, two readings, and a test that passed on the interpreter it was written
+   on. Settled in `close_at_unterminated_comment` the way 3.11 and a browser do.
+10. `urllib.parse.urlparse` **raises on 3.11 where 3.12 does not** — `//[` is
+    `Invalid IPv6 URL` on one and a result on the other. Every URL VOX parses comes
+    from a model, a scraped href or an MCP server, so `vox_chat/urls.py` now does the
+    parsing once, the same way on every version.
 
 And three of this document's own premises turned out to be wrong, which is worth as
 much as the fixes:
@@ -665,8 +678,8 @@ decision rather than work: whether to move to an async provider client
     Anything that is not text flushes the waiting text before it goes, because a tool
     result arriving before the sentence that led to it would be a transcript nobody
     could read.
-  * `[done]` Measured: **about 1.6x on the assembly path** — 272k tokens/s plain
-    against 173k with logprobs, best of five passes. Real, bounded, and rather less
+  * `[done]` Measured: **about 1.6x on the assembly path** on Python 3.12 and 1.8x on
+    3.13 — 272k tokens/s plain against 173k with logprobs, best of five passes. Real, bounded, and rather less
     than "several times", so the original description overstates this path; the rest
     of the weight is where a fake provider cannot see it, in the wire and in the
     inspect screen's redraw.

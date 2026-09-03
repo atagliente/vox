@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from . import http, threads
+from . import http, threads, urls
 from .logging_setup import get_logger
 
 log = get_logger("searchd")
@@ -180,7 +180,7 @@ def keywords(query: str, keep: int = 8) -> str:
 
 def port_of(endpoint: str) -> int:
     """The port an endpoint names, defaulting the way a browser would."""
-    parsed = urllib.parse.urlparse(endpoint)
+    parsed = urls.split(endpoint)
     return parsed.port or (443 if parsed.scheme == "https" else 80)
 
 
@@ -215,7 +215,7 @@ def _direct(url: str) -> str:
     """DuckDuckGo wraps every result in a redirect; this unwraps it."""
     if url.startswith("//"):
         url = "https:" + url
-    parsed = urllib.parse.urlparse(url)
+    parsed = urls.split(url)
     if "duckduckgo.com" in parsed.netloc and parsed.path.startswith("/l/"):
         target = urllib.parse.parse_qs(parsed.query).get("uddg")
         if target:

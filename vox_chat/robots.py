@@ -21,7 +21,7 @@ import urllib.parse
 import urllib.robotparser
 from dataclasses import dataclass, field
 
-from . import http
+from . import http, urls
 from .logging_setup import get_logger
 
 log = get_logger("robots")
@@ -60,7 +60,7 @@ class RobotsCache:
         robots.txt has not refused anything, and treating an unreachable file
         as a refusal would make an outage look like a policy.
         """
-        parsed = urllib.parse.urlparse(url)
+        parsed = urls.split(url)
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             return True
         origin = f"{parsed.scheme}://{parsed.netloc}"

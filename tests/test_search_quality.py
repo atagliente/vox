@@ -367,3 +367,34 @@ def test_a_cached_page_says_it_was_cached() -> None:
     page = web.Page(url="https://x.test", title="T", text="body", from_cache="3m old")
     assert page.from_cache == "3m old"
     assert json.dumps(page.to_dict())
+
+
+# ------------------------------------------------------- urls that are not
+
+
+@pytest.mark.parametrize(
+    "broken",
+    ["//[", "http://[", "https://exa mple.com", "http://a:notaport/", "://"],
+)
+def test_a_string_that_is_not_a_url_is_not_an_exception(broken: str) -> None:
+    """urlparse raises, and which strings make it raise depends on the
+    interpreter: 3.12 accepts `//[` and 3.11 raises Invalid IPv6 URL. Every
+    URL VOX parses comes from a model, a scraped href or an MCP server, so
+    "mostly does not raise" is the wrong thing to build on — and the version
+    deciding is worse.
+    """
+    from vox_chat import urls
+
+    assert urls.split(broken).scheme in ("", "http", "https")
+    assert isinstance(urls.host_of(broken), str)
+    assert isinstance(urls.netloc_of(broken), str)
+
+
+def test_the_callers_that_see_a_url_first_all_survive_one() -> None:
+    from vox_chat import searchd
+
+    assert isinstance(searchd._direct("//["), str)
+    assert isinstance(ranking.normalise("//["), str)
+    assert robots.RobotsCache().allows("//[") is True
+    with pytest.raises(web.WebError):
+        web.check_url("//[", web.WebSettings(enabled=True))

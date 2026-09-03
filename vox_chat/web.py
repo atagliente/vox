@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Any
 
-from . import http, ranking, robots, webcache
+from . import http, ranking, robots, urls, webcache
 from .logging_setup import get_logger
 
 log = get_logger("web")
@@ -153,8 +153,7 @@ def is_local_endpoint(endpoint: str) -> bool:
     provider is called: a configuration written before the local server existed
     still says ``searxng`` and still means localhost.
     """
-    host = urllib.parse.urlparse(endpoint).hostname or ""
-    return host.lower() in LOOPBACK_NAMES
+    return urls.host_of(endpoint) in LOOPBACK_NAMES
 
 
 def _is_private(host: str) -> bool:
@@ -186,7 +185,7 @@ def _is_private(host: str) -> bool:
 
 def check_url(url: str, settings: WebSettings, *, internal: bool = False) -> str:
     """Refuse anything that is not a plain http(s) request to a public host."""
-    parsed = urllib.parse.urlparse(url)
+    parsed = urls.split(url)
     if parsed.scheme not in ("http", "https"):
         raise WebError(
             f"only http and https are fetched, not {parsed.scheme or 'that'}"
@@ -232,7 +231,7 @@ def _open(
 
 def _explain(exc: http.HttpError, url: str, settings: WebSettings) -> WebError:
     """Turn a transport failure into something worth reading."""
-    where = urllib.parse.urlparse(url).netloc
+    where = urls.netloc_of(url)
     if exc.kind == "http":
         # The local server answers a failure with the reason in JSON; passing
         # on "HTTP 502" instead would throw away the only useful part.
@@ -514,6 +513,31 @@ def main_region(html: str) -> str:
     return html
 
 
+def close_at_unterminated_comment(html: str) -> str:
+    """Cut the source at a ``<!--`` that is never closed.
+
+    Python's HTML parser disagrees with itself about these across versions.
+    On 3.11 an unclosed comment runs to the end of the document and
+    everything after it disappears; on 3.12 it ends at the first ``>`` and
+    parsing carries on, which is what let a `<script>` body through. One
+    document, two readings, and a test that passed on the interpreter it was
+    written on.
+
+    So the decision is made here rather than left to the standard library,
+    and it is 3.11's: a comment nobody closed swallows the rest. That is also
+    what a browser shows, which is the only reading a reader could check.
+    """
+    cursor = 0
+    while True:
+        start = html.find("<!--", cursor)
+        if start < 0:
+            return html
+        end = html.find("-->", start + 4)
+        if end < 0:
+            return html[:start]
+        cursor = end + 3
+
+
 def to_text(html: str) -> tuple[str, str]:
     """``(title, text)`` from a page's source."""
     # Cut the code elements out before the parser sees them. Chasing this in
@@ -528,12 +552,16 @@ def to_text(html: str) -> tuple[str, str]:
     # it is read from the whole page and the body from the article.
     title_parser = _TextExtractor()
     try:
-        title_parser.feed(_CODE_ELEMENTS.sub(" ", html[:20_000]))
+        title_parser.feed(
+            close_at_unterminated_comment(_CODE_ELEMENTS.sub(" ", html[:20_000]))
+        )
         title_parser.close()
     except Exception:  # pragma: no cover - a title is not worth failing over
         pass
     try:
-        parser.feed(_CODE_ELEMENTS.sub(" ", main_region(html)))
+        parser.feed(
+            close_at_unterminated_comment(_CODE_ELEMENTS.sub(" ", main_region(html)))
+        )
         parser.close()
     except Exception as exc:  # pragma: no cover - malformed beyond the parser
         raise WebError(f"could not read that page: {exc}") from exc
@@ -567,7 +595,7 @@ def fetch(url: str, settings: WebSettings) -> Page:
         raise WebError("web.allow_fetch is off; only search results are available")
     if settings.respect_robots and not ROBOTS.allows(url, settings.timeout_seconds):
         raise WebError(
-            f"{urllib.parse.urlparse(url).netloc} asks crawlers not to read that "
+            f"{urls.netloc_of(url)} asks crawlers not to read that "
             "page (robots.txt). Set web.respect_robots to false if it is yours."
         )
     cached = CACHE.get("page", url, float(settings.cache_seconds) * 4)

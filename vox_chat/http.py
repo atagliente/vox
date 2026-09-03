@@ -27,6 +27,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Literal
 
+from . import urls
 from .logging_setup import get_logger
 
 log = get_logger("http")
@@ -133,7 +134,7 @@ def request(
     server sends: one extra byte is read past it so the caller can tell a
     body that fitted from one that was cut off.
     """
-    scheme = urllib.parse.urlparse(url).scheme.lower()
+    scheme = urls.split(url).scheme.lower()
     if scheme not in ALLOWED_SCHEMES:
         raise HttpError(
             "protocol",

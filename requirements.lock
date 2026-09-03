@@ -1,16 +1,27 @@
-# The runtime dependencies, pinned to exact versions and their hashes.
+# The runtime dependencies, pinned to exact versions with their hashes.
 #
-# What this is for: the installers. `pip install -e .` resolves whatever is
+# Universal, and that word is load-bearing. Resolved per-platform this file
+# would be right on the machine that generated it and wrong on the other two:
+# `colorama` is a Windows-only dependency of `tqdm`, so a lock made on Linux
+# omits it and a lock made on Windows demands it everywhere. The markers here
+# are what make one file correct on Linux, macOS and Windows — and what makes
+# the CI staleness check deterministic instead of a guaranteed failure.
+#
+# Resolved for the lowest Python VOX supports, so the pins are installable on
+# every version in the matrix rather than only the newest.
+#
+# What it is for: the installers. `pip install -e .` resolves whatever is
 # newest and compatible, which is right for development and wrong for a
 # machine somebody is setting up today and will run for a year. Install from
-# here and every one of them gets the same tree, verified by hash — a
-# mirror that served something else is refused rather than trusted.
+# here and every one of them gets the same tree, verified by hash — a mirror
+# that served something else is refused rather than trusted.
 #
 #     pip install --require-hashes -r requirements.lock
 #
-# Regenerate after changing pyproject.toml:
+# Regenerate after changing pyproject.toml (uv, not pip-compile: pip-tools
+# has no universal resolution, which is how this file was wrong before):
 #
-#     pip-compile --generate-hashes --output-file=requirements.lock pyproject.toml
+#     uv pip compile --universal --generate-hashes --python-version 3.11 #       --output-file requirements.lock pyproject.toml
 #
 annotated-types==0.8.0 \
     --hash=sha256:13b2beaad985e05e2d6407ee4c4f35590b11f8d693a258a561055cac8f64cab7 \
@@ -28,7 +39,7 @@ certifi==2026.7.22 \
     # via
     #   httpcore
     #   httpx
-cffi==2.1.1 \
+cffi==2.1.1 ; platform_python_implementation != 'PyPy' \
     --hash=sha256:046bfc24911b37851ee1b51aab8bffe713d89c68c6a057b09484ce9fd5f69b4e \
     --hash=sha256:06c72bb76605a4b0cd0aad6930b69d4baf7dd5d806cfc409b824191099700e66 \
     --hash=sha256:0beceaabe56af686895136a2de78db54ecd8e4046b236b8fd6d6cb61389e9bf2 \
@@ -130,7 +141,7 @@ cffi==2.1.1 \
     --hash=sha256:fb92203a88b3d3053034db775110081c49d28be6551923805e039924093761e4 \
     --hash=sha256:fcd22650c908d7b7da162bbfaab594a1227a15d1643a98c68b122ac642fa2264
     # via cryptography
-colorama==0.4.6 \
+colorama==0.4.6 ; sys_platform == 'win32' \
     --hash=sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44 \
     --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
     # via tqdm
@@ -315,7 +326,7 @@ linkify-it-py==2.2.0 \
     --hash=sha256:3adc40eb5af300b2605fcfdb968c24e1d780a90f1f2221af7c15e5111e94d443 \
     --hash=sha256:907acd2d17ac1fbb9ddb62c8957ccbd6158cac602231a15c3b0cd1e215f03cee
     # via markdown-it-py
-markdown-it-py[linkify]==4.2.0 \
+markdown-it-py==4.2.0 \
     --hash=sha256:04a21681d6fbb623de53f6f364d352309d4094dd4194040a10fd51833e418d49 \
     --hash=sha256:9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a
     # via
@@ -338,7 +349,7 @@ platformdirs==4.11.7 \
     --hash=sha256:4f41487eeeeeb07f3a6625e61d9bc0ae6809f92d3386dbd74392fbb76108104d \
     --hash=sha256:8a02cb259042c79d1cd0450facc2fe6dc9d303ae7901afbe33bf8ea0b188cef6
     # via textual
-pycparser==3.0 \
+pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy' \
     --hash=sha256:600f49d217304a5902ac3c37e1281c9fe94e4d0489de643a9504c5cdfdfc6b29 \
     --hash=sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992
     # via cffi
@@ -478,8 +489,8 @@ rich==15.0.0 \
     --hash=sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb \
     --hash=sha256:edd07a4824c6b40189fb7ac9bc4c52536e9780fbbfbddf6f1e2502c31b068c36
     # via
-    #   textual
     #   vox (pyproject.toml)
+    #   textual
 sniffio==1.3.1 \
     --hash=sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2 \
     --hash=sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc
