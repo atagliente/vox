@@ -34,6 +34,11 @@ installs through `pipx` or a private virtual environment in `~/.vox/venv`, puts
 a `vox` launcher on your user `PATH`, and offers to fetch missing system
 packages.
 
+Tagged releases also carry a wheel, an sdist and a single-file executable for
+Linux, macOS and Windows, each signed with sigstore — no key to trust, the
+certificate is in a public transparency log and names the workflow that built
+it.
+
 ## Check
 
 ```bash
@@ -554,6 +559,10 @@ is what widens, one module at a time, as the rest of the tree is cleared.
 
 CI covers Linux, macOS and Windows across Python 3.11, 3.12 and 3.13, and
 exercises `install.sh` and `install.ps1` on clean runners.
+
+A red test job also writes the failing test names into the run's annotations,
+which are readable without a token — a job that says only "exit code 1" to
+anyone who cannot download the log is a job nobody can diagnose.
 
 ### How it is laid out
 

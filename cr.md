@@ -14,10 +14,10 @@ not estimated.
 
 | | Before (`95e087d`) | Now |
 | --- | --- | --- |
-| Suite | 511 passed, **8m 24s** | 771 passed, **2m 03s** |
+| Suite | 511 passed, **8m 24s** | 829 passed, **1m 42s** |
 | Coverage | not measured | **76%**, with a floor in CI |
-| `app.py` | 2,636 lines | **2,240** |
-| Lines, source and tests | 21,261 | 31,463 |
+| `app.py` | 2,636 lines | **2,264** |
+| Lines, source and tests | 21,261 | 33,270 |
 | Startup to a screen | 2,566 ms | **806 ms** |
 | UI hops per 6,000-token answer | 6,000 | **87** |
 | Lint / types / CI | none | ruff, mypy strict on five modules, CI on 3 OS × 3 Python |
@@ -206,11 +206,11 @@ see 1.2.
 
 ## 3. Code architecture — `[done]`
 
-`app.py` is 1,925 lines, down from 2,636. The one open question — whether to move to
+`app.py` is 2,264 lines, down from 2,636 — it dropped further than that during the extraction and has since taken back some of it as features landed. The one open question — whether to move to
 an async provider client (3.3) — is settled below, by the measurement that was
 supposed to justify it.
 
-* **3.1 `app.py` is a god object (2,636 lines)** — `[done]`, now **1,925**
+* **3.1 `app.py` is a god object (2,636 lines)** — `[done]`, now **2,264**
   * `[done]` The `cmd_*` registry is a `vox_chat/commands/` package: `spec` holds the
     vocabulary and no application state, `handlers` holds the thirty-eight functions,
     `dispatch` is the table joining them — built from the command table itself, so a
