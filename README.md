@@ -223,6 +223,15 @@ Anything unset is not sent at all, so the provider's own default stands.
 `/set preset` stores what is in force as this model's own, and `/format` makes
 the answer match a JSON Schema.
 
+### Quiet mode
+
+`vox --screen-reader` (or `VOX_SCREEN_READER=1`, or `ui.screen_reader` in the
+configuration) stops the parts of the screen that move: the status bar redraws
+once a second instead of ten times, the braille spinner is not drawn, the wait
+is spelled out in words, and the splash is skipped. It is not detected
+automatically — nothing announces itself to a terminal program — so it has to
+be asked for.
+
 ## Where your files go
 
 Everything a conversation produces lands in the directory you launched from:

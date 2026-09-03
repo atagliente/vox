@@ -90,6 +90,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-splash", action="store_true", help="Skip the boot banner."
     )
     parser.add_argument(
+        "--screen-reader",
+        action="store_true",
+        help=(
+            "Quiet mode: no spinner, no splash, and a status line that "
+            "changes once a second instead of ten times."
+        ),
+    )
+    parser.add_argument(
         "--save",
         action="store_true",
         help="Persist --provider / --model to the global config.",
@@ -167,6 +175,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     loaded = load_config(workspace)
+    if args.screen_reader:
+        # A flag is a request for this run, so it goes in the loaded
+        # configuration rather than being saved anywhere.
+        loaded.data.setdefault("ui", {})["screen_reader"] = True
     if args.provider:
         if args.provider not in loaded.data.get("providers", {}):
             available = ", ".join(loaded.data.get("providers", {}))

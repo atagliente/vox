@@ -90,7 +90,11 @@ class WebCache:
         except (OSError, ValueError, KeyError, TypeError):
             self.misses += 1
             return None
-        if entry.age > ttl:
+        # >= and not >: with ttl=0 the two clocks can read the same value —
+        # time.time() advances in ~15ms steps on Windows — and an entry
+        # written a moment ago would come back as fresh from a cache that was
+        # asked to keep nothing. A zero TTL means do not use the cache.
+        if entry.age >= ttl:
             self.misses += 1
             with contextlib.suppress(OSError):  # it will be overwritten anyway
                 path.unlink(missing_ok=True)

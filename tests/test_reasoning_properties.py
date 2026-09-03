@@ -113,11 +113,19 @@ def strip_matched(document: str) -> str:
     """The document with exactly the tags the splitter would act on removed.
 
     It only ever looks for the one tag it is waiting for, so a second
-    ``<think>`` inside a thought, or a ``</think>`` that opens nothing, is
-    ordinary text. This mirrors that rule rather than removing every tag.
+    ``<think>`` inside a thought, or a ``</think>`` part-way through an
+    answer, is ordinary text. This mirrors that rule rather than removing
+    every tag — including the one exception, a stream that opens on a closing
+    tag, where the tag is swallowed because a provider put the model inside a
+    thought it never announced.
     """
     out: list[str] = []
     rest, thinking = document, False
+    leading = rest.lstrip()
+    if leading.startswith(CLOSE_TAG):
+        gap = len(rest) - len(leading)
+        out.append(rest[:gap])
+        rest = leading[len(CLOSE_TAG) :]
     while rest:
         marker = CLOSE_TAG if thinking else OPEN_TAG
         index = rest.find(marker)
@@ -147,13 +155,28 @@ def test_an_unmatched_tag_is_ordinary_text() -> None:
     """Pinning the rule the properties above lean on, because it is a choice
     and not an accident: the splitter looks for one tag at a time.
 
-    A ``</think>`` with nothing open stays in the answer, and a second
-    ``<think>`` inside a thought stays in the reasoning. Some providers do
-    emit a bare leading ``</think>``; treating it as the end of a thought
-    that was never announced would be a different contract, and cr.md carries
-    that as a question rather than this test deciding it."""
-    assert run(["</think>"]) == [("text", "</think>")]
+    A ``</think>`` in the middle of an answer stays in the answer, and a
+    second ``<think>`` inside a thought stays in the reasoning."""
+    assert run(["answer </think> more"]) == [("text", "answer </think> more")]
     assert run(["<think>", "<think>", "</think>"]) == [("reasoning", "<think>")]
+
+
+def test_a_stream_that_opens_on_a_closing_tag_loses_the_tag() -> None:
+    """The one asymmetry, and the reason for it.
+
+    Several servers start the model already inside a thought and send only
+    the close, so the answer began with a literal ``</think>``. There is no
+    reading of that under which printing the tag is right, so it is
+    swallowed and the answer carries on — including when it arrives split
+    across chunks, or behind the whitespace a provider puts in front of it.
+    """
+    assert run(["</think>", "Hello"]) == [("text", "Hello")]
+    assert run(["</th", "ink>", "Hello"]) == [("text", "Hello")]
+    assert run(["  </think> answer"]) == [("text", " answer")]
+    assert run(["</think>"]) == []
+    # Narrow on purpose: once the answer has started, a model writing about
+    # tags is likelier than a provider ending a thought a paragraph late.
+    assert run(["a", "</think>"]) == [("text", "a"), ("text", "</think>")]
 
 
 @given(document=DOCUMENTS)

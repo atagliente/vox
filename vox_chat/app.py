@@ -21,6 +21,7 @@ from textual.widgets import Static
 
 from . import (
     __version__,
+    accessibility,
     clipboard,
     code_blocks,
     commands,
@@ -191,8 +192,13 @@ class VoxApp(App[None]):
         type(self).CSS = branding.theme_css(theme)
         super().__init__()
 
-        self.show_splash = show_splash and bool(
-            self.config.get("ui", {}).get("splash", True)
+        # Quiet mode before the splash, because the splash is the first thing
+        # it turns off: an animation nobody can see is a wait nobody asked for.
+        self.quiet = accessibility.wanted(self.config)
+        self.show_splash = (
+            show_splash
+            and not self.quiet
+            and bool(self.config.get("ui", {}).get("splash", True))
         )
         self.role_store = RoleStore()
         self.prompt_store = PromptStore()
@@ -409,9 +415,16 @@ class VoxApp(App[None]):
             workspace=str(self.workspace_path),
             extra=f"{detail}  {extra}".strip(),
             spinner=(
-                spinner_frame(self._spinner_tick)
-                if self.generating or self._preloading
-                else ""
+                ""
+                # A braille frame that changes every tick is read out as a
+                # character by some screen readers and skipped by others, and
+                # neither is information.
+                if self.quiet
+                else (
+                    spinner_frame(self._spinner_tick)
+                    if self.generating or self._preloading
+                    else ""
+                )
             ),
             busy=(
                 f"PRELOADING {self._preloading}"
@@ -474,7 +487,9 @@ class VoxApp(App[None]):
             f"PRELOADING {model} ON {endpoint}" if endpoint else f"PRELOADING {model}"
         )
         if self._usage_timer is None:
-            self._usage_timer = self.set_interval(0.1, self._tick_status)
+            self._usage_timer = self.set_interval(
+                accessibility.tick_seconds(self.quiet), self._tick_status
+            )
         self.refresh_status()
 
     def end_preload(self, model: str, elapsed: float | None, error: str | None) -> None:
@@ -856,7 +871,7 @@ class VoxApp(App[None]):
     def show_thinking(self, label: str) -> None:
         """Mount, or relabel, the spinner that says the model is working."""
         if self._thinking is None:
-            self._thinking = ThinkingBox(label)
+            self._thinking = ThinkingBox(label, quiet=self.quiet)
             self.transcript.mount(self._thinking)
             self.transcript.scroll_end(animate=False)
         else:

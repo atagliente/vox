@@ -11,6 +11,7 @@ from textual.containers import VerticalScroll
 from textual.message import Message as TextualMessage
 from textual.widgets import Static, TextArea
 
+from ..accessibility import tick_seconds, waiting_text
 from ..models import Message
 from . import branding
 
@@ -207,15 +208,18 @@ class ThinkingBox(Static):
     thread is blocked waiting on the provider.
     """
 
-    def __init__(self, label: str = "WAITING FOR MODEL") -> None:
+    def __init__(self, label: str = "WAITING FOR MODEL", quiet: bool = False) -> None:
         super().__init__(classes="msg msg-system")
         self.label = label
+        # In quiet mode this is a line of text that changes once a second, not
+        # an animation: see vox_chat/accessibility.py for why.
+        self.quiet = quiet
         self._tick = 0
         self._started = monotonic()
         self._timer = None
 
     def on_mount(self) -> None:
-        self._timer = self.set_interval(0.1, self._advance)
+        self._timer = self.set_interval(tick_seconds(self.quiet), self._advance)
         self._advance()
 
     def on_unmount(self) -> None:
@@ -233,8 +237,9 @@ class ThinkingBox(Static):
         self._tick += 1
         elapsed = monotonic() - self._started
         rendered = Text()
-        rendered.append(f"{spinner_frame(self._tick)} ", style="bold")
-        rendered.append(f"{self.label}… {elapsed:.1f}s")
+        if not self.quiet:
+            rendered.append(f"{spinner_frame(self._tick)} ", style="bold")
+        rendered.append(waiting_text(self.label, elapsed, self.quiet))
         if elapsed >= self.SLOW_AFTER:
             rendered.append(
                 "  (the server may still be loading the model)", style="dim"

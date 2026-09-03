@@ -45,7 +45,25 @@ class PickerItem(NamedTuple):
     subtitle: str = ""
 
 
-class ConfirmModal(ModalScreen[bool]):
+class Titled:
+    """Gives a modal a name that is not only drawn on the screen.
+
+    Every modal here already shows its title in a Label, which is what a
+    sighted user reads and what a screen reader reaching the terminal buffer
+    eventually reaches too — after the border, the buttons and whatever else
+    happens to be above it. Textual keeps a `title` on each screen, and
+    setting it is what makes the modal announce what it is when it opens
+    rather than when the reader gets there.
+
+    So the Label and the screen name come from one call, and cannot drift.
+    """
+
+    def titled(self, text: str) -> Label:
+        self.title = text  # type: ignore[attr-defined]
+        return Label(text, id="modal-title")
+
+
+class ConfirmModal(Titled, ModalScreen[bool]):
     """Two-button dialog: authorise a write or a command, or confirm a quit.
 
     Left and right move between the buttons, Enter activates the focused one,
@@ -87,7 +105,7 @@ class ConfirmModal(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal-box"):
-            yield Label(self.title_text, id="modal-title")
+            yield self.titled(self.title_text)
             with VerticalScroll():
                 yield Static(diff_text(self.body_text))
             with Horizontal(id="modal-buttons"):
@@ -117,7 +135,7 @@ class ConfirmModal(ModalScreen[bool]):
         self.dismiss(False)
 
 
-class KeysModal(ModalScreen[None]):
+class KeysModal(Titled, ModalScreen[None]):
     """Every key and every command, on ctrl+shift+l.
 
     The bar at the bottom of the screen carries five keys because a legend
@@ -149,7 +167,7 @@ class KeysModal(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal-box"):
-            yield Label("KEYS AND COMMANDS", id="modal-title")
+            yield self.titled("KEYS AND COMMANDS")
             with VerticalScroll(id="keys-scroll"):
                 yield Static(legend_text(), id="keys-table")
             yield Static("↑ ↓ scroll   ·   esc close", id="modal-hint")
@@ -172,7 +190,7 @@ class KeysModal(ModalScreen[None]):
         self.dismiss(None)
 
 
-class TextPromptModal(ModalScreen[str | None]):
+class TextPromptModal(Titled, ModalScreen[str | None]):
     """A one-line question, e.g. a session or prompt name."""
 
     BINDINGS = [("escape", "cancel", "Cancel")]
@@ -185,7 +203,7 @@ class TextPromptModal(ModalScreen[str | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal-box"):
-            yield Label(self.title_text, id="modal-title")
+            yield self.titled(self.title_text)
             yield Input(value=self.value, placeholder=self.placeholder, id="value")
             with Horizontal(id="modal-buttons"):
                 yield Button("OK", id="ok", variant="success")
@@ -207,7 +225,7 @@ class TextPromptModal(ModalScreen[str | None]):
         self.dismiss(None)
 
 
-class PickerModal(ModalScreen[str | None]):
+class PickerModal(Titled, ModalScreen[str | None]):
     """A searchable list; returns the selected value or ``None``.
 
     The filter keeps the focus and the arrows move the highlight, so a choice
@@ -236,7 +254,7 @@ class PickerModal(ModalScreen[str | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal-box"):
-            yield Label(self.title_text, id="modal-title")
+            yield self.titled(self.title_text)
             yield Input(placeholder="filter…", id="filter")
             if self.items:
                 yield ListView(*self._rows(self.items), id="items")
@@ -308,7 +326,7 @@ class PickerModal(ModalScreen[str | None]):
         self.dismiss(None)
 
 
-class SettingsModal(ModalScreen[dict[str, Any] | None]):
+class SettingsModal(Titled, ModalScreen[dict[str, Any] | None]):
     """Edit the configuration as JSON, with validation before it is accepted.
 
     The API key of every provider is masked while displayed; a masked value
@@ -327,7 +345,7 @@ class SettingsModal(ModalScreen[dict[str, Any] | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal-box"):
-            yield Label("SETTINGS - config.json", id="modal-title")
+            yield self.titled("SETTINGS - config.json")
             yield TextArea(
                 json.dumps(self.masked, indent=2, ensure_ascii=False),
                 language="json",

@@ -446,6 +446,12 @@ async def test_a_built_window_becomes_the_active_model(
     monkeypatch.setattr(
         ollama, "create_with_context", lambda *a, **k: "vox-granite4.2-3b:ctx16384"
     )
+    # Without this the build measures the GPU, which means a real request to
+    # localhost:11434. On a machine with Ollama running the test passed; on
+    # CI it failed on all nine runners with a connection error in place of the
+    # message being asserted. A test about what VOX writes should not depend
+    # on what is listening.
+    monkeypatch.setattr(ollama, "fit_layers", lambda *a, **k: (0, None))
     async with app.run_test() as pilot:
         await pilot.pause()
         handlers.cmd_model_ctx(app, "16384")
