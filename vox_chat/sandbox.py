@@ -156,7 +156,10 @@ class Sandbox:
             "--dev",
             "/dev",
             "--tmpfs",
-            "/tmp",
+            # Not a temp file: this is the mount point *inside* the namespace,
+            # and a private tmpfs there is the opposite of the insecure shared
+            # /tmp bandit is looking for.
+            "/tmp",  # nosec B108
             # The one writable place, at the same path it has outside, so
             # anything the command prints about a file is a path that means
             # something here too.
