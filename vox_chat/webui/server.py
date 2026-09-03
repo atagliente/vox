@@ -28,6 +28,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from .. import threads
+from ..commands import command_index
 from ..logging_setup import get_logger
 from .host import WebHost
 from .page import PAGE
@@ -74,6 +75,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._json(200, self.host.state())
         elif path == "/api/sessions":
             self._json(200, {"sessions": self._sessions()})
+        elif path == "/api/commands":
+            # Straight from the same table the legend is built from, so the
+            # popup cannot offer a command that does not exist or miss one
+            # that does.
+            self._json(200, {"commands": command_index()})
         else:
             self._json(404, {"error": "no such route"})
 

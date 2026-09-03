@@ -74,6 +74,11 @@ streamed as it is written, the slash commands, the agent's confirmations with
 the diff. The session list is on the left, `Enter` sends and `Shift+Enter` is
 a newline.
 
+Typing `/` opens the command list, filtered as you keep typing, grouped the
+way `/help` groups them. Up and Down move, Tab or Enter completes, Escape
+closes. It comes from the same table the legend is built from, so it cannot
+offer a command that does not exist or miss one that does.
+
 It binds the loopback address and nothing else, and it asks for no password —
 the machine is yours and the page is yours, and an authentication that is not
 needed is one more thing to get wrong. From another device, forward the port

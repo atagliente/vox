@@ -271,6 +271,27 @@ def _grouped_commands() -> tuple[tuple[str, tuple[CommandSpec, ...]], ...]:
     )
 
 
+def command_index() -> list[dict[str, object]]:
+    """Every command as data, grouped, for a host that draws rather than prints.
+
+    The browser's completion popup reads this. It comes from
+    ``_grouped_commands`` like the legend does, so the popup cannot list a
+    command the legend does not, or miss one it has — the import-time check
+    that keeps the legend honest keeps this honest too.
+    """
+    return [
+        {
+            "name": spec.name,
+            "usage": spec.usage,
+            "help": spec.help,
+            "aliases": list(spec.aliases),
+            "group": title,
+        }
+        for title, group in _grouped_commands()
+        for spec in group
+    ]
+
+
 def commands_text(indent: str = "  ") -> str:
     """Every command, grouped, usage in a fixed column."""
     width = max(len(spec.usage) for spec in COMMANDS)

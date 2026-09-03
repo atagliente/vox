@@ -155,3 +155,21 @@ def test_every_command_appears_exactly_once() -> None:
 def test_arguments_are_also_exposed_as_a_list() -> None:
     parsed = commands.parse("/prompt-save alpha beta")
     assert parsed.args == ["alpha", "beta"]
+
+
+def test_the_command_index_says_the_same_as_the_table() -> None:
+    """The browser's completion popup reads `command_index`, and a popup that
+    offered a command nobody had written, or missed one that exists, would be
+    worse than none. It is built from the same grouping the legend uses, so
+    the import-time check that keeps the legend honest keeps it honest too."""
+    from vox_chat.commands.spec import COMMANDS, command_index
+
+    index = command_index()
+    assert len(index) == len(COMMANDS)
+    by_name = {spec.name: spec for spec in COMMANDS}
+    for entry in index:
+        spec = by_name[str(entry["name"])]
+        assert entry["usage"] == spec.usage
+        assert entry["help"] == spec.help
+        assert entry["aliases"] == list(spec.aliases)
+        assert entry["group"]

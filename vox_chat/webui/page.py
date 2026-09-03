@@ -129,6 +129,34 @@ details.think .body { font-style: italic; margin-top: .4rem; }
 #confirm .yes { border-color: var(--green); color: var(--green); }
 #confirm .no { border-color: var(--red); color: var(--red); }
 
+/* ------------------------------------------------------------- the popup */
+/* Above the textarea rather than below it: the input sits at the bottom of
+   the window, so a list under it would open off-screen. */
+#compose { position: relative; }
+#palette {
+  position: absolute; bottom: calc(100% - .4rem); left: 1rem; right: 1rem;
+  max-width: 48rem; margin: 0 auto; display: none;
+  background: var(--bg); border: 1px solid var(--gold); border-radius: 6px;
+  max-height: 22rem; overflow-y: auto; z-index: 20;
+  box-shadow: 0 -8px 24px rgba(0,0,0,.45);
+}
+#palette.open { display: block; }
+#palette .group {
+  color: var(--dim); font-size: .7rem; letter-spacing: .12em;
+  padding: .5rem .8rem .2rem; border-top: 1px solid var(--line);
+}
+#palette .group:first-child { border-top: none; }
+#palette .row {
+  display: flex; gap: .8rem; padding: .3rem .8rem; cursor: pointer;
+  align-items: baseline;
+}
+#palette .row .usage { color: var(--gold); white-space: nowrap; }
+#palette .row .what { color: var(--dim); overflow: hidden; text-overflow: ellipsis;
+                      white-space: nowrap; }
+#palette .row.on { background: var(--panel); }
+#palette .row.on .what { color: var(--text); }
+#palette .none { padding: .6rem .8rem; color: var(--red); }
+
 /* ---------------------------------------------------------------- input */
 #compose { border-top: 1px solid var(--line); padding: .8rem 1rem 1rem; }
 #compose .inner { max-width: 48rem; margin: 0 auto; display: flex; gap: .6rem;
@@ -247,6 +275,108 @@ function diffHtml(text) {
   }).join("\n");
 }
 
+/* --------------------------------------------------------------- the popup */
+/* Typing "/" opens the command list, filtered as you keep typing. It only
+   ever opens on the first token: "/model " has already chosen a command, and
+   a list that stayed open while you typed its argument would be in the way.
+   Up and Down move, Tab and Enter complete, Escape closes — the keys any
+   completion menu uses, because a menu with its own idea about that is a
+   menu people fight. */
+
+let commands = [];
+let matches = [];
+let chosen = 0;
+
+async function loadCommands() {
+  try {
+    const reply = await fetch("/api/commands");
+    commands = (await reply.json()).commands || [];
+  } catch (error) {
+    commands = [];  /* the popup is a convenience; typing still works */
+  }
+}
+
+function paletteOpen() {
+  return $("palette").classList.contains("open");
+}
+
+function typedCommand(value) {
+  /* The prefix being completed, or null when this is not one. */
+  if (!value.startsWith("/")) return null;
+  const first = value.split(/\s/)[0];
+  if (first.length !== value.length) return null;  /* into the argument now */
+  return first.slice(1).toLowerCase();
+}
+
+function rank(prefix) {
+  if (!prefix) return commands;
+  const starts = [], contains = [];
+  for (const c of commands) {
+    const names = [c.name, ...(c.aliases || [])];
+    if (names.some((n) => n.startsWith(prefix))) starts.push(c);
+    else if (c.name.includes(prefix) || c.help.toLowerCase().includes(prefix))
+      contains.push(c);
+  }
+  /* What you typed the beginning of first, then what merely mentions it:
+     "/se" should offer /sessions before /prompt-save. */
+  return starts.concat(contains);
+}
+
+function drawPalette() {
+  const palette = $("palette");
+  palette.innerHTML = "";
+  if (!matches.length) {
+    palette.appendChild(el("div", "none", "no command matches that"));
+    return;
+  }
+  let group = null;
+  matches.forEach((command, index) => {
+    if (command.group !== group) {
+      group = command.group;
+      palette.appendChild(el("div", "group", group));
+    }
+    const row = el("div", "row" + (index === chosen ? " on" : ""));
+    row.appendChild(el("div", "usage", command.usage));
+    row.appendChild(el("div", "what", command.help));
+    row.onmousedown = (event) => { event.preventDefault(); complete(index); };
+    palette.appendChild(row);
+  });
+  const on = palette.querySelector(".row.on");
+  if (on) on.scrollIntoView({ block: "nearest" });
+}
+
+function refreshPalette() {
+  const prefix = typedCommand($("draft").value);
+  if (prefix === null) { closePalette(); return; }
+  matches = rank(prefix);
+  chosen = 0;
+  $("palette").classList.add("open");
+  drawPalette();
+}
+
+function movePalette(step) {
+  if (!matches.length) return;
+  chosen = (chosen + step + matches.length) % matches.length;
+  drawPalette();
+}
+
+function complete(index) {
+  const command = matches[index === undefined ? chosen : index];
+  if (!command) return;
+  const box = $("draft");
+  /* The name, not the usage line: "/model [name]" is how it is written down,
+     not something to put in the box and make somebody delete. */
+  box.value = "/" + command.name + " ";
+  closePalette();
+  box.focus();
+  box.dispatchEvent(new Event("input"));
+}
+
+function closePalette() {
+  $("palette").classList.remove("open");
+  matches = [];
+}
+
 let pendingConfirm = null;
 function askConfirm(frame) {
   pendingConfirm = frame.id;
@@ -324,14 +454,29 @@ function wire() {
   box.addEventListener("input", () => {
     box.style.height = "auto";
     box.style.height = Math.min(box.scrollHeight, 288) + "px";
+    refreshPalette();
     post("/draft", { text: box.value });
   });
   box.addEventListener("keydown", (event) => {
+    if (paletteOpen()) {
+      if (event.key === "ArrowDown") { event.preventDefault(); movePalette(1); return; }
+      if (event.key === "ArrowUp") { event.preventDefault(); movePalette(-1); return; }
+      if (event.key === "Tab") { event.preventDefault(); complete(); return; }
+      if (event.key === "Escape") { event.preventDefault(); closePalette(); return; }
+      if (event.key === "Enter" && !event.shiftKey && matches.length) {
+        /* Enter completes rather than sends while the list is open. It cannot
+           send what is in the box anyway: half a command name is not one. */
+        event.preventDefault();
+        complete();
+        return;
+      }
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       submit();
     }
   });
+  box.addEventListener("blur", closePalette);
   $("send").onclick = submit;
   $("new").onclick = () => post("/command", { text: "/new" });
   $("keys").onclick = () => post("/command", { text: "/help" });
@@ -342,6 +487,7 @@ function wire() {
     if (event.key === "Escape" && pendingConfirm) answer(false);
   });
   loadSessions();
+  loadCommands();
   connect();
   box.focus();
 }
@@ -377,6 +523,7 @@ BODY = """
   <div id="log"><div class="inner" id="log-inner"></div></div>
 
   <div id="compose">
+    <div id="palette"></div>
     <div class="inner">
       <textarea id="draft" rows="1" placeholder="Ask something, or type / for a command"></textarea>
       <button class="act" id="send">send</button>

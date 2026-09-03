@@ -390,3 +390,26 @@ def test_a_turn_that_crashes_says_so_instead_of_freezing(
     host._turn()
     assert host.generating is False
     assert "the turn failed" in host.session.messages[-1].content
+
+
+# --------------------------------------------------------- the command popup
+
+
+def test_the_page_can_ask_for_every_command(server: UiServer) -> None:
+    data = json.loads(get(server, "/api/commands"))
+    names = [c["name"] for c in data["commands"]]
+    assert len(names) == len(set(names)) == 49
+    for command in data["commands"]:
+        assert command["usage"].startswith("/")
+        assert command["help"]
+        assert command["group"]
+
+
+def test_the_popup_and_the_legend_cannot_disagree(server: UiServer) -> None:
+    """Both come from _grouped_commands, which fails at import if a command
+    is in no group or in a group twice. A popup that quietly omitted a
+    command would be worse than no popup."""
+    from vox_chat.commands.spec import COMMANDS
+
+    served = {c["name"] for c in json.loads(get(server, "/api/commands"))["commands"]}
+    assert served == {spec.name for spec in COMMANDS}

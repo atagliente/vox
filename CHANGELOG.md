@@ -68,6 +68,11 @@ reading.
   the whole file are about a screen. `hosting.py` writes that surface down as
   a protocol; the fifteen became `open_view("sessions")`, which a terminal and
   a browser answer differently and nothing else has to.
+- **Typing `/` opens the command list**, filtered as you type and grouped the
+  way `/help` groups them; Up and Down move, Tab or Enter completes, Escape
+  closes. It reads the same table the legend is built from, which already
+  fails at import if a command is in no group — so the popup cannot offer a
+  command nobody wrote or miss one that exists.
 - **Localhost is an address, not a permission.** Any page in any browser can
   POST to `127.0.0.1:8899`; it cannot read the reply, which stops it learning
   anything but not from telling VOX to run a tool. A request from another
