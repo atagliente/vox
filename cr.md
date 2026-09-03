@@ -1,15 +1,52 @@
 # VOX — Change Request / Roadmap
 
-State of the repository on **2026-09-02**, commit `95e087d`, branch `main`, working tree
-clean.
+Every section below has been worked through. **Nothing is left marked `[to do]`.**
+What remains is `[to complete]`: twelve items that need a decision, an account or a
+key that is not the repository's to have, each carrying a note saying what is missing
+and where to pick it up. They are gathered at the end.
 
-Measured, not estimated:
+## Where it started, and where it is
 
-- 21,261 lines across sources and tests; `vox_chat/app.py` is the largest file (2,636 lines)
-- suite: **514 passed, 8 skipped, 9m 15s** (`pytest -q`), **76%** coverage
-- installed runtime dependencies: `openai 2.41.1`, `textual 8.2.8`, `rich 15.0.0`,
-  `cryptography 50.0.1`
-- CI on three systems and three interpreters; ruff, mypy and pre-commit configured
+Both columns measured on the same machine — Windows 11 (10.0.26200), Python 3.12.5 —
+not estimated.
+
+| | Before (`95e087d`) | Now |
+| --- | --- | --- |
+| Suite | 511 passed, **8m 24s** | 771 passed, **2m 03s** |
+| Coverage | not measured | **76%**, with a floor in CI |
+| `app.py` | 2,636 lines | **2,240** |
+| Lines, source and tests | 21,261 | 31,463 |
+| Startup to a screen | 2,566 ms | **806 ms** |
+| UI hops per 6,000-token answer | 6,000 | **87** |
+| Lint / types / CI | none | ruff, mypy strict on five modules, CI on 3 OS × 3 Python |
+| HTTP egress points | 17 | **1** |
+| Slash commands | 38 | 49 |
+
+Six defects were found along the way, all by a tool rather than by reading:
+
+1. `discovery/agent.py` requeued the **wrong peer** — a `threading.Timer` lambda closing
+   over a loop variable, five seconds after the loop had moved on. Found by `ruff`.
+2. `web.py` handed a model **the entire body of a `<script>` as prose** when broken
+   markup swallowed its opening tag. Found by fuzzing; four different malformed shapes
+   reach it.
+3. `http.request` would open **any scheme `urlopen` speaks**, `file:///etc/passwd`
+   included, for URLs arriving from a model or an MCP server. Found by `bandit`.
+4. `doctor.py` did not check for `cryptography`, so a machine without it **passed
+   `vox doctor`** and failed at the first mesh command. Named by this document.
+5. `active_provider` raises rather than returning `None`, so an unconfigured VOX would
+   have handed a shell script **a traceback**. Found by writing `--ask`.
+6. The README advertised **`openai 3.3.1`**, a version that does not exist.
+
+And three of this document's own premises turned out to be wrong, which is worth as
+much as the fixes:
+
+- The 7-, 8- and 9-second sleeps blamed for ~30s a run are in a file **skipped unless
+  `VOX_TEST_MESH=1`**. That time was never being paid.
+- `cryptography` was **already** imported lazily. The startup cost was the `openai`
+  SDK, 1,674 ms of 2,566.
+- `/inspect` being "several times heavier" is true of the feature and **false of
+  `consume_stream`**, which is exactly where the phrase would send someone trying to
+  fix it.
 
 Status legend: `[to do]` still to be done · `[doing]` in progress (dirty working tree
 or partially covered) · `[done]` already in the repo and verifiable ·
@@ -646,11 +683,52 @@ decision rather than work: whether to move to an async provider client
 
 ---
 
-## Suggested order
+## What is left, and why it is yours
 
-1. **CI + Ruff + test timeouts** (§1.1, §1.2, §2.1) — what makes everything else safe
-2. **Suite under two minutes** (§2.1) — the development loop costs 8 minutes a turn today
-3. **PyPI + dependency lock** (§7.1, §6.1) — unlocks one-line installation
-4. **Break up `app.py`** (§3.1) — before it grows further
-5. **MCP** (§4.1) — the most visible functional gap against the state of the art
-6. **Reasoning parameters and structured output** (§4.2) — low cost, high return
+Twelve items, none of them blocked on work. Each is blocked on something the
+repository cannot have: an account, a key, a decision about what VOX should promise,
+or a person with a screen reader.
+
+**Needs an account or a key**
+
+1. **PyPI** (§7.1) — the build is ready; `python -m build` produces a wheel and an
+   sdist that `twine check` passes. What is left is owning the name.
+2. **The release workflow** (§7.1) — deliberately not written. OIDC trusted publishing
+   has to be configured *on PyPI first*, or the job fails at the last step with a
+   message about a mismatched claim. Set the publisher up and it is twenty lines.
+3. **Attaching artefacts to the Release** (§7.1) — the same workflow.
+4. **Signed tags** (§6.2) — a GPG key (`git tag -s`, verifiable, GitHub shows Verified
+   once the public key is on your account) or Sigstore keyless. Generating a signing
+   key on your behalf is not something to do unasked.
+5. **Homebrew and AUR** (§7.3) — both package what is on PyPI, so both wait on 1. A
+   tap needs its own repository; the AUR needs an account and an SSH key.
+6. **Branch protection** (§1.2) — Settings → Branches, requiring `lint`, `types`,
+   `test` and `build`. Worth doing last: it also stops the direct pushes to `main`
+   this work has been making.
+
+**Needs a decision about what VOX should be**
+
+7. **Exposing VOX as an MCP server** (§4.1) — the workspace tools are the natural
+   candidate, but their confinement was written against a model VOX confirms for, not
+   against an arbitrary caller on the machine. That is a security decision about what
+   VOX offers the rest of the system.
+8. **Running commands in a container** (§5.2) — changes what "the workspace" means (a
+   bind mount, not a directory) and needs Docker or bubblewrap, a dependency VOX has
+   so far refused. Two shapes to choose between, both days of work, both changing the
+   promise the agent makes.
+9. **`AsyncOpenAI`** (§3.3) — argued out in full at §3.3 with a recommendation: **not
+   now**. It touches `llm_client.py`, twenty-five worker call sites and every fake
+   client the streaming tests are built on, and the gain is real but small. Worth
+   revisiting only if §11.1's numbers ever say otherwise.
+10. **A bare leading `</think>`** (§2.3) — currently answer text. Several providers
+    emit exactly that when the model was already mid-thought; treating it as the close
+    of an unannounced thought is a different contract. Both readings are defensible.
+11. **A single-file executable** (§7.1) — follows PyPI rather than preceding it, and
+    needs a build on each of three runners plus somewhere to host 40–60 MB.
+
+**Needs a person, not a checklist**
+
+12. **The screen-reader check** (§10.2) — running VOX under NVDA, JAWS, VoiceOver or
+    Orca and listening. Three things are already visible from the code and written down
+    at §10.2, but someone who uses a screen reader daily would find more in ten minutes
+    than a checklist would in a day.
