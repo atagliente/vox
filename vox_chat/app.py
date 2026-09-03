@@ -228,9 +228,9 @@ class VoxApp(App[None]):
         self.mesh = MeshController(MeshSettings.from_config(self.config))
         self._universe_screen: UniverseScreen | None = None
         # Set while a consensus turn is being generated, cleared afterwards.
-        self._consensus_prompt: str = ""
+        self.consensus_prompt: str = ""
         # Set for one turn when web mode has gathered sources for it.
-        self._web_prompt: str = ""
+        self.web_prompt: str = ""
         self._web_running = False
         # The little search server, started when web mode needs one.
         self.search_server = searchd.LocalSearch()
@@ -266,7 +266,7 @@ class VoxApp(App[None]):
         # Set by --resume before the screen is mounted.
         self.resume_on_start: str = ""
         self._inspect_screen: InspectScreen | None = None
-        self._panel_mode = "code"
+        self.panel_mode = "code"
 
     # ---------------------------------------------------------------- layout
 
@@ -815,7 +815,7 @@ class VoxApp(App[None]):
             return
         self.code_blocks = blocks
         if blocks and self.config.get("ui", {}).get("code_panel", True):
-            self._panel_mode = "code"
+            self.panel_mode = "code"
             self.query_one("#side-panel").set_class(True, "visible")
         if self.query_one("#side-panel").has_class("visible"):
             self.refresh_panel()
@@ -1175,14 +1175,14 @@ class VoxApp(App[None]):
 
     def refresh_panel(self) -> None:
         panel = self.query_one("#side-panel")
-        panel.set_class(self._panel_mode in ("code", "consensus"), "code")
-        if self._panel_mode == "consensus":
+        panel.set_class(self.panel_mode in ("code", "consensus"), "code")
+        if self.panel_mode == "consensus":
             self.query_one("#side-title", Static).update("VOX · CONSENSUS")
             self.query_one("#side-content", Static).update(
                 cns.render_panel(self._consensus_answers)
             )
             return
-        if self._panel_mode == "code":
+        if self.panel_mode == "code":
             self.query_one("#side-title", Static).update("VOX · CODE")
             self.query_one("#side-content", Static).update(
                 code_blocks.render_panel(self.code_blocks)
@@ -1715,7 +1715,7 @@ class VoxApp(App[None]):
         self.session.messages.append(citation)
         self.write_message(citation)
         self.dirty = True
-        self._web_prompt = web_module.research_prompt(
+        self.web_prompt = web_module.research_prompt(
             sources, limit=settings.auto_max_chars
         )
         self.start_generation()
@@ -2218,6 +2218,58 @@ class VoxApp(App[None]):
         self._stop_status_timer()
         if self.client is not None:
             self.client.close()
+
+    # ------------------------------------------------- the host surface
+    #
+    # `handlers.py` used to call action_open_sessions() and friends directly,
+    # which is what tied forty-nine commands to a Textual App for the sake of
+    # fifteen call sites. It now asks a host for a view by name, and this is
+    # where a VoxApp answers. Everything below is a redirection: the screens,
+    # the flows and the panel are unchanged.
+
+    _VIEW_ACTIONS = {
+        "inspect": "action_open_inspect",
+        "keys": "action_open_keys",
+        "settings": "action_open_settings",
+        "sessions": "action_open_sessions",
+        "save-session": "action_save_session",
+        "roles": "action_open_roles",
+        "prompts": "action_open_prompts",
+        "universe": "action_open_universe",
+        "round": "action_open_round",
+        "quit": "action_request_quit",
+    }
+
+    def open_view(self, name: str, argument: str = "") -> None:
+        if name == "panel":
+            self.panel_mode = argument or "code"
+            self.query_one("#side-panel").set_class(True, "visible")
+            self.refresh_panel()
+            return
+        action = self._VIEW_ACTIONS.get(name)
+        if action is None:
+            # A name no host knows is a mistake in a command, not in a
+            # configuration, so it is worth saying out loud rather than
+            # ignoring.
+            self.write_error(f"NO SUCH VIEW: {name}")
+            return
+        getattr(self, action)()
+
+    def new_session(self) -> None:
+        self.action_new_session()
+
+    def stop_generation(self) -> None:
+        self.action_stop()
+
+    def toggle_mesh(self) -> None:
+        self.action_toggle_mesh()
+
+    def clear_transcript(self) -> None:
+        self.transcript.clear_messages()
+
+    @property
+    def draft_text(self) -> str:
+        return str(self.input_area.text)
 
     # Modal flows must run inside a worker: push_screen_wait suspends until the
     # screen is dismissed, and Textual refuses that on the main task.

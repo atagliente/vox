@@ -15,7 +15,7 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
-from . import coalesce, compaction, fitting, indexing, sampling
+from . import coalesce, compaction, fitting, sampling, turn
 from .agent import AgentEvent, run_turn
 from .llm_client import LLMError, context_overflow
 from .logging_setup import get_logger
@@ -36,57 +36,12 @@ class GenerationController:
         self.app = app
 
     def build_request_messages(self) -> list[Message]:
-        """Prepend the active role system prompt to the conversation."""
-        app = self.app
-        role = app.role_store.get(str(app.config.get("active_role", "")))
-        messages: list[Message] = []
-        if role is not None and role.system_prompt:
-            messages.append(Message(role="system", content=role.system_prompt))
-        relevant = self.workspace_context()
-        if relevant:
-            messages.append(Message(role="system", content=relevant))
-        if app.project_notes is not None:
-            # The project's own notes, after the role and before the
-            # conversation: they describe the codebase, and the role decides
-            # how to behave.
-            messages.append(
-                Message(role="system", content=app.project_notes.as_prompt())
-            )
-        # "peer" and "error" are ours, not roles any provider accepts. The peer
-        # answers are folded into one system message just before the question
-        # they belong to, by start_consensus.
-        history: list[Message] = []
-        for message in app.session.messages:
-            if message.role in ("error", "peer"):
-                continue
-            if message.role == "web":
-                # What a search found is context, and "web" is not a role any
-                # provider knows.
-                history.append(Message(role="system", content=message.content))
-                continue
-            history.append(message)
+        """The conversation as the provider will receive it.
 
-        research = [
-            Message(role="system", content=prompt)
-            for prompt in (app._web_prompt, app._consensus_prompt)
-            if prompt
-        ]
-        # Everything gathered for this turn belongs in front of the question it
-        # was gathered for. The citations are appended to the session after the
-        # question, so without this they — and the sources — arrive after it,
-        # and a model reads that as "answer, then here is some reading".
-        last_user = max(
-            (index for index, message in enumerate(history) if message.role == "user"),
-            default=None,
-        )
-        if last_user is not None:
-            trailing = history[last_user + 1 :]
-            del history[last_user + 1 :]
-            history[last_user:last_user] = research + trailing
-        else:
-            history.extend(research)
-        messages.extend(history)
-        return messages
+        The rules live in :mod:`vox_chat.turn`, because what to send is not a
+        drawing decision and a second host needs the same answer.
+        """
+        return turn.build_request_messages(self.app)
 
     def start(self) -> None:
         app = self.app
@@ -217,8 +172,8 @@ class GenerationController:
 
     def finish(self, error: str | None) -> None:
         app = self.app
-        app._consensus_prompt = ""
-        app._web_prompt = ""
+        app.consensus_prompt = ""
+        app.web_prompt = ""
         app.note_logprob_refusal()
         app.generating = False
         app._assistant_box = None
@@ -246,32 +201,8 @@ class GenerationController:
         app.transcript.scroll_end(animate=False)
 
     def workspace_context(self) -> str:
-        """The indexed files that look relevant to the question being asked.
-
-        Only when the index is switched on, and never at the cost of the
-        turn: if the embedding server is not there the question goes out on
-        its own, which is what it did before the index existed.
-        """
-        app = self.app
-        settings = app.index_settings()
-        if not settings.get("enabled"):
-            return ""
-        question = next(
-            (
-                message.content
-                for message in reversed(app.session.messages)
-                if message.role == "user" and message.content
-            ),
-            "",
-        )
-        hits = app.relevant_chunks(question)
-        if not hits:
-            return ""
-        block = indexing.render(hits)
-        limit = int(settings.get("max_chars", 6000))
-        if len(block) > limit:
-            block = block[:limit] + "\n[trimmed to fit]"
-        return block
+        """The indexed files that look relevant. See :mod:`vox_chat.turn`."""
+        return turn.workspace_context(self.app)
 
     def compact_if_needed(self) -> None:
         """Summarise the older turns before the window fills, not after.

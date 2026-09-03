@@ -262,10 +262,13 @@ class KeyBar(Static):
         # reason, and this row is dropped from the right, so it is also the
         # entry a narrow terminal keeps.
         #
-        # Both keys are named, F1 first. ^L alone was not enough: F1 is what
-        # people try when they want help, and a key that works but is written
-        # down nowhere is a key nobody finds.
-        ("F1/^L", "all keys"),
+        # F1 rather than ^L, which is what it said first: F1 is the key
+        # people try when they want help, and one that works while being
+        # written down nowhere is one nobody finds. Naming both — "F1/^L" —
+        # was three characters too many, and at thirty columns it pushed
+        # "enter send" off the row, which is a worse thing not to know.
+        # ^L is still bound, and the legend itself lists all three.
+        ("F1", "all keys"),
         ("enter", "send"),
         ("^C/^V", "copy/paste"),
         ("^Q", "quit"),

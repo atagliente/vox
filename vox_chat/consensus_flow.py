@@ -102,7 +102,7 @@ class ConsensusController:
         app.consensus_log.add(agent, kind, text, ts)
         if app._round_screen is not None:
             app._round_screen.refresh_view()
-        if app._panel_mode == "consensus":
+        if app.panel_mode == "consensus":
             app.refresh_panel()
 
     def consensus_answered(
@@ -129,7 +129,7 @@ class ConsensusController:
         app.remember_round(question, answers)
         app.write_system(f"CONSENSUS - {cns.describe(answers)}")
         if app.config.get("ui", {}).get("code_panel", True):
-            app._panel_mode = "consensus"
+            app.panel_mode = "consensus"
             app.query_one("#side-panel").set_class(True, "visible")
             app.refresh_panel()
 
@@ -183,7 +183,7 @@ class ConsensusController:
             app.write_error("NO AGENT ANSWERED - answering locally")
         else:
             app.write_system("CONSENSUS - the agents differ; reconciling locally")
-        app._consensus_prompt = cns.synthesis_prompt(question, answers)
+        app.consensus_prompt = cns.synthesis_prompt(question, answers)
         app.start_generation()
 
     def install_answer_hook(self) -> None:

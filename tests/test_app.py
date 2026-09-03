@@ -971,10 +971,14 @@ def test_the_legend_keys_leave_the_screens_their_own() -> None:
 
 
 def test_the_bottom_row_says_where_the_rest_is() -> None:
-    """A legend nobody can find is worse than a bar with six entries."""
+    """A legend nobody can find is worse than a bar with six entries.
+
+    F1 rather than ^L: F1 is the one people try when they want help. Both
+    are bound and the legend lists all three, but only one of them fits a
+    thirty-column terminal beside "enter send"."""
     from vox_chat.ui.widgets import KeyBar
 
-    assert KeyBar.KEYS[0] == ("^L", "all keys")
+    assert KeyBar.KEYS[0] == ("F1", "all keys")
 
 
 async def test_a_legend_this_long_can_be_scrolled(offline_app: VoxApp) -> None:

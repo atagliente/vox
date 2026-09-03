@@ -307,8 +307,8 @@ async def test_disagreement_is_reconciled_locally(app: VoxApp) -> None:
         await pilot.pause()
 
         assert "the agents differ" in transcript(app)
-        assert app._consensus_prompt, "the synthesis prompt is set for the turn"
-        assert "alpha" in app._consensus_prompt and "beta" in app._consensus_prompt
+        assert app.consensus_prompt, "the synthesis prompt is set for the turn"
+        assert "alpha" in app.consensus_prompt and "beta" in app.consensus_prompt
 
         # And it reaches the provider as a system message, not as role=peer,
         # placed in front of the question it belongs to.
@@ -749,7 +749,7 @@ async def test_a_message_sent_mid_round_is_refused(app: VoxApp) -> None:
     # it passed only while the generation had not run yet. What this test is
     # about is the round, so the turn it starts is held here instead.
     started: list[str] = []
-    app.start_generation = lambda: started.append(app._consensus_prompt)
+    app.start_generation = lambda: started.append(app.consensus_prompt)
 
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -791,7 +791,7 @@ async def test_a_round_can_be_abandoned(app: VoxApp) -> None:
         # The peers still answer; those answers belong to nobody now.
         await app.workers.wait_for_complete()
         await pilot.pause()
-        assert not app._consensus_prompt
+        assert not app.consensus_prompt
         assert all(m.role != "peer" for m in app.session.messages)
 
         # And the next question goes through normally.

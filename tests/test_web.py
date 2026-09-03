@@ -746,8 +746,8 @@ async def test_a_message_in_web_mode_is_answered_from_sources(
         stored = [m for m in app.session.messages if m.name == "web"]
         assert stored and "https://a.example" in stored[0].content
         assert "A stalled reader" not in stored[0].content
-        assert "A stalled reader" in app._web_prompt
-        assert web.UNTRUSTED_NOTE in app._web_prompt
+        assert "A stalled reader" in app.web_prompt
+        assert web.UNTRUSTED_NOTE in app.web_prompt
 
 
 async def test_a_failed_search_still_answers(app: VoxApp, wire, engine) -> None:
@@ -766,7 +766,7 @@ async def test_a_failed_search_still_answers(app: VoxApp, wire, engine) -> None:
         app.search_server = engine
 
         assert "answering without sources" in transcript(app)
-        assert app._web_prompt == ""
+        assert app.web_prompt == ""
         assert [m.content for m in app.session.messages if m.role == "user"] == [
             "a question"
         ]
@@ -887,7 +887,7 @@ def test_the_sources_sit_in_front_of_the_question(app: VoxApp) -> None:
     from vox_chat.models import Message
 
     app.session.messages.append(Message(role="user", content="what is a buffer?"))
-    app._web_prompt = "SOURCES: a page about buffers"
+    app.web_prompt = "SOURCES: a page about buffers"
 
     rendered = app.build_request_messages()
     roles = [message.role for message in rendered]

@@ -38,7 +38,7 @@ def cmd_warm(app: VoxApp, argument: str) -> None:
 def cmd_inspect(app: VoxApp, argument: str) -> None:
     value = argument.strip().lower()
     if not value:
-        app.action_open_inspect()
+        app.open_view("inspect")
         return
     if value not in ("on", "off"):
         app.write_error("USAGE: /inspect [on|off]")
@@ -61,22 +61,22 @@ def cmd_help(app: VoxApp, argument: str) -> None:
 
 
 def cmd_keys(app: VoxApp, argument: str) -> None:
-    app.action_open_keys()
+    app.open_view("keys")
 
 
 def cmd_new(app: VoxApp, argument: str) -> None:
-    app.action_new_session()
+    app.new_session()
 
 
 def cmd_clear(app: VoxApp, argument: str) -> None:
-    app.transcript.clear_messages()
+    app.clear_transcript()
     app.session.messages.clear()
     app.dirty = False
     app.write_system("TRANSCRIPT CLEARED")
 
 
 def cmd_settings(app: VoxApp, argument: str) -> None:
-    app.action_open_settings()
+    app.open_view("settings")
 
 
 def cmd_config(app: VoxApp, argument: str) -> None:
@@ -178,16 +178,16 @@ def cmd_role(app: VoxApp, argument: str) -> Any:
     if argument:
         app.set_role(argument)
         return None
-    app.action_open_roles()
+    app.open_view("roles")
     return None
 
 
 def cmd_roles(app: VoxApp, argument: str) -> None:
-    app.action_open_roles()
+    app.open_view("roles")
 
 
 def cmd_prompts(app: VoxApp, argument: str) -> None:
-    app.action_open_prompts()
+    app.open_view("prompts")
 
 
 def cmd_prompt(app: VoxApp, argument: str) -> None:
@@ -198,7 +198,7 @@ def cmd_prompt(app: VoxApp, argument: str) -> None:
 
 
 def cmd_prompt_save(app: VoxApp, argument: str) -> Any:
-    content = app.input_area.text.strip()
+    content = app.draft_text.strip()
     if not content:
         app.write_error("NOTHING TO SAVE - THE INPUT IS EMPTY")
         return None
@@ -217,20 +217,20 @@ def cmd_prompt_delete(app: VoxApp, argument: str) -> Any:
 
 
 def cmd_sessions(app: VoxApp, argument: str) -> None:
-    app.action_open_sessions()
+    app.open_view("sessions")
 
 
 def cmd_session_save(app: VoxApp, argument: str) -> Any:
     if argument:
         app.save_session(argument)
         return None
-    app.action_save_session()
+    app.open_view("save-session")
     return None
 
 
 def cmd_session_load(app: VoxApp, argument: str) -> Any:
     if not argument:
-        app.action_open_sessions()
+        app.open_view("sessions")
         return None
     app.load_session(argument)
     return None
@@ -408,7 +408,7 @@ def cmd_mesh(app: VoxApp, argument: str) -> None:
     if (value == "on") == app.mesh.online:
         app.write_system(f"MESH IS ALREADY {value.upper()}")
         return
-    app.action_toggle_mesh()
+    app.toggle_mesh()
 
 
 def cmd_revoke(app: VoxApp, argument: str) -> None:
@@ -454,7 +454,7 @@ def cmd_peers(app: VoxApp, argument: str) -> None:
 
 
 def cmd_universe(app: VoxApp, argument: str) -> None:
-    app.action_open_universe()
+    app.open_view("universe")
 
 
 def cmd_rounds(app: VoxApp, argument: str) -> None:
@@ -463,7 +463,7 @@ def cmd_rounds(app: VoxApp, argument: str) -> None:
 
 
 def cmd_round(app: VoxApp, argument: str) -> None:
-    app.action_open_round()
+    app.open_view("round")
 
 
 def cmd_stats(app: VoxApp, argument: str) -> None:
@@ -472,9 +472,7 @@ def cmd_stats(app: VoxApp, argument: str) -> None:
 
 def cmd_code(app: VoxApp, argument: str) -> None:
     """Show the code panel, or copy one block by number."""
-    app._panel_mode = "code"
-    app.query_one("#side-panel").set_class(True, "visible")
-    app.refresh_panel()
+    app.open_view("panel", "code")
     if not argument:
         if app.code_blocks:
             summary = ", ".join(
@@ -494,15 +492,11 @@ def cmd_code(app: VoxApp, argument: str) -> None:
 
 
 def cmd_panel(app: VoxApp, argument: str) -> None:
-    mode = argument.strip().lower() or (
-        "index" if app._panel_mode == "code" else "code"
-    )
+    mode = argument.strip().lower() or ("index" if app.panel_mode == "code" else "code")
     if mode not in ("code", "index", "consensus"):
         app.write_error("USAGE: /panel code|index|consensus")
         return
-    app._panel_mode = mode
-    app.query_one("#side-panel").set_class(True, "visible")
-    app.refresh_panel()
+    app.open_view("panel", mode)
 
 
 def cmd_connect(app: VoxApp, argument: str) -> None:
@@ -511,11 +505,11 @@ def cmd_connect(app: VoxApp, argument: str) -> None:
 
 
 def cmd_stop(app: VoxApp, argument: str) -> None:
-    app.action_stop()
+    app.stop_generation()
 
 
 def cmd_exit(app: VoxApp, argument: str) -> None:
-    app.action_request_quit()
+    app.open_view("quit")
 
 
 def cmd_mcp(app: VoxApp, argument: str) -> None:

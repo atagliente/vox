@@ -135,7 +135,7 @@ async def test_a_turn_refused_for_room_is_retried_smaller(app: VoxApp) -> None:
         client = OneRefusal()
         app.client = client  # type: ignore[assignment]
         app.connected = True
-        app._web_prompt = "SOURCES\n" + "x" * 4000
+        app.web_prompt = "SOURCES\n" + "x" * 4000
         app.session.messages.append(Message(role="user", content="a question"))
         app.start_generation()
         await app.workers.wait_for_complete()
@@ -165,7 +165,7 @@ async def test_a_window_that_can_never_fit_is_reported_not_retried_for_ever(
         client = AlwaysRefuses()
         app.client = client  # type: ignore[assignment]
         app.connected = True
-        app._web_prompt = "SOURCES\n" + "x" * 4000
+        app.web_prompt = "SOURCES\n" + "x" * 4000
         app.session.messages.append(Message(role="user", content="a question"))
         app.start_generation()
         await app.workers.wait_for_complete()
@@ -471,12 +471,12 @@ def test_the_key_bar_leads_with_where_everything_else_is() -> None:
     is first — and the row is dropped from the right, so it is also the entry
     a narrow terminal keeps.
 
-    Both keys are named, F1 first: F1 is what people reach for when they want
-    help, and one that works while being written down nowhere is one nobody
-    finds."""
+    F1 rather than ^L: it is what people reach for when they want help, and
+    one that works while being written down nowhere is one nobody finds. Both
+    stay bound; only one of them fits beside "enter send"."""
     labels = [label for _key, label in KeyBar.KEYS]
     assert labels == ["all keys", "send", "copy/paste", "quit", "stop", "mode"]
-    assert KeyBar.KEYS[0][0] == "F1/^L"
+    assert KeyBar.KEYS[0][0] == "F1"
     assert dict(KeyBar.KEYS)["F2"] == "mode"
 
 
